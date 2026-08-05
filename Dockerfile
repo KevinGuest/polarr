@@ -66,10 +66,15 @@ RUN apt-get update \
 COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
-# Ensure native SQLite binary is present for standalone server
+# Native sqlite module + whatever was pruned to nest under it
 COPY --from=builder --chown=node:node /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
-COPY --from=builder --chown=node:node /app/node_modules/bindings ./node_modules/bindings
-COPY --from=builder --chown=node:node /app/node_modules/file-uri-to-path ./node_modules/file-uri-to-path
+COPY --from=builder /app/node_modules /tmp/nm
+RUN set -eux; \
+    for pkg in bindings file-uri-to-path; do \
+      if [ -d "/tmp/nm/$pkg" ]; then cp -a "/tmp/nm/$pkg" node_modules/; fi; \
+    done; \
+    chown -R node:node node_modules; \
+    rm -rf /tmp/nm
 
 USER node
 EXPOSE 3000

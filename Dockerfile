@@ -59,21 +59,19 @@ RUN apt-get update \
   && curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/yt-dlp" \
        -o /usr/local/bin/yt-dlp \
   && chmod a+rx /usr/local/bin/yt-dlp \
-  && groupadd --system --gid 1000 polarr \
-  && useradd --system --uid 1000 --gid 1000 --home-dir /app --shell /usr/sbin/nologin polarr \
   && mkdir -p /data /music \
-  && chown -R polarr:polarr /data /music /app \
+  && chown -R node:node /data /music /app \
   && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder --chown=polarr:polarr /app/public ./public
-COPY --from=builder --chown=polarr:polarr /app/.next/standalone ./
-COPY --from=builder --chown=polarr:polarr /app/.next/static ./.next/static
+COPY --from=builder --chown=node:node /app/public ./public
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 # Ensure native SQLite binary is present for standalone server
-COPY --from=builder --chown=polarr:polarr /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
-COPY --from=builder --chown=polarr:polarr /app/node_modules/bindings ./node_modules/bindings
-COPY --from=builder --chown=polarr:polarr /app/node_modules/file-uri-to-path ./node_modules/file-uri-to-path
+COPY --from=builder --chown=node:node /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
+COPY --from=builder --chown=node:node /app/node_modules/bindings ./node_modules/bindings
+COPY --from=builder --chown=node:node /app/node_modules/file-uri-to-path ./node_modules/file-uri-to-path
 
-USER polarr
+USER node
 EXPOSE 3000
 
 HEALTHCHECK --interval=20s --timeout=5s --start-period=20s --retries=3 \

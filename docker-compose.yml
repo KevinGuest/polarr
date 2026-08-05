@@ -1,0 +1,16 @@
+services:
+  polarr:
+    build: .
+    container_name: polarr
+    ports:
+      - "3647:3000"
+    environment:
+      - POLARR_DATA_DIR=/data
+      - POLARR_MUSIC_DIR=/music
+      - POLARR_DOWNLOADS_DIR=/music/downloads
+      - HOSTNAME=0.0.0.0
+      - PORT=3000
+    volumes:
+      - ./data:/data
+      - ./music:/music
+    restart: unless-stopped

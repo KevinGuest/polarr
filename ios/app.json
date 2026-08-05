@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Polarr",
+    "slug": "polarr",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "polarr",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "audio.polarr.app",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
+    "plugins": ["expo-router", "expo-secure-store"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

@@ -1,0 +1,29 @@
+version: "3.7"
+
+services:
+  app_proxy:
+    environment:
+      APP_HOST: polarr_web_1
+      APP_PORT: 3000
+      PROXY_AUTH_WHITELIST: "/api/*"
+
+  web:
+    image: ghcr.io/kevinguest/polarr-app:0.1.0
+    user: "1000:1000"
+    init: true
+    restart: on-failure
+    environment:
+      - POLARR_DATA_DIR=/data
+      - POLARR_MUSIC_DIR=/music
+      - POLARR_DOWNLOADS_DIR=/music/downloads
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    volumes:
+      - ${APP_DATA_DIR}/data:/data
+      - ${UMBREL_ROOT}/data/storage/downloads/music:/music
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/v1/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 25s

@@ -1,0 +1,43 @@
+# Keep the build context tiny so git/CI Docker builds stay fast.
+
+# deps / builds
+node_modules
+.next
+out
+dist
+coverage
+*.tsbuildinfo
+
+# VCS / editor
+.git
+.gitignore
+.cursor
+.vscode
+.idea
+*.md
+!README.md
+AGENTS.md
+CLAUDE.md
+components.json.bak
+
+# runtime / local data
+data
+music
+.env
+.env.*
+!.env.example
+
+# mobile companion — not part of the server image
+ios
+
+# dev-only UI mockups (Vite) — not part of the server image
+ui-preview
+
+# packaging metadata / previews (not needed at image build time)
+umbrel-package
+scripts
+uploads
+agent-transcripts
+**/*.original.md
+**/*.test.ts
+**/*.test.tsx

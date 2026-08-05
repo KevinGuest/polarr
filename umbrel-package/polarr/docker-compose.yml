@@ -8,7 +8,7 @@ services:
       PROXY_AUTH_WHITELIST: "/api/*"
 
   web:
-    image: ghcr.io/kevinguest/polarr-app:0.2.0
+    image: ghcr.io/kevinguest/polarr-app:0.2.0@sha256:588e389e573d6938b1e339b4862becce0a78986019f7f55bcb850430a588fd2b
     user: "1000:1000"
     init: true
     restart: on-failure

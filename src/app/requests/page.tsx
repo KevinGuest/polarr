@@ -1,5 +1,5 @@
-import { RequestsClient } from "@/components/requests-client";
+import { redirect } from "next/navigation";
 
-export default function RequestsPage() {
-  return <RequestsClient />;
+export default function RequestsRedirect() {
+  redirect("/admin/requests");
 }

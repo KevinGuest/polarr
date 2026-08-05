@@ -67,6 +67,12 @@ export function LoginForm() {
               Sign in
             </Button>
           </form>
+          <p className="text-center text-xs text-muted-foreground">
+            Have an invite?{" "}
+            <a href="/join" className="underline underline-offset-2">
+              Join with a code
+            </a>
+          </p>
         </CardContent>
       </Card>
     </div>

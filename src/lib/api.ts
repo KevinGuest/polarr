@@ -12,6 +12,13 @@ export async function getAuthUser() {
   return getUserByToken(token);
 }
 
+/** Returns the signed-in admin user, or null. */
+export async function getAdminUser() {
+  const user = await getAuthUser();
+  if (!user?.isAdmin) return null;
+  return user;
+}
+
 export function json(
   data: unknown,
   init?: { status?: number; headers?: Record<string, string> },

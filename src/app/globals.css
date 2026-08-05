@@ -118,3 +118,26 @@
 .hero-plane {
   background: hsl(var(--muted));
 }
+
+@keyframes polarr-listener-drift {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.82);
+  }
+  12% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 1;
+    transform: translate(52%, -58%) scale(1);
+  }
+  85%,
+  100% {
+    opacity: 0;
+    transform: translate(62%, -72%) scale(1.06);
+  }
+}
+
+.animate-listener-drift {
+  animation: polarr-listener-drift 4.5s ease-in-out infinite;
+}

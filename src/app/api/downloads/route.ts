@@ -1,12 +1,21 @@
 import { json } from "@/lib/api";
 import { listDownloads } from "@/lib/db";
 import { enqueueFallbackDownload, processDownloadJob } from "@/lib/fallback-download";
+import { albumCoverKey, getAlbumCoverMap } from "@/lib/lidarr";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return json({ downloads: listDownloads() });
+  const covers = await getAlbumCoverMap();
+  const downloads = listDownloads().map((d) => {
+    const album = (d.title || "").trim();
+    const coverPath = album
+      ? covers.get(albumCoverKey(d.artist, album)) || null
+      : null;
+    return { ...d, coverPath };
+  });
+  return json({ downloads });
 }
 
 const schema = z.object({

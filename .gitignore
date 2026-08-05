@@ -1,5 +1,3 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # dependencies
 /node_modules
 /.pnp
@@ -23,24 +21,29 @@
 # misc
 .DS_Store
 *.pem
+*.log
+.tmp-*
+.cursor/
 
 # debug
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files
 .env*
 
-# Polarr runtime data
+# Polarr runtime data / local media
 /data
 /music
-ios/node_modules
-ios/.expo
-ios/dist
+*.db
+*.sqlite
+*.sqlite3
 
-# UI mockup sandbox — local only, not in git
+# Disbanded Expo companion (keep tree local-only if revived)
+/ios/
+
+# UI mockup sandbox — local only
 /ui-preview/
 
 # vercel
@@ -53,7 +56,7 @@ ios/dist
 *.tsbuildinfo
 next-env.d.ts
 
-# local agent skills
+# local agent skills / memory
 .agents/
 skills-lock.json
-
+AGENTS.md

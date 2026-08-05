@@ -1,12 +1,36 @@
 import { cookies } from "next/headers";
 import { json, getAuthUser } from "@/lib/api";
+import { getPublicProfileById } from "@/lib/db";
+import { scrambleUserId } from "@/lib/user-id";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   const user = await getAuthUser();
   if (!user) return json({ user: null }, { status: 401 });
-  return json({ user });
+  const profile = getPublicProfileById(user.id);
+  if (!profile) {
+    return json({
+      user: {
+        publicId: scrambleUserId(user.id),
+        username: user.username,
+        isAdmin: user.isAdmin,
+        createdAt: "",
+        avatarUrl: null,
+        bannerColors: null,
+      },
+    });
+  }
+  return json({
+    user: {
+      publicId: profile.publicId,
+      username: profile.username,
+      isAdmin: profile.isAdmin,
+      createdAt: profile.createdAt,
+      avatarUrl: profile.avatarUrl,
+      bannerColors: profile.bannerColors,
+    },
+  });
 }
 
 export async function DELETE() {

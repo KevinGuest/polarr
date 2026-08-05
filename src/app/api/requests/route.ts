@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { json, getAuthUser } from "@/lib/api";
+import { json, getAuthUser, getAdminUser } from "@/lib/api";
 import {
   createRequest,
   findTrack,
@@ -8,24 +8,73 @@ import {
   listRequests,
   requestStats,
   updateRequestStatus,
+  type RequestRow,
 } from "@/lib/db";
-import { LidarrClient } from "@/lib/lidarr";
-import { enqueueFallbackDownload } from "@/lib/fallback-download";
+import { albumCoverKey, artistCoverKey, getAlbumCoverMap, getArtistCoverMap, LidarrClient } from "@/lib/lidarr";
+import {
+  enqueueFallbackDownload,
+  stopDownloadJob,
+  stopRequest,
+} from "@/lib/fallback-download";
 
 export const dynamic = "force-dynamic";
 
+function requestCover(
+  r: RequestRow,
+  albumCovers: Map<string, string>,
+  artistCovers: Map<string, string>,
+): string | null {
+  if (r.mediaType === "artist") {
+    return (
+      (r.foreignArtistId
+        ? artistCovers.get(`mbid:${r.foreignArtistId}`)
+        : null) ||
+      artistCovers.get(artistCoverKey(r.artist)) ||
+      null
+    );
+  }
+
+  const album = (r.album || r.title || "").trim();
+  const fromLidarr = album
+    ? albumCovers.get(albumCoverKey(r.artist, album)) || null
+    : null;
+  if (fromLidarr) return fromLidarr;
+  if (r.foreignAlbumId) {
+    return `https://coverartarchive.org/release-group/${encodeURIComponent(r.foreignAlbumId)}/front-500`;
+  }
+  return artistCovers.get(artistCoverKey(r.artist)) || null;
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
+  // Stats OK for dashboard badges; full log is admin-only.
   if (searchParams.get("stats") === "1") {
     return json({ stats: requestStats() });
   }
+  const admin = await getAdminUser();
+  if (!admin) {
+    return json({ error: "Admin only" }, { status: 403 });
+  }
   const id = searchParams.get("id");
   if (id) {
-    const events = listRequestEvents(id);
-    return json({ events });
+    return json({ events: listRequestEvents(id) });
   }
-  return json({ requests: listRequests(200), stats: requestStats() });
+  const [albumCovers, artistCovers] = await Promise.all([
+    getAlbumCoverMap(),
+    getArtistCoverMap(),
+  ]);
+  const requests = listRequests(200).map((r) => ({
+    ...r,
+    coverPath: requestCover(r, albumCovers, artistCovers),
+  }));
+  return json({ requests, stats: requestStats() });
 }
+
+const stopSchema = z.object({
+  action: z.literal("stop"),
+  requestId: z.string().optional(),
+  jobId: z.string().optional(),
+});
 
 const schema = z.object({
   title: z.string().min(1),
@@ -39,18 +88,48 @@ const schema = z.object({
 });
 
 export async function POST(req: Request) {
-  const parsed = schema.safeParse(await req.json());
+  const raw = await req.json();
+
+  // Admin stop signal
+  if (raw && typeof raw === "object" && raw.action === "stop") {
+    const admin = await getAdminUser();
+    if (!admin) {
+      return json({ error: "Admin only" }, { status: 403 });
+    }
+    const parsed = stopSchema.safeParse(raw);
+    if (!parsed.success) {
+      return json({ error: parsed.error.flatten() }, { status: 400 });
+    }
+    const { requestId, jobId } = parsed.data;
+    if (!requestId && !jobId) {
+      return json({ error: "requestId or jobId required" }, { status: 400 });
+    }
+    if (jobId) {
+      const r = stopDownloadJob(jobId);
+      return r.ok
+        ? json({ ok: true, stopped: "job", jobId })
+        : json({ error: r.error }, { status: 400 });
+    }
+    const r = stopRequest(requestId!);
+    return r.ok
+      ? json({ ok: true, stopped: "request", requestId })
+      : json({ error: r.error }, { status: 400 });
+  }
+
+  const parsed = schema.safeParse(raw);
   if (!parsed.success) {
     return json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const body = parsed.data;
   const settings = getSettings();
   const user = await getAuthUser();
-  const query = `${body.artist} ${body.album || body.title}`.trim();
+  const query =
+    body.type === "track"
+      ? `${body.artist} ${body.title}`.trim()
+      : `${body.artist} ${body.album || body.title}`.trim();
   const foreignArtistId = body.foreignArtistId || body.foreignId || undefined;
   const foreignAlbumId = body.foreignAlbumId || undefined;
 
-  // Track-type + auto: prefer downtify so audio is streamable without waiting on Lidarr.
   const streamFirst =
     body.prefer === "auto" &&
     settings.fallbackEnabled &&
@@ -61,7 +140,6 @@ export async function POST(req: Request) {
     (body.prefer === "auto" && settings.fallbackEnabled);
   const wantLidarr = body.prefer !== "fallback" && !streamFirst;
 
-  // Already on disk (incl. prior downtify acquire) → stream immediately
   const existing = findTrack(body.artist, body.title);
   if (existing) {
     return json({
@@ -90,7 +168,6 @@ export async function POST(req: Request) {
     requestedBy: user?.username ?? null,
   };
 
-  // Artist request via Lidarr
   if (wantLidarr && foreignArtistId && body.type === "artist") {
     try {
       const client = LidarrClient.fromSettings();
@@ -120,7 +197,6 @@ export async function POST(req: Request) {
     }
   }
 
-  // Album / artist discover via Lidarr
   if (wantLidarr && body.type !== "track") {
     try {
       const client = LidarrClient.fromSettings();
@@ -170,20 +246,17 @@ export async function POST(req: Request) {
       ...base,
       status: "failed",
       source: "lidarr",
-      error:
-        "Could not queue via Lidarr, and fallback downloads are disabled in settings",
+      error: "Could not queue via Lidarr, and acquire path is not available",
     });
     return json(
       {
-        error:
-          "Could not queue via Lidarr, and fallback downloads are disabled in settings",
+        error: "Could not queue via Lidarr, and acquire path is not available",
         request: failed,
       },
       { status: 400 },
     );
   }
 
-  // Create request first so download can link request_id
   let request = createRequest({
     ...base,
     status: "pending",
@@ -210,7 +283,6 @@ export async function POST(req: Request) {
     });
   }
 
-  // Deduped active request that already has work in flight
   if (request.downloadJobId || request.status !== "pending") {
     return json({ request, path: request.source, deduped: true });
   }
@@ -225,7 +297,7 @@ export async function POST(req: Request) {
   request =
     updateRequestStatus(request.id, "downloading", {
       downloadJobId: job.id,
-      message: "Fallback download started — will stream when ready",
+      message: "Acquire started — will stream when ready",
     }) || request;
 
   return json({

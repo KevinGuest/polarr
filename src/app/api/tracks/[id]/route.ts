@@ -1,5 +1,11 @@
-import { json } from "@/lib/api";
-import { getTrack, markOffline } from "@/lib/db";
+import { json, getAdminUser, getAuthUser } from "@/lib/api";
+import {
+  deleteTrack,
+  getTrack,
+  listOfflineTrackIds,
+  markOffline,
+} from "@/lib/db";
+import { resolveTrackCover } from "@/lib/lidarr";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -11,12 +17,22 @@ export async function GET(
   const { id } = await ctx.params;
   const track = getTrack(id);
   if (!track) return json({ error: "Not found" }, { status: 404 });
+  const coverUrl = await resolveTrackCover({
+    coverPath: track.coverPath,
+    artist: track.artist,
+    album: track.album,
+  });
+  const offline = listOfflineTrackIds().includes(id);
   return json({
     track: {
       ...track,
+      coverPath: coverUrl || track.coverPath,
+      coverUrl,
       streamUrl: `/api/stream/${track.id}`,
       downloadUrl: `/api/stream/${track.id}?download=1`,
     },
+    downloaded: Boolean(track.path) || offline,
+    offline,
   });
 }
 
@@ -43,4 +59,22 @@ export async function POST(
       album: track.album,
     },
   });
+}
+
+/** Admin: hard-delete a track from the library index and managed disk path. */
+export async function DELETE(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> },
+) {
+  const admin = await getAdminUser();
+  if (!admin) {
+    const user = await getAuthUser();
+    if (!user) return json({ error: "Unauthorized" }, { status: 401 });
+    return json({ error: "Admin only" }, { status: 403 });
+  }
+
+  const { id } = await ctx.params;
+  const removed = deleteTrack(id);
+  if (!removed) return json({ error: "Not found" }, { status: 404 });
+  return json({ ok: true, track: removed, hardDeleted: true });
 }

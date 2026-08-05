@@ -52,13 +52,22 @@ ENV NODE_ENV=production \
     POLARR_DOWNLOADS_DIR=/music/downloads
 
 # Pin yt-dlp so this layer stays cacheable across builds.
+# Use arch-specific standalone binaries (zipapp needs Python, which we skip).
 ARG YT_DLP_VERSION=2026.07.04
+ARG TARGETARCH
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg \
-  && curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/yt-dlp" \
+  && case "${TARGETARCH}" in \
+       amd64) YT_ASSET=yt-dlp_linux ;; \
+       arm64) YT_ASSET=yt-dlp_linux_aarch64 ;; \
+       *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+     esac \
+  && curl -fsSL "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/${YT_ASSET}" \
        -o /usr/local/bin/yt-dlp \
   && chmod a+rx /usr/local/bin/yt-dlp \
+  && /usr/local/bin/yt-dlp --version \
+  && which ffmpeg \
   && mkdir -p /data /music \
   && chown -R node:node /data /music /app \
   && rm -rf /var/lib/apt/lists/*

@@ -1,21 +1,31 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
-import { Download, Play, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useRouter } from "next/navigation";
+import { Play } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
+import { ListeningCover } from "@/components/listening-cover";
+import { TrackContextMenu } from "@/components/track-context-menu";
+import { albumHref } from "@/lib/album-ref";
+import { MediaShelfRow, MediaTileShell } from "@/components/media-shelf";
+import { Skeleton } from "@/components/ui/skeleton";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
+import { LISTEN_CREDITED_EVENT } from "@/lib/ui-events";
+import { formatTrackArtistLine } from "@/lib/utils";
 
-type Track = PlayerTrack & { source?: string };
-
-type StreamAlbum = {
-  key: string;
+function catalogAlbumHref(r: {
   title: string;
   artist: string;
-  tracks: Track[];
-  source?: string;
-};
+  foreignAlbumId?: string;
+  lidarrAlbumId?: number;
+}) {
+  return albumHref({
+    title: r.title,
+    artist: r.artist,
+    foreignAlbumId: r.foreignAlbumId,
+    lidarrAlbumId: r.lidarrAlbumId,
+  });
+}
 
 type Release = {
   id: string;
@@ -28,50 +38,77 @@ type Release = {
   releaseDate?: string;
   hasFile: boolean;
   monitored: boolean;
+  lidarrAlbumId?: number;
 };
 
-async function pollTrack(
-  artist: string,
-  title: string,
-  attempts = 40,
-): Promise<Track | null> {
-  for (let i = 0; i < attempts; i++) {
-    await new Promise((r) => setTimeout(r, 1500));
-    const res = await fetch(
-      `/api/search?q=${encodeURIComponent(`${artist} ${title}`)}`,
-    );
-    const data = await res.json();
-    const hit = (data.local as Track[] | undefined)?.find(
-      (t) =>
-        t.artist.toLowerCase().includes(artist.toLowerCase().slice(0, 12)) ||
-        t.title.toLowerCase().includes(title.toLowerCase().slice(0, 12)),
-    );
-    if (hit) return hit;
-  }
-  return null;
-}
+type OthersItem = PlayerTrack & {
+  playedAt: string;
+  listenedBy: string;
+  listenedByAvatarUrl?: string | null;
+};
+
+type MoreFromItem =
+  | {
+      kind: "album";
+      id: string;
+      title: string;
+      subtitle: string;
+      artist: string;
+      album: string;
+      image?: string | null;
+      trackCount: number;
+      foreignAlbumId?: string;
+      lidarrAlbumId?: number;
+    }
+  | {
+      kind: "single" | "feature";
+      id: string;
+      title: string;
+      subtitle: string;
+      artist: string;
+      album?: string;
+      image?: string | null;
+      trackId: string;
+      duration?: number;
+      coverPath?: string | null;
+    };
+
+type MoreFromShelf = {
+  artist: string;
+  image?: string | null;
+  items: MoreFromItem[];
+};
 
 export function HomeClient() {
+  const router = useRouter();
   const { play } = usePlayer();
-  const [albums, setAlbums] = useState<StreamAlbum[]>([]);
-  const [tracks, setTracks] = useState<Track[]>([]);
+  const [moreFrom, setMoreFrom] = useState<MoreFromShelf[]>([]);
   const [releases, setReleases] = useState<Release[]>([]);
+  const [others, setOthers] = useState<OthersItem[]>([]);
   const [lidarrError, setLidarrError] = useState<string | null>(null);
-  const [fallbackReady, setFallbackReady] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+
+  const loadOthers = useCallback(async () => {
+    try {
+      const res = await fetch("/api/listening?limit=48", {
+        cache: "no-store",
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setOthers(Array.isArray(data.items) ? data.items : []);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/discover");
+      const res = await fetch("/api/discover", { cache: "no-store" });
       const data = await res.json();
-      setAlbums(data.streamableAlbums || []);
-      setTracks(data.tracks || []);
+      setMoreFrom(Array.isArray(data.moreFrom) ? data.moreFrom : []);
       setReleases(data.releases || []);
       setLidarrError(data.lidarrError || null);
-      setFallbackReady(Boolean(data.fallbackReady));
     } finally {
       setLoading(false);
     }
@@ -79,264 +116,258 @@ export function HomeClient() {
 
   useEffect(() => {
     void load();
-    const t = window.setInterval(() => void load(), 60_000);
-    return () => clearInterval(t);
-  }, [load]);
+    void loadOthers();
+    const t = window.setInterval(() => {
+      void loadOthers();
+    }, 15_000);
+    const onListen = () => {
+      void loadOthers();
+    };
+    window.addEventListener(LISTEN_CREDITED_EVENT, onListen);
+    return () => {
+      window.clearInterval(t);
+      window.removeEventListener(LISTEN_CREDITED_EVENT, onListen);
+    };
+  }, [load, loadOthers]);
 
-  function playAlbum(a: StreamAlbum) {
-    if (!a.tracks[0]) return;
-    play(a.tracks[0], a.tracks);
+  function playOthers(item: OthersItem) {
+    const queue = others.map((r) => ({
+      id: r.id,
+      title: r.title,
+      artist: formatTrackArtistLine(r.artist, r.title),
+      album: r.album,
+      coverPath: r.coverPath,
+    }));
+    play(
+      { ...item, artist: formatTrackArtistLine(item.artist, item.title) },
+      queue,
+    );
   }
 
-  function playTrack(t: Track) {
-    play(t, tracks);
+  function playShelfTrack(item: Extract<MoreFromItem, { trackId: string }>) {
+    const pt: PlayerTrack = {
+      id: item.trackId,
+      title: item.title,
+      artist: item.subtitle || item.artist,
+      album: item.album || "",
+      coverPath: item.coverPath || item.image || null,
+    };
+    play(pt, [pt]);
   }
-
-  async function requestRelease(r: Release, stream = false) {
-    setBusy(r.id);
-    setMsg(null);
-    // Prefer downtify for stream path when ready
-    const prefer =
-      stream && fallbackReady ? "fallback" : "auto";
-    try {
-      const res = await fetch("/api/requests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: r.title,
-          artist: r.artist,
-          album: r.title,
-          foreignId: r.foreignArtistId || r.foreignAlbumId,
-          type: stream ? "track" : "album",
-          prefer,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setMsg(data.error || "Request failed");
-        return;
-      }
-      if (data.track?.id) {
-        play(data.track as Track, [data.track as Track, ...tracks]);
-        setMsg(
-          data.alreadyAvailable
-            ? "Playing from library"
-            : "Ready — streaming",
-        );
-        void load();
-        return;
-      }
-      if (data.streamWhenReady || data.path === "fallback") {
-        setMsg(`Acquiring via downtify — will stream when ready…`);
-        const track = await pollTrack(r.artist, r.title);
-        if (track) {
-          play(track, [track, ...tracks]);
-          setMsg("Streaming downtify acquire");
-          void load();
-        } else {
-          setMsg("Download still running — check Library shortly");
-        }
-        return;
-      }
-      setMsg(
-        data.alreadyAvailable
-          ? "Already in library — scan if not listed above"
-          : `Queued ${r.artist} — ${r.title}`,
-      );
-      void load();
-    } catch (err) {
-      setMsg(err instanceof Error ? err.message : "Request failed");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  const toGet = releases.filter((r) => !r.hasFile).slice(0, 16);
-  const newlyOnDisk = releases.filter((r) => r.hasFile).slice(0, 8);
 
   return (
-    <div className="space-y-10 px-6 py-6 md:px-10">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
-            Home
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Library + downtify streams
-            {fallbackReady ? " · fallback ready" : ""}
-            {" · "}
-            Lidarr latest every 60s.
-          </p>
-          {msg && <p className="text-sm text-foreground">{msg}</p>}
-          {lidarrError && (
-            <p className="text-sm text-destructive">Lidarr: {lidarrError}</p>
-          )}
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => void load()}
-          disabled={loading}
-        >
-          <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
-      </header>
+    <div className="space-y-10">
+      {lidarrError && (
+        <p className="text-sm text-destructive">Lidarr: {lidarrError}</p>
+      )}
 
-      <section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium text-muted-foreground">
-            Ready to stream
-          </h2>
-          <Link
-            href="/library"
-            className="text-xs text-muted-foreground hover:text-foreground"
-          >
-            Open library
-          </Link>
-        </div>
-        {albums.length === 0 ? (
+      <MediaShelfRow
+        title="What others are listening to"
+        seeAllHref="/browse/listening"
+        itemCount={others.length}
+        empty={
           <p className="text-sm text-muted-foreground">
-            No local files yet. Scan in Library, or stream a release below
-            {fallbackReady ? " with downtify" : ""}.
+            Tracks show up here after anyone on this server listens for 15+
+            seconds.
           </p>
-        ) : (
-          <div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-1">
-            {albums.map((a) => (
-              <button
-                key={a.key}
-                type="button"
-                onClick={() => playAlbum(a)}
-                className="w-36 shrink-0 space-y-2 text-left transition-opacity hover:opacity-90"
-              >
-                <div className="relative aspect-square overflow-hidden rounded-lg bg-muted">
-                  <CoverArt seed={a.title} className="size-full" />
-                  <span className="absolute bottom-2 right-2 flex size-8 items-center justify-center rounded-full border border-border bg-background/90">
-                    <Play className="size-3.5" fill="currentColor" />
-                  </span>
-                </div>
-                <div>
-                  <div className="truncate text-sm font-medium">{a.title}</div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {a.artist}
-                    {a.source === "fallback" ? " · downtify" : ""}
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
+        }
+      >
+        {(visible) =>
+          others.slice(0, visible).map((item, i) => (
+            <TrackContextMenu key={item.id} track={item}>
+              <div className="min-w-0">
+                <MediaTileShell
+                  title={item.title}
+                  subtitle={`${formatTrackArtistLine(item.artist, item.title)} · ${item.listenedBy}`}
+                  ariaLabel={`Play ${item.title}`}
+                  onOpen={() => playOthers(item)}
+                  cover={
+                    <ListeningCover
+                      title={item.title}
+                      coverPath={item.coverPath}
+                      listenedBy={item.listenedBy}
+                      avatarUrl={item.listenedByAvatarUrl}
+                      delayMs={(i % 5) * 700}
+                    />
+                  }
+                  playButton={
+                    <button
+                      type="button"
+                      aria-label={`Play ${item.title}`}
+                      onClick={() => playOthers(item)}
+                      className="absolute bottom-2 right-2 flex size-9 items-center justify-center rounded-full border border-border bg-background/95 shadow-md transition-transform hover:scale-105"
+                    >
+                      <Play className="size-3.5" fill="currentColor" />
+                    </button>
+                  }
+                />
+              </div>
+            </TrackContextMenu>
+          ))
+        }
+      </MediaShelfRow>
 
-      <section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium text-muted-foreground">
-            Latest releases
-          </h2>
-          <Link
-            href="/search"
-            className="text-xs text-muted-foreground hover:text-foreground"
-          >
-            Search more
-          </Link>
-        </div>
-        {toGet.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
+      <MediaShelfRow
+        title="Latest releases"
+        seeAllHref="/browse/releases"
+        itemCount={releases.length}
+        empty={
+          <div className="flex gap-5" aria-busy={loading || undefined}>
             {loading
-              ? "Loading Lidarr…"
-              : "No missing recent albums. Connect Lidarr in Admin or wait for calendar activity."}
-          </p>
-        ) : (
-          <div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-1">
-            {toGet.map((r) => (
-              <div key={r.id} className="w-36 shrink-0 space-y-2">
-                <div className="relative aspect-square overflow-hidden rounded-lg bg-muted">
+              ? Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="w-36 shrink-0 space-y-2.5">
+                    <Skeleton className="aspect-square w-full rounded-md" />
+                    <Skeleton className="h-3.5 w-4/5" />
+                    <Skeleton className="h-3 w-3/5" />
+                  </div>
+                ))
+              : (
+                  <p className="text-sm text-muted-foreground">
+                    No recent albums. Connect Lidarr in Admin, then open an album to pick tracks.
+                  </p>
+                )}
+          </div>
+        }
+      >
+        {(visible) =>
+          releases.slice(0, visible).map((r) => {
+            const href = catalogAlbumHref(r);
+            return (
+              <MediaTileShell
+                key={r.id}
+                title={r.title}
+                subtitle={r.artist}
+                ariaLabel={`Open ${r.title}`}
+                onOpen={() => router.push(href)}
+                cover={
                   <CoverArt
                     seed={r.title}
                     image={r.image}
                     className="size-full"
                   />
-                  <span className="absolute left-2 top-2 rounded-md border border-border bg-background/90 px-1.5 py-0.5 text-[10px] font-medium">
-                    {r.releaseDate?.slice(0, 10) || r.year || "Get"}
-                  </span>
-                </div>
-                <div>
-                  <div className="truncate text-sm font-medium">{r.title}</div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {r.artist}
-                    {r.year ? ` · ${r.year}` : ""}
-                  </div>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  {fallbackReady && (
-                    <Button
-                      size="sm"
-                      className="w-full"
-                      disabled={busy === r.id}
-                      onClick={() => void requestRelease(r, true)}
-                    >
-                      <Play className="size-3.5" />
-                      {busy === r.id ? "…" : "Stream"}
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full"
-                    disabled={busy === r.id}
-                    onClick={() => void requestRelease(r, false)}
-                  >
-                    <Download className="size-3.5" />
-                    {busy === r.id ? "…" : "Download"}
-                  </Button>
+                }
+              />
+            );
+          })
+        }
+      </MediaShelfRow>
+
+      {loading && moreFrom.length === 0
+        ? Array.from({ length: 2 }).map((_, i) => (
+            <div key={i} className="space-y-4">
+              <div className="flex items-center gap-3">
+                <Skeleton className="size-12 shrink-0 rounded-full" />
+                <div className="space-y-2">
+                  <Skeleton className="h-3 w-16" />
+                  <Skeleton className="h-6 w-40" />
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-        {newlyOnDisk.length > 0 && (
-          <p className="text-xs text-muted-foreground">
-            {newlyOnDisk.length} calendar albums report files in Lidarr — scan
-            Library to stream after import.
-          </p>
-        )}
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="text-sm font-medium text-muted-foreground">Tracks</h2>
-        {tracks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No streamable tracks.</p>
-        ) : (
-          <ul className="divide-y divide-border/60 rounded-lg border border-border">
-            {tracks.slice(0, 12).map((t, i) => (
-              <li key={t.id}>
-                <button
-                  type="button"
-                  onClick={() => playTrack(t)}
-                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/30"
-                >
-                  <span className="w-5 text-xs tabular-nums text-muted-foreground">
-                    {i + 1}
-                  </span>
-                  <CoverArt
-                    seed={t.title}
-                    className="size-10 shrink-0 rounded-md"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{t.title}</div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {t.artist} · {t.album}
-                      {t.source === "fallback" ? " · downtify" : ""}
-                    </div>
+              <div className="flex gap-5">
+                {Array.from({ length: 5 }).map((__, j) => (
+                  <div key={j} className="w-36 shrink-0 space-y-2.5">
+                    <Skeleton className="aspect-square w-full rounded-md" />
+                    <Skeleton className="h-3.5 w-4/5" />
+                    <Skeleton className="h-3 w-3/5" />
                   </div>
-                  <Play className="size-3.5 shrink-0 text-muted-foreground" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                ))}
+              </div>
+            </div>
+          ))
+        : null}
+
+      {moreFrom.map((shelf) => (
+        <MediaShelfRow
+          key={shelf.artist}
+          eyebrow="More from"
+          title={shelf.artist}
+          seeAllHref={`/artist?name=${encodeURIComponent(shelf.artist)}`}
+          itemCount={shelf.items.length}
+          leading={
+            <button
+              type="button"
+              onClick={() =>
+                router.push(
+                  `/artist?name=${encodeURIComponent(shelf.artist)}`,
+                )
+              }
+              className="shrink-0 overflow-hidden rounded-full"
+              aria-label={`Open ${shelf.artist}`}
+            >
+              <CoverArt
+                seed={shelf.artist}
+                image={shelf.image || undefined}
+                className="size-12 rounded-full"
+              />
+            </button>
+          }
+        >
+          {(visible) =>
+            shelf.items.slice(0, visible).map((item) => {
+              if (item.kind === "album") {
+                const href = albumHref({
+                  title: item.album,
+                  artist: item.artist,
+                  foreignAlbumId: item.foreignAlbumId,
+                  lidarrAlbumId: item.lidarrAlbumId,
+                });
+                return (
+                  <MediaTileShell
+                    key={item.id}
+                    title={item.title}
+                    subtitle={item.subtitle}
+                    ariaLabel={`Open ${item.title}`}
+                    onOpen={() => router.push(href)}
+                    cover={
+                      <CoverArt
+                        seed={item.title}
+                        image={item.image || undefined}
+                        className="size-full"
+                      />
+                    }
+                  />
+                );
+              }
+
+              const track: PlayerTrack = {
+                id: item.trackId,
+                title: item.title,
+                artist: item.subtitle || item.artist,
+                album: item.album || "",
+                coverPath: item.coverPath || item.image || null,
+              };
+              return (
+                <TrackContextMenu key={item.id} track={track}>
+                  <div className="min-w-0">
+                    <MediaTileShell
+                      title={item.title}
+                      subtitle={item.subtitle}
+                      ariaLabel={`Play ${item.title}`}
+                      onOpen={() => playShelfTrack(item)}
+                      cover={
+                        <CoverArt
+                          seed={item.album || item.title}
+                          image={item.image || undefined}
+                          className="size-full"
+                        />
+                      }
+                      playButton={
+                        <button
+                          type="button"
+                          aria-label={`Play ${item.title}`}
+                          onClick={() => playShelfTrack(item)}
+                          className="absolute bottom-2 right-2 flex size-9 items-center justify-center rounded-full border border-border bg-background/95 shadow-md transition-transform hover:scale-105"
+                        >
+                          <Play className="size-3.5" fill="currentColor" />
+                        </button>
+                      }
+                    />
+                  </div>
+                </TrackContextMenu>
+              );
+            })
+          }
+        </MediaShelfRow>
+      ))}
     </div>
   );
 }

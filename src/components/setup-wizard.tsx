@@ -62,7 +62,7 @@ export function SetupWizard() {
   }
 
   const canSubmit =
-    username.trim().length >= 2 &&
+    username.trim().length >= 1 &&
     password.length >= 8 &&
     confirmPassword.length >= 8 &&
     !loading;

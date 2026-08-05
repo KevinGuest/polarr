@@ -8,7 +8,19 @@
  */
 import Database from "better-sqlite3";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { dbPath } from "./paths";
+import { dbPath, unlinkManagedAudioFile } from "./paths";
+import {
+  parseNotifyEvents,
+  serializeNotifyEvents,
+  type NotifyEventFlags,
+} from "./notify-events";
+
+export type { NotifyEventFlags, NotifyEventId } from "./notify-events";
+export {
+  DEFAULT_NOTIFY_EVENTS,
+  NOTIFY_EVENTS,
+  NOTIFY_EVENT_IDS,
+} from "./notify-events";
 
 export type Settings = {
   setupComplete: boolean;
@@ -18,6 +30,17 @@ export type Settings = {
   fallbackEnabled: boolean;
   serverName: string;
   publicUrl: string;
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPassword: string;
+  smtpFrom: string;
+  smtpSecure: boolean;
+  notifyEmailEnabled: boolean;
+  notifyDiscordEnabled: boolean;
+  discordWebhookUrl: string;
+  notifyEmailEvents: NotifyEventFlags;
+  notifyDiscordEvents: NotifyEventFlags;
 };
 
 export type MediaType = "artist" | "album" | "track";
@@ -38,12 +61,20 @@ export type TrackRow = {
   duration: number;
   path: string;
   coverPath: string | null;
-  source: "library" | "lidarr" | "fallback";
+  source: "library" | "lidarr" | "fallback" | "stream";
   externalId: string | null;
   fileSize: number;
   mtimeMs: number;
   addedAt: string;
   updatedAt: string;
+};
+
+export type LikeMeta = {
+  title?: string;
+  artist?: string;
+  album?: string;
+  coverPath?: string | null;
+  duration?: number;
 };
 
 export type RequestRow = {
@@ -74,7 +105,7 @@ export type DownloadJob = {
   query: string;
   title: string;
   artist: string;
-  status: "queued" | "running" | "completed" | "failed";
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
   progress: number;
   error: string | null;
   outputPath: string | null;
@@ -93,7 +124,7 @@ export type RequestEvent = {
 
 let db: Database.Database | null = null;
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 function hashPassword(password: string, salt?: string): string {
   const s = salt || randomBytes(16).toString("hex");
@@ -160,6 +191,70 @@ function ensureColumn(
   if (!tableColumns(database, table).has(column)) {
     database.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
   }
+}
+
+/** Stable id for likes that aren't (yet) in the local library. */
+export function streamLikeId(artist: string, title: string): string {
+  return `stream:${artist.trim().toLowerCase()}|${title.trim().toLowerCase()}`;
+}
+
+/**
+ * Drop track FK and keep title/artist metadata so streamed tracks can be liked
+ * without downloading. Safe to re-run (no-op when already migrated).
+ */
+function migrateTrackLikesV3(database: Database.Database) {
+  const cols = tableColumns(database, "track_likes");
+  const ddl = (
+    database
+      .prepare(
+        `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'track_likes'`,
+      )
+      .get() as { sql: string } | undefined
+  )?.sql;
+  const hasTrackFk = Boolean(ddl?.includes("REFERENCES tracks"));
+  if (cols.has("title") && cols.has("artist") && !hasTrackFk) return;
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS track_likes_v3 (
+      user_id TEXT NOT NULL,
+      track_id TEXT NOT NULL,
+      liked_at TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      artist TEXT NOT NULL DEFAULT '',
+      album TEXT NOT NULL DEFAULT '',
+      cover_path TEXT,
+      duration REAL NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, track_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
+
+  if (cols.size > 0) {
+    database.exec(`
+      INSERT OR IGNORE INTO track_likes_v3(
+        user_id, track_id, liked_at, title, artist, album, cover_path, duration
+      )
+      SELECT
+        l.user_id,
+        l.track_id,
+        l.liked_at,
+        coalesce(t.title, ${cols.has("title") ? "l.title" : "''"}),
+        coalesce(t.artist, ${cols.has("artist") ? "l.artist" : "''"}),
+        coalesce(t.album, ${cols.has("album") ? "l.album" : "''"}),
+        coalesce(t.cover_path, ${cols.has("cover_path") ? "l.cover_path" : "NULL"}),
+        coalesce(t.duration, ${cols.has("duration") ? "l.duration" : "0"})
+      FROM track_likes l
+      LEFT JOIN tracks t ON t.id = l.track_id;
+      DROP TABLE track_likes;
+    `);
+  } else {
+    database.exec(`DROP TABLE IF EXISTS track_likes;`);
+  }
+
+  database.exec(`ALTER TABLE track_likes_v3 RENAME TO track_likes;`);
+  database.exec(
+    `CREATE INDEX IF NOT EXISTS idx_track_likes_user ON track_likes(user_id, liked_at DESC);`,
+  );
 }
 
 function migrate(database: Database.Database) {
@@ -259,10 +354,107 @@ function migrate(database: Database.Database) {
       created_at TEXT NOT NULL,
       FOREIGN KEY(request_id) REFERENCES requests(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS invites (
+      id TEXT PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT,
+      revoked_at TEXT,
+      used_by TEXT,
+      used_at TEXT,
+      emailed_to TEXT,
+      FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS listen_daily (
+      user_id TEXT NOT NULL,
+      day TEXT NOT NULL,
+      seconds REAL NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, day),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS listen_bucket (
+      user_id TEXT NOT NULL,
+      bucket TEXT NOT NULL,
+      seconds REAL NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, bucket),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS play_history (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      track_id TEXT NOT NULL,
+      played_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS track_likes (
+      user_id TEXT NOT NULL,
+      track_id TEXT NOT NULL,
+      liked_at TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      artist TEXT NOT NULL DEFAULT '',
+      album TEXT NOT NULL DEFAULT '',
+      cover_path TEXT,
+      duration REAL NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, track_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS playlists (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS playlist_tracks (
+      playlist_id TEXT NOT NULL,
+      track_id TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      added_at TEXT NOT NULL,
+      PRIMARY KEY (playlist_id, track_id),
+      FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+      FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS taste_excludes (
+      user_id TEXT NOT NULL,
+      track_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, track_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      actor_label TEXT NOT NULL,
+      message TEXT NOT NULL,
+      href TEXT,
+      image_seed TEXT,
+      request_id TEXT,
+      dedupe_key TEXT,
+      created_at TEXT NOT NULL,
+      read_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
 
   // Column upgrades for DBs created before v2
   ensureColumn(database, "users", "is_admin", "is_admin INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(database, "users", "avatar_path", "avatar_path TEXT");
+  ensureColumn(database, "users", "banner_colors", "banner_colors TEXT");
+  ensureColumn(database, "invites", "emailed_to", "emailed_to TEXT");
   ensureColumn(database, "tracks", "file_size", "file_size INTEGER NOT NULL DEFAULT 0");
   ensureColumn(database, "tracks", "mtime_ms", "mtime_ms REAL NOT NULL DEFAULT 0");
   ensureColumn(database, "tracks", "updated_at", "updated_at TEXT NOT NULL DEFAULT ''");
@@ -276,6 +468,15 @@ function migrate(database: Database.Database) {
   ensureColumn(database, "requests", "available_at", "available_at TEXT");
   ensureColumn(database, "requests", "normalized_key", "normalized_key TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, "downloads", "request_id", "request_id TEXT");
+  ensureColumn(
+    database,
+    "play_history",
+    "listened_seconds",
+    "listened_seconds REAL",
+  );
+
+  // v3: likes may reference streamed tracks (no library file / no track FK)
+  migrateTrackLikesV3(database);
 
   // Backfill missing updated_at / normalized_key
   database.exec(`
@@ -312,6 +513,16 @@ function migrate(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_request_events_request ON request_events(request_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_listen_daily_day ON listen_daily(day);
+    CREATE INDEX IF NOT EXISTS idx_listen_bucket ON listen_bucket(bucket);
+    CREATE INDEX IF NOT EXISTS idx_play_history_user ON play_history(user_id, played_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_play_history_track ON play_history(track_id);
+    CREATE INDEX IF NOT EXISTS idx_track_likes_user ON track_likes(user_id, liked_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_playlists_user ON playlists(user_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_playlist_tracks ON playlist_tracks(playlist_id, position);
+    CREATE INDEX IF NOT EXISTS idx_taste_excludes_user ON taste_excludes(user_id);
+    CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, read_at);
   `);
 
   database
@@ -341,14 +552,30 @@ function getSetting(key: string, fallback = ""): string {
 }
 
 export function getSettings(): Settings {
+  const portRaw = getSetting("smtpPort", "587");
+  const port = Number.parseInt(portRaw, 10);
   return {
     setupComplete: getSetting("setupComplete", "false") === "true",
     lidarrUrl: getSetting("lidarrUrl", ""),
     lidarrApiKey: getSetting("lidarrApiKey", ""),
     musicRoot: getSetting("musicRoot", process.env.POLARR_MUSIC_DIR || ""),
-    fallbackEnabled: getSetting("fallbackEnabled", "true") === "true",
+    fallbackEnabled: true, // always-on acquire path (Lidarr + yt-dlp)
     serverName: getSetting("serverName", "Polarr"),
     publicUrl: getSetting("publicUrl", ""),
+    smtpHost: getSetting("smtpHost", ""),
+    smtpPort: Number.isFinite(port) && port > 0 ? port : 587,
+    smtpUser: getSetting("smtpUser", ""),
+    smtpPassword: getSetting("smtpPassword", ""),
+    smtpFrom: getSetting("smtpFrom", ""),
+    smtpSecure: getSetting("smtpSecure", "false") === "true",
+    notifyEmailEnabled: getSetting("notifyEmailEnabled", "false") === "true",
+    notifyDiscordEnabled:
+      getSetting("notifyDiscordEnabled", "false") === "true",
+    discordWebhookUrl: getSetting("discordWebhookUrl", ""),
+    notifyEmailEvents: parseNotifyEvents(getSetting("notifyEmailEvents", "")),
+    notifyDiscordEvents: parseNotifyEvents(
+      getSetting("notifyDiscordEvents", ""),
+    ),
   };
 }
 
@@ -362,16 +589,46 @@ export function updateSettings(partial: Partial<Settings>): Settings {
   setSetting("fallbackEnabled", String(next.fallbackEnabled));
   setSetting("serverName", next.serverName);
   setSetting("publicUrl", next.publicUrl);
+  setSetting("smtpHost", next.smtpHost);
+  setSetting("smtpPort", String(next.smtpPort));
+  setSetting("smtpUser", next.smtpUser);
+  setSetting("smtpPassword", next.smtpPassword);
+  setSetting("smtpFrom", next.smtpFrom);
+  setSetting("smtpSecure", String(next.smtpSecure));
+  setSetting("notifyEmailEnabled", String(next.notifyEmailEnabled));
+  setSetting("notifyDiscordEnabled", String(next.notifyDiscordEnabled));
+  setSetting("discordWebhookUrl", next.discordWebhookUrl);
+  setSetting("notifyEmailEvents", serializeNotifyEvents(next.notifyEmailEvents));
+  setSetting(
+    "notifyDiscordEvents",
+    serializeNotifyEvents(next.notifyDiscordEvents),
+  );
   return next;
+}
+
+export function smtpConfigured(settings?: Settings): boolean {
+  const s = settings ?? getSettings();
+  return Boolean(s.smtpHost.trim() && s.smtpFrom.trim() && s.smtpPort > 0);
 }
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
 
 export function hasUsers(): boolean {
+  return countUsers() > 0;
+}
+
+export function countUsers(): number {
   const row = getDb()
     .prepare(`SELECT COUNT(*) as c FROM users`)
     .get() as { c: number };
-  return row.c > 0;
+  return row.c;
+}
+
+export function countAdmins(): number {
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) as c FROM users WHERE is_admin = 1`)
+    .get() as { c: number };
+  return row.c;
 }
 
 export function createUser(
@@ -394,6 +651,194 @@ export function createAdminUser(username: string, password: string) {
   if (hasUsers()) throw new Error("Admin account already exists");
   const user = createUser(username, password, { isAdmin: true });
   updateSettings({ setupComplete: true });
+  return user;
+}
+
+export function setUserAdmin(userId: string, isAdmin: boolean) {
+  const db = getDb();
+  const row = db
+    .prepare(`SELECT id, is_admin as isAdmin FROM users WHERE id = ?`)
+    .get(userId) as { id: string; isAdmin: number } | undefined;
+  if (!row) throw new Error("User not found");
+  if (row.isAdmin && !isAdmin && countAdmins() <= 1) {
+    throw new Error("Cannot remove the last admin");
+  }
+  db.prepare(`UPDATE users SET is_admin = ? WHERE id = ?`).run(
+    isAdmin ? 1 : 0,
+    userId,
+  );
+  return getPublicProfileById(userId);
+}
+
+export function getPublicProfileById(id: string): PublicProfile | null {
+  const row = getDb()
+    .prepare(`${PROFILE_SELECT} WHERE id = ? LIMIT 1`)
+    .get(id) as UserProfileRow | undefined;
+  if (!row) return null;
+  return mapPublicProfile(row);
+}
+
+// ─── Invites ────────────────────────────────────────────────────────────────
+
+export type InviteRow = {
+  id: string;
+  code: string;
+  createdBy: string;
+  createdByUsername?: string;
+  createdAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  usedBy: string | null;
+  usedByUsername?: string | null;
+  usedAt: string | null;
+  emailedTo: string | null;
+};
+
+function mapInvite(row: {
+  id: string;
+  code: string;
+  createdBy: string;
+  createdByUsername?: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  usedBy: string | null;
+  usedByUsername?: string | null;
+  usedAt: string | null;
+  emailedTo?: string | null;
+}): InviteRow {
+  return {
+    id: row.id,
+    code: row.code,
+    createdBy: row.createdBy,
+    createdByUsername: row.createdByUsername ?? undefined,
+    createdAt: row.createdAt,
+    expiresAt: row.expiresAt,
+    revokedAt: row.revokedAt,
+    usedBy: row.usedBy,
+    usedByUsername: row.usedByUsername ?? null,
+    usedAt: row.usedAt,
+    emailedTo: row.emailedTo ?? null,
+  };
+}
+
+function inviteCode(): string {
+  const raw = randomBytes(5).toString("hex").toUpperCase();
+  return `POLARR-${raw.slice(0, 4)}-${raw.slice(4)}`;
+}
+
+const INVITE_SELECT = `SELECT i.id, i.code, i.created_by as createdBy, u.username as createdByUsername,
+              i.created_at as createdAt, i.expires_at as expiresAt,
+              i.revoked_at as revokedAt, i.used_by as usedBy,
+              uu.username as usedByUsername, i.used_at as usedAt,
+              i.emailed_to as emailedTo
+       FROM invites i
+       LEFT JOIN users u ON u.id = i.created_by
+       LEFT JOIN users uu ON uu.id = i.used_by`;
+
+export function createInvite(
+  createdBy: string,
+  options?: { expiresInDays?: number; emailedTo?: string | null },
+): InviteRow {
+  const id = newId();
+  const code = inviteCode();
+  const now = nowIso();
+  const expiresInDays = options?.expiresInDays ?? 14;
+  const expires =
+    expiresInDays > 0
+      ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString()
+      : null;
+  const emailedTo = options?.emailedTo?.trim() || null;
+  getDb()
+    .prepare(
+      `INSERT INTO invites(id, code, created_by, created_at, expires_at, emailed_to)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(id, code, createdBy, now, expires, emailedTo);
+  return getInviteById(id)!;
+}
+
+export function getInviteById(id: string): InviteRow | null {
+  const row = getDb()
+    .prepare(`${INVITE_SELECT} WHERE i.id = ?`)
+    .get(id) as Parameters<typeof mapInvite>[0] | undefined;
+  return row ? mapInvite(row) : null;
+}
+
+export function getInviteByCode(code: string): InviteRow | null {
+  purgeStaleRevokedInvites();
+  const key = code.trim().toUpperCase();
+  if (!key) return null;
+  const row = getDb()
+    .prepare(`${INVITE_SELECT} WHERE upper(i.code) = ?`)
+    .get(key) as Parameters<typeof mapInvite>[0] | undefined;
+  return row ? mapInvite(row) : null;
+}
+
+export function listInvites(limit = 100): InviteRow[] {
+  purgeStaleRevokedInvites();
+  return (
+    getDb()
+      .prepare(`${INVITE_SELECT} ORDER BY i.created_at DESC LIMIT ?`)
+      .all(limit) as Parameters<typeof mapInvite>[0][]
+  ).map(mapInvite);
+}
+
+export function inviteStatus(
+  invite: InviteRow,
+): "open" | "used" | "revoked" | "expired" {
+  if (invite.revokedAt) return "revoked";
+  if (invite.usedBy || invite.usedAt) return "used";
+  if (invite.expiresAt && new Date(invite.expiresAt).getTime() < Date.now()) {
+    return "expired";
+  }
+  return "open";
+}
+
+export function revokeInvite(id: string) {
+  const invite = getInviteById(id);
+  if (!invite) throw new Error("Invite not found");
+  if (inviteStatus(invite) !== "open") {
+    throw new Error("Only open invites can be revoked");
+  }
+  getDb()
+    .prepare(`UPDATE invites SET revoked_at = ? WHERE id = ?`)
+    .run(nowIso(), id);
+  return getInviteById(id)!;
+}
+
+export function deleteInvite(id: string) {
+  getDb().prepare(`DELETE FROM invites WHERE id = ?`).run(id);
+}
+
+/** Remove revoked invites that are at least 24 hours old. */
+export function purgeStaleRevokedInvites(maxAgeMs = 24 * 60 * 60 * 1000) {
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+  const result = getDb()
+    .prepare(
+      `DELETE FROM invites
+       WHERE revoked_at IS NOT NULL AND revoked_at <= ?`,
+    )
+    .run(cutoff);
+  return result.changes;
+}
+
+export function redeemInvite(
+  code: string,
+  username: string,
+  password: string,
+) {
+  const invite = getInviteByCode(code);
+  if (!invite) throw new Error("Invalid invite code");
+  const status = inviteStatus(invite);
+  if (status === "used") throw new Error("Invite already used");
+  if (status === "revoked") throw new Error("Invite was revoked");
+  if (status === "expired") throw new Error("Invite has expired");
+
+  const user = createUser(username, password, { isAdmin: false });
+  getDb()
+    .prepare(`UPDATE invites SET used_by = ?, used_at = ? WHERE id = ?`)
+    .run(user.id, nowIso(), invite.id);
   return user;
 }
 
@@ -453,6 +898,254 @@ export function getUserByToken(token: string | null | undefined) {
     username: row.username,
     isAdmin: Boolean(row.isAdmin),
   };
+}
+
+import { scrambleUserId } from "./user-id";
+
+export type PublicProfile = {
+  id: string;
+  publicId: string;
+  username: string;
+  isAdmin: boolean;
+  createdAt: string;
+  avatarUrl: string | null;
+  bannerColors: string[] | null;
+};
+
+type UserProfileRow = {
+  id: string;
+  username: string;
+  isAdmin: number;
+  createdAt: string;
+  avatarPath?: string | null;
+  bannerColors?: string | null;
+};
+
+function parseBannerColors(raw: string | null | undefined): string[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      Array.isArray(parsed) &&
+      parsed.length > 0 &&
+      parsed.every((c) => typeof c === "string")
+    ) {
+      return parsed as string[];
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function mapPublicProfile(row: UserProfileRow): PublicProfile {
+  const hasAvatar = Boolean(row.avatarPath);
+  const publicId = scrambleUserId(row.id);
+  return {
+    id: row.id,
+    publicId,
+    username: row.username,
+    isAdmin: Boolean(row.isAdmin),
+    createdAt: row.createdAt,
+    avatarUrl: hasAvatar
+      ? `/api/profiles/avatar/${encodeURIComponent(publicId)}`
+      : null,
+    bannerColors: parseBannerColors(row.bannerColors),
+  };
+}
+
+const PROFILE_SELECT = `SELECT id, username, is_admin as isAdmin, created_at as createdAt,
+  avatar_path as avatarPath, banner_colors as bannerColors FROM users`;
+
+/** Absolute filesystem path for a stored avatar, if any. */
+export function getUserAvatarPath(userId: string): string | null {
+  const row = getDb()
+    .prepare(`SELECT avatar_path as avatarPath FROM users WHERE id = ?`)
+    .get(userId) as { avatarPath: string | null } | undefined;
+  if (!row?.avatarPath) return null;
+  return row.avatarPath;
+}
+
+export function setUserAvatar(
+  userId: string,
+  avatarPath: string | null,
+  bannerColors: string[] | null,
+) {
+  getDb()
+    .prepare(
+      `UPDATE users SET avatar_path = ?, banner_colors = ? WHERE id = ?`,
+    )
+    .run(
+      avatarPath,
+      bannerColors ? JSON.stringify(bannerColors) : null,
+      userId,
+    );
+  return getPublicProfileById(userId);
+}
+
+/** Public profile listing (no secrets) — visible to all homeserver users. */
+export function listPublicProfiles(): PublicProfile[] {
+  return (
+    getDb()
+      .prepare(`${PROFILE_SELECT} ORDER BY created_at ASC`)
+      .all() as UserProfileRow[]
+  ).map(mapPublicProfile);
+}
+
+export function getPublicProfile(username: string): PublicProfile | null {
+  const key = username.trim();
+  if (!key) return null;
+  const row = getDb()
+    .prepare(`${PROFILE_SELECT} WHERE lower(username) = lower(?) LIMIT 1`)
+    .get(key) as UserProfileRow | undefined;
+  if (!row) return null;
+  return mapPublicProfile(row);
+}
+
+/** Artist frequency from shared library — used on public profiles. */
+export function topArtistsFromLibrary(limit = 12): {
+  artist: string;
+  tracks: number;
+}[] {
+  return getDb()
+    .prepare(
+      `SELECT artist as artist, COUNT(*) as tracks
+       FROM tracks
+       WHERE artist IS NOT NULL AND trim(artist) != ''
+       GROUP BY lower(artist)
+       ORDER BY tracks DESC, artist ASC
+       LIMIT ?`,
+    )
+    .all(limit) as { artist: string; tracks: number }[];
+}
+
+/** Recent / top tracks for public profile lists. */
+export function topTracksFromLibrary(limit = 10): TrackRow[] {
+  return (
+    getDb()
+      .prepare(
+        `${TRACK_SELECT}
+         ORDER BY mtime_ms DESC, added_at DESC
+         LIMIT ?`,
+      )
+      .all(limit) as Record<string, unknown>[]
+  ).map(mapTrack);
+}
+
+/** Sidebar: albums listed like Spotify library (recent-ish by max mtime). */
+export function listLibraryNavItems(limit = 40): {
+  type: "album" | "playlist";
+  key: string;
+  title: string;
+  artist: string;
+  tracks: number;
+  image: string | null;
+}[] {
+  const albums = getDb()
+    .prepare(
+      `SELECT album as title,
+              artist as artist,
+              COUNT(*) as tracks,
+              MAX(mtime_ms) as mtime,
+              MAX(CASE
+                WHEN cover_path IS NOT NULL AND trim(cover_path) != ''
+                THEN cover_path END) as image
+       FROM tracks
+       WHERE album IS NOT NULL AND trim(album) != ''
+       GROUP BY lower(artist), lower(album)
+       ORDER BY mtime DESC, title ASC
+       LIMIT ?`,
+    )
+    .all(limit) as {
+    title: string;
+    artist: string;
+    tracks: number;
+    mtime: number;
+    image: string | null;
+  }[];
+
+  return albums.map((a) => ({
+    type: "album" as const,
+    key: `${a.artist}::${a.title}`.toLowerCase(),
+    title: a.title,
+    artist: a.artist || "Unknown artist",
+    tracks: a.tracks,
+    image: a.image || null,
+  }));
+}
+
+/** Stamp cover URL onto local tracks for an album (sidebar / player reuse). */
+export function setAlbumCover(
+  artist: string,
+  album: string,
+  imageUrl: string,
+): void {
+  const a = artist.trim().toLowerCase();
+  const al = album.trim().toLowerCase();
+  const url = imageUrl.trim();
+  if (!a || !al || !url || !/^https?:\/\//i.test(url)) return;
+  getDb()
+    .prepare(
+      `UPDATE tracks
+       SET cover_path = ?
+       WHERE lower(artist) = ? AND lower(album) = ?
+         AND (cover_path IS NULL OR trim(cover_path) = ''
+              OR cover_path NOT LIKE 'http%')`,
+    )
+    .run(url, a, al);
+}
+
+/** Top albums from the shared library for public profiles. */
+export function publicAlbumsFromLibrary(limit = 16): {
+  title: string;
+  artist: string;
+  tracks: number;
+}[] {
+  return getDb()
+    .prepare(
+      `SELECT album as title,
+              artist as artist,
+              COUNT(*) as tracks
+       FROM tracks
+       WHERE album IS NOT NULL AND trim(album) != ''
+       GROUP BY lower(artist), lower(album)
+       ORDER BY tracks DESC, title ASC
+       LIMIT ?`,
+    )
+    .all(limit) as {
+    title: string;
+    artist: string;
+    tracks: number;
+  }[];
+}
+
+export function libraryStats(): {
+  tracks: number;
+  albums: number;
+  artists: number;
+} {
+  const tracks = countTracks();
+  const albums = (
+    getDb()
+      .prepare(
+        `SELECT COUNT(*) as c FROM (
+           SELECT 1 FROM tracks GROUP BY lower(artist), lower(album)
+         )`,
+      )
+      .get() as { c: number }
+  ).c;
+  const artists = (
+    getDb()
+      .prepare(
+        `SELECT COUNT(*) as c FROM (
+           SELECT 1 FROM tracks
+           WHERE artist IS NOT NULL AND trim(artist) != ''
+           GROUP BY lower(artist)
+         )`,
+      )
+      .get() as { c: number }
+  ).c;
+  return { tracks, albums, artists };
 }
 
 // ─── Tracks (library) ───────────────────────────────────────────────────────
@@ -536,6 +1229,69 @@ export function getTrack(id: string): TrackRow | null {
     .prepare(`${TRACK_SELECT} WHERE id = ?`)
     .get(id) as Record<string, unknown> | undefined;
   return row ? mapTrack(row) : null;
+}
+
+/**
+ * Remove a track from the library index (and related history/offline).
+ * Hard-deletes the audio file when it lives under a managed music root so a
+ * later scan cannot resurrect it without re-download.
+ */
+export function deleteTrack(id: string): TrackRow | null {
+  const track = getTrack(id);
+  if (!track) return null;
+  const db = getDb();
+  // Keep likes as stream-only entries so hearts survive library removal
+  const likeRows = db
+    .prepare(
+      `SELECT user_id as userId, liked_at as likedAt FROM track_likes WHERE track_id = ?`,
+    )
+    .all(id) as { userId: string; likedAt: string }[];
+  const streamId = streamLikeId(track.artist, track.title);
+  for (const row of likeRows) {
+    db.prepare(`DELETE FROM track_likes WHERE user_id = ? AND track_id = ?`).run(
+      row.userId,
+      id,
+    );
+    db.prepare(
+      `INSERT INTO track_likes(
+         user_id, track_id, liked_at, title, artist, album, cover_path, duration
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, track_id) DO UPDATE SET
+         liked_at = excluded.liked_at,
+         title = excluded.title,
+         artist = excluded.artist,
+         album = excluded.album,
+         cover_path = excluded.cover_path,
+         duration = excluded.duration`,
+    ).run(
+      row.userId,
+      streamId,
+      row.likedAt,
+      track.title,
+      track.artist,
+      track.album,
+      track.coverPath,
+      track.duration,
+    );
+  }
+  db.prepare(`DELETE FROM play_history WHERE track_id = ?`).run(id);
+  db.prepare(`DELETE FROM offline_marks WHERE track_id = ?`).run(id);
+  db.prepare(`DELETE FROM playlist_tracks WHERE track_id = ?`).run(id);
+  db.prepare(`DELETE FROM tracks WHERE id = ?`).run(id);
+
+  const settings = getSettings();
+  unlinkManagedAudioFile(track.path, [
+    settings.musicRoot,
+  ].filter(Boolean));
+
+  return track;
+}
+
+/** Remove all indexed tracks for an album (artist + album title). */
+export function deleteAlbumTracks(artist: string, album: string): number {
+  const rows = listTracksForAlbum(artist, album, 500);
+  for (const t of rows) deleteTrack(t.id);
+  return rows.length;
 }
 
 export function hasLibraryMatch(artist: string, albumOrTitle: string): boolean {
@@ -721,9 +1477,10 @@ export function createRequest(input: {
       createdAt: now,
       updatedAt: now,
     };
-    insertRequestRow(row);
-    appendRequestEvent(row.id, "available", "Already present in library");
-    return row;
+  insertRequestRow(row);
+  appendRequestEvent(row.id, "available", "Already present in library");
+  // Already in library — no toast spam
+  return row;
   }
 
   const now = nowIso();
@@ -750,6 +1507,10 @@ export function createRequest(input: {
   };
   insertRequestRow(row);
   appendRequestEvent(row.id, row.status, "Request created");
+  // Admin-only for new album/artist library requests — skip track acquire spam
+  if (row.status !== "available" && row.mediaType !== "track") {
+    notifyFromRequest(row, "new");
+  }
   return row;
 }
 
@@ -812,7 +1573,276 @@ export function updateRequestStatus(
     patch?.message ?? null,
     current.status,
   );
-  return getRequest(id);
+  const updated = getRequest(id);
+  if (updated && current.status !== status) {
+    if (status === "failed") {
+      notifyFromRequest(updated, "failed");
+    } else if (
+      status === "available" &&
+      (current.status === "downloading" ||
+        current.status === "queued" ||
+        current.status === "pending")
+    ) {
+      // Only when something actually finished acquiring — not instant library
+      notifyFromRequest(updated, "available");
+    }
+    // No spam for started / downloading / new intermediate states
+  }
+  return updated;
+}
+
+// ─── In-app notifications ───────────────────────────────────────────────────
+
+export type AppNotification = {
+  id: string;
+  userId: string;
+  kind: string;
+  actorLabel: string;
+  message: string;
+  href: string | null;
+  imageSeed: string | null;
+  requestId: string | null;
+  createdAt: string;
+  readAt: string | null;
+  unread: boolean;
+};
+
+function listAdminUserIds(): string[] {
+  return (
+    getDb()
+      .prepare(`SELECT id FROM users WHERE is_admin = 1`)
+      .all() as { id: string }[]
+  ).map((r) => r.id);
+}
+
+function getUserIdByUsername(username: string | null | undefined): string | null {
+  if (!username?.trim()) return null;
+  const row = getDb()
+    .prepare(`SELECT id FROM users WHERE lower(username) = lower(?) LIMIT 1`)
+    .get(username.trim()) as { id: string } | undefined;
+  return row?.id ?? null;
+}
+
+function pushNotification(input: {
+  userId: string;
+  kind: string;
+  actorLabel: string;
+  message: string;
+  href?: string | null;
+  imageSeed?: string | null;
+  requestId?: string | null;
+  dedupeKey?: string | null;
+}) {
+  if (!input.userId) return;
+  // Collapse lifecycle for a request into one row
+  if (input.requestId) {
+    getDb()
+      .prepare(
+        `DELETE FROM notifications
+         WHERE user_id = ? AND request_id = ?`,
+      )
+      .run(input.userId, input.requestId);
+  }
+  const dedupe = input.dedupeKey || null;
+  if (dedupe) {
+    const existing = getDb()
+      .prepare(
+        `SELECT id, read_at as readAt FROM notifications
+         WHERE user_id = ? AND dedupe_key = ?
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(input.userId, dedupe) as
+      | { id: string; readAt: string | null }
+      | undefined;
+    if (existing && !existing.readAt) {
+      getDb()
+        .prepare(
+          `UPDATE notifications SET
+             kind = ?, actor_label = ?, message = ?, href = ?, image_seed = ?,
+             created_at = ?, request_id = ?
+           WHERE id = ?`,
+        )
+        .run(
+          input.kind,
+          input.actorLabel,
+          input.message,
+          input.href ?? null,
+          input.imageSeed ?? null,
+          nowIso(),
+          input.requestId ?? null,
+          existing.id,
+        );
+      return;
+    }
+  }
+  getDb()
+    .prepare(
+      `INSERT INTO notifications(
+         id, user_id, kind, actor_label, message, href, image_seed,
+         request_id, dedupe_key, created_at, read_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+    )
+    .run(
+      newId(),
+      input.userId,
+      input.kind,
+      input.actorLabel,
+      input.message,
+      input.href ?? null,
+      input.imageSeed ?? null,
+      input.requestId ?? null,
+      dedupe,
+      nowIso(),
+    );
+  // Cap history
+  getDb()
+    .prepare(
+      `DELETE FROM notifications
+       WHERE user_id = ?
+         AND id IN (
+           SELECT id FROM (
+             SELECT id FROM notifications
+             WHERE user_id = ?
+             ORDER BY created_at DESC
+             LIMIT -1 OFFSET 80
+           )
+         )`,
+    )
+    .run(input.userId, input.userId);
+}
+
+function notifyFromRequest(
+  req: RequestRow,
+  event: "new" | "available" | "failed",
+) {
+  const seed = `${req.artist}-${req.title}`;
+  const media = req.mediaType === "track" ? "track" : req.mediaType;
+  const subject = `${req.artist} — ${req.title}`;
+  const requesterId = getUserIdByUsername(req.requestedBy);
+
+  const adminIds = listAdminUserIds();
+  const targets = new Set<string>();
+
+  if (event === "new") {
+    for (const id of adminIds) targets.add(id);
+  } else if (event === "failed") {
+    for (const id of adminIds) targets.add(id);
+    if (requesterId) targets.add(requesterId);
+  } else if (event === "available") {
+    if (requesterId) targets.add(requesterId);
+  }
+
+  if (targets.size === 0) return;
+
+  let actorLabel = "Polarr";
+  let message = "";
+  let href = "/admin/requests";
+  let kind = `request_${event}`;
+
+  if (event === "new") {
+    actorLabel = req.requestedBy || "Someone";
+    message = `requested a ${media}: ${subject}`;
+    kind = "request_new";
+  } else if (event === "available") {
+    actorLabel = req.artist || "Library";
+    message = `${req.title} is ready to play`;
+    href = `/library?album=${encodeURIComponent(req.album)}&artist=${encodeURIComponent(req.artist)}`;
+    kind = "request_available";
+  } else {
+    actorLabel = req.artist || "Download";
+    message = `failed to get ${req.title}${req.error ? `: ${req.error}` : ""}`;
+    kind = "request_failed";
+  }
+
+  for (const userId of targets) {
+    pushNotification({
+      userId,
+      kind,
+      actorLabel,
+      message: message.slice(0, 280),
+      href,
+      imageSeed: seed,
+      requestId: req.id,
+      // One lifecycle row per request
+      dedupeKey: `request:${req.id}`,
+    });
+  }
+}
+
+export function listNotifications(
+  userId: string,
+  limit = 40,
+): AppNotification[] {
+  if (!userId) return [];
+  const rows = getDb()
+    .prepare(
+      `SELECT id, user_id as userId, kind, actor_label as actorLabel,
+              message, href, image_seed as imageSeed, request_id as requestId,
+              created_at as createdAt, read_at as readAt
+       FROM notifications
+       WHERE user_id = ?
+       ORDER BY created_at DESC
+       LIMIT ?`,
+    )
+    .all(userId, limit) as {
+    id: string;
+    userId: string;
+    kind: string;
+    actorLabel: string;
+    message: string;
+    href: string | null;
+    imageSeed: string | null;
+    requestId: string | null;
+    createdAt: string;
+    readAt: string | null;
+  }[];
+
+  return rows.map((r) => ({
+    ...r,
+    unread: !r.readAt,
+  }));
+}
+
+export function countUnreadNotifications(userId: string): number {
+  if (!userId) return 0;
+  const row = getDb()
+    .prepare(
+      `SELECT COUNT(*) as c FROM notifications
+       WHERE user_id = ? AND read_at IS NULL`,
+    )
+    .get(userId) as { c: number };
+  return Number(row?.c) || 0;
+}
+
+/** Mark all (or specific) notifications as read for a user. */
+export function markNotificationsRead(
+  userId: string,
+  ids?: string[],
+): number {
+  if (!userId) return 0;
+  const at = nowIso();
+  if (ids && ids.length > 0) {
+    const stmt = getDb().prepare(
+      `UPDATE notifications SET read_at = ?
+       WHERE user_id = ? AND id = ? AND read_at IS NULL`,
+    );
+    const tx = getDb().transaction((list: string[]) => {
+      let n = 0;
+      for (const id of list) {
+        const r = stmt.run(at, userId, id);
+        n += r.changes;
+      }
+      return n;
+    });
+    return tx(ids);
+  }
+  const r = getDb()
+    .prepare(
+      `UPDATE notifications SET read_at = ?
+       WHERE user_id = ? AND read_at IS NULL`,
+    )
+    .run(at, userId);
+  return r.changes;
 }
 
 export function getRequest(id: string): RequestRow | null {
@@ -971,6 +2001,11 @@ export function updateDownloadJob(
         error: patch.error ?? "Download failed",
         message: patch.error ?? "Fallback download failed",
       });
+    } else if (patch.status === "cancelled") {
+      updateRequestStatus(current.requestId, "cancelled", {
+        error: null,
+        message: patch.error ?? "Stopped by admin",
+      });
     } else if (patch.status === "running") {
       updateRequestStatus(current.requestId, "downloading", {
         message: "Fallback download running",
@@ -978,6 +2013,17 @@ export function updateDownloadJob(
     }
   }
   return next;
+}
+
+export function getDownload(id: string): DownloadJob | null {
+  const row = getDb()
+    .prepare(
+      `SELECT id, request_id as requestId, query, title, artist, status, progress,
+              error, output_path as outputPath, created_at as createdAt,
+              updated_at as updatedAt FROM downloads WHERE id = ?`,
+    )
+    .get(id) as DownloadJob | undefined;
+  return row ?? null;
 }
 
 export function listDownloads(limit = 50): DownloadJob[] {
@@ -1002,3 +2048,963 @@ export function markOffline(trackId: string, deviceId?: string) {
     )
     .run(newId(8), trackId, deviceId ?? null, nowIso());
 }
+
+export function listOfflineTrackIds(): string[] {
+  const rows = getDb()
+    .prepare(`SELECT track_id as trackId FROM offline_marks`)
+    .all() as { trackId: string }[];
+  return rows.map((r) => r.trackId);
+}
+
+// ─── Playlists ──────────────────────────────────────────────────────────────
+
+export type PlaylistRow = {
+  id: string;
+  userId: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  trackCount: number;
+};
+
+export function listUserPlaylists(userId: string): PlaylistRow[] {
+  if (!userId) return [];
+  return getDb()
+    .prepare(
+      `SELECT p.id, p.user_id as userId, p.name,
+              p.created_at as createdAt, p.updated_at as updatedAt,
+              (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlist_id = p.id) as trackCount
+       FROM playlists p
+       WHERE p.user_id = ?
+       ORDER BY p.updated_at DESC`,
+    )
+    .all(userId) as PlaylistRow[];
+}
+
+export function createPlaylist(userId: string, name: string): PlaylistRow {
+  const now = nowIso();
+  const id = newId();
+  getDb()
+    .prepare(
+      `INSERT INTO playlists(id, user_id, name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(id, userId, name.trim() || "My Playlist", now, now);
+  return {
+    id,
+    userId,
+    name: name.trim() || "My Playlist",
+    createdAt: now,
+    updatedAt: now,
+    trackCount: 0,
+  };
+}
+
+export function addTrackToPlaylist(
+  userId: string,
+  playlistId: string,
+  trackId: string,
+): { ok: boolean; error?: string } {
+  const pl = getDb()
+    .prepare(`SELECT id FROM playlists WHERE id = ? AND user_id = ?`)
+    .get(playlistId, userId) as { id: string } | undefined;
+  if (!pl) return { ok: false, error: "Playlist not found" };
+  if (!getTrack(trackId)) return { ok: false, error: "Track not found" };
+  const pos = (
+    getDb()
+      .prepare(
+        `SELECT COALESCE(MAX(position), -1) + 1 as n FROM playlist_tracks WHERE playlist_id = ?`,
+      )
+      .get(playlistId) as { n: number }
+  ).n;
+  getDb()
+    .prepare(
+      `INSERT INTO playlist_tracks(playlist_id, track_id, position, added_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(playlist_id, track_id) DO NOTHING`,
+    )
+    .run(playlistId, trackId, pos, nowIso());
+  getDb()
+    .prepare(`UPDATE playlists SET updated_at = ? WHERE id = ?`)
+    .run(nowIso(), playlistId);
+  return { ok: true };
+}
+
+export function removeTrackFromPlaylist(
+  userId: string,
+  playlistId: string,
+  trackId: string,
+): { ok: boolean; error?: string } {
+  const pl = getDb()
+    .prepare(`SELECT id FROM playlists WHERE id = ? AND user_id = ?`)
+    .get(playlistId, userId) as { id: string } | undefined;
+  if (!pl) return { ok: false, error: "Playlist not found" };
+  const result = getDb()
+    .prepare(
+      `DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?`,
+    )
+    .run(playlistId, trackId);
+  if (result.changes > 0) {
+    getDb()
+      .prepare(`UPDATE playlists SET updated_at = ? WHERE id = ?`)
+      .run(nowIso(), playlistId);
+  }
+  return { ok: true };
+}
+
+/** Playlists for a user, with whether each contains `trackId`. */
+export function listUserPlaylistsForTrack(
+  userId: string,
+  trackId: string,
+): (PlaylistRow & { contains: boolean })[] {
+  if (!userId) return [];
+  return (
+    getDb()
+      .prepare(
+        `SELECT p.id, p.user_id as userId, p.name,
+                p.created_at as createdAt, p.updated_at as updatedAt,
+                (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlist_id = p.id) as trackCount,
+                EXISTS(
+                  SELECT 1 FROM playlist_tracks pt
+                  WHERE pt.playlist_id = p.id AND pt.track_id = ?
+                ) as contains
+         FROM playlists p
+         WHERE p.user_id = ?
+         ORDER BY p.updated_at DESC`,
+      )
+      .all(trackId, userId) as (PlaylistRow & { contains: number | boolean })[]
+  ).map((row) => ({
+    ...row,
+    contains: Boolean(row.contains),
+  }));
+}
+
+export function listPlaylistTracks(
+  userId: string,
+  playlistId: string,
+): TrackRow[] {
+  const pl = getDb()
+    .prepare(`SELECT id FROM playlists WHERE id = ? AND user_id = ?`)
+    .get(playlistId, userId) as { id: string } | undefined;
+  if (!pl) return [];
+  return (
+    getDb()
+      .prepare(
+        `${TRACK_SELECT}
+         INNER JOIN playlist_tracks pt ON pt.track_id = tracks.id
+         WHERE pt.playlist_id = ?
+         ORDER BY pt.position ASC`,
+      )
+      .all(playlistId) as Record<string, unknown>[]
+  ).map(mapTrack);
+}
+
+// ─── Taste excludes ─────────────────────────────────────────────────────────
+
+export function excludeTrackFromTaste(userId: string, trackId: string) {
+  if (!userId || !trackId || !getTrack(trackId)) return false;
+  getDb()
+    .prepare(
+      `INSERT INTO taste_excludes(user_id, track_id, created_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(user_id, track_id) DO NOTHING`,
+    )
+    .run(userId, trackId, nowIso());
+  return true;
+}
+
+export function listTasteExcludeIds(userId: string): string[] {
+  if (!userId) return [];
+  return (
+    getDb()
+      .prepare(`SELECT track_id as id FROM taste_excludes WHERE user_id = ?`)
+      .all(userId) as { id: string }[]
+  ).map((r) => r.id);
+}
+
+export function isTrackTasteExcluded(userId: string, trackId: string): boolean {
+  if (!userId || !trackId) return false;
+  const row = getDb()
+    .prepare(
+      `SELECT 1 as ok FROM taste_excludes WHERE user_id = ? AND track_id = ?`,
+    )
+    .get(userId, trackId) as { ok: number } | undefined;
+  return Boolean(row);
+}
+
+export function listTracksByArtist(artist: string, limit = 100): TrackRow[] {
+  const a = artist.trim().toLowerCase();
+  if (!a) return [];
+  return (
+    getDb()
+      .prepare(
+        `${TRACK_SELECT}
+         WHERE lower(artist) = ?
+         ORDER BY album ASC, title ASC
+         LIMIT ?`,
+      )
+      .all(a, limit) as Record<string, unknown>[]
+  ).map(mapTrack);
+}
+
+/** Tracks matching artist + album title (case-insensitive). */
+export function listTracksForAlbum(
+  artist: string,
+  album: string,
+  limit = 200,
+): TrackRow[] {
+  const a = artist.trim().toLowerCase();
+  const al = album.trim().toLowerCase();
+  if (!a || !al) return [];
+  return (
+    getDb()
+      .prepare(
+        `${TRACK_SELECT}
+         WHERE lower(artist) = ? AND lower(album) = ?
+         ORDER BY title ASC
+         LIMIT ?`,
+      )
+      .all(a, al, limit) as Record<string, unknown>[]
+  ).map(mapTrack);
+}
+
+/** Per-user activity for admin user detail (requests.requested_by is username). */
+export function getUserActivityStats(userId: string) {
+  const user = getPublicProfileById(userId);
+  if (!user) return null;
+
+  const username = user.username;
+  const requestRows = getDb()
+    .prepare(
+      `SELECT status, COUNT(*) as c FROM requests
+       WHERE lower(requested_by) = lower(?)
+       GROUP BY status`,
+    )
+    .all(username) as { status: string; c: number }[];
+
+  const requestsByStatus: Record<string, number> = {};
+  let requestsTotal = 0;
+  for (const r of requestRows) {
+    requestsByStatus[r.status] = r.c;
+    requestsTotal += r.c;
+  }
+
+  const downloadRow = getDb()
+    .prepare(
+      `SELECT
+         COUNT(*) as total,
+         SUM(CASE WHEN d.status = 'completed' THEN 1 ELSE 0 END) as completed,
+         SUM(CASE WHEN d.status IN ('queued','running') THEN 1 ELSE 0 END) as active
+       FROM downloads d
+       INNER JOIN requests r ON r.id = d.request_id
+       WHERE lower(r.requested_by) = lower(?)`,
+    )
+    .get(username) as {
+    total: number;
+    completed: number | null;
+    active: number | null;
+  };
+
+  const recentRequests = getDb()
+    .prepare(
+      `SELECT id, media_type as mediaType, title, artist, album, status, source,
+              created_at as createdAt
+       FROM requests
+       WHERE lower(requested_by) = lower(?)
+       ORDER BY created_at DESC
+       LIMIT 8`,
+    )
+    .all(username) as {
+    id: string;
+    mediaType: string;
+    title: string;
+    artist: string;
+    album: string;
+    status: string;
+    source: string;
+    createdAt: string;
+  }[];
+
+  // Shared library album count (shown on public profiles).
+  const albumsListed = (
+    getDb()
+      .prepare(
+        `SELECT COUNT(*) as c FROM (
+           SELECT 1 FROM tracks
+           WHERE album IS NOT NULL AND trim(album) != ''
+           GROUP BY lower(artist), lower(album)
+         )`,
+      )
+      .get() as { c: number }
+  ).c;
+
+  const lib = libraryStats();
+
+  return {
+    user,
+    requestsTotal,
+    requestsByStatus,
+    downloads: {
+      total: Number(downloadRow?.total) || 0,
+      completed: Number(downloadRow?.completed) || 0,
+      active: Number(downloadRow?.active) || 0,
+    },
+    albumsListed,
+    libraryTracks: lib.tracks,
+    recentRequests,
+  };
+}
+
+// ─── Listening (hours played) ───────────────────────────────────────────────
+
+/** Current UTC 3-hour bucket key, e.g. 2026-08-05T06 */
+export function listenBucketKey(date = new Date()): string {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  const h = String(Math.floor(date.getUTCHours() / 3) * 3).padStart(2, "0");
+  return `${y}-${m}-${d}T${h}`;
+}
+
+function bucketStartMs(key: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})$/.exec(key);
+  if (!m) return 0;
+  return Date.UTC(
+    Number(m[1]),
+    Number(m[2]) - 1,
+    Number(m[3]),
+    Number(m[4]),
+    0,
+    0,
+    0,
+  );
+}
+
+function nextBucketKey(key: string): string {
+  return listenBucketKey(new Date(bucketStartMs(key) + 3 * 60 * 60 * 1000));
+}
+
+function listBucketsInclusive(fromKey: string, toKey: string): string[] {
+  if (!fromKey || !toKey || fromKey > toKey) return [toKey || fromKey].filter(Boolean);
+  const keys: string[] = [];
+  let cur = fromKey;
+  let guard = 0;
+  while (cur <= toKey && guard < 10000) {
+    keys.push(cur);
+    if (cur === toKey) break;
+    cur = nextBucketKey(cur);
+    guard += 1;
+  }
+  return keys;
+}
+
+/** Record a play start for Recently Played (dedupes by replaying updates timestamp). */
+export function recordPlay(userId: string, trackId: string) {
+  if (!userId || !trackId) return;
+  if (trackId.startsWith("live:")) return;
+  const track = getTrack(trackId);
+  if (!track) return;
+  const existing = getDb()
+    .prepare(
+      `SELECT id, listened_seconds as listenedSeconds FROM play_history
+       WHERE user_id = ? AND track_id = ?
+       ORDER BY played_at DESC LIMIT 1`,
+    )
+    .get(userId, trackId) as
+    | { id: string; listenedSeconds: number | null }
+    | undefined;
+  const at = nowIso();
+  if (existing) {
+    const secs = Math.max(Number(existing.listenedSeconds) || 0, 15);
+    getDb()
+      .prepare(
+        `UPDATE play_history
+         SET played_at = ?, listened_seconds = ?
+         WHERE id = ?`,
+      )
+      .run(at, secs, existing.id);
+  } else {
+    getDb()
+      .prepare(
+        `INSERT INTO play_history(id, user_id, track_id, played_at, listened_seconds)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(newId(), userId, trackId, at, 15);
+  }
+  // Cap history size per user
+  getDb()
+    .prepare(
+      `DELETE FROM play_history
+       WHERE user_id = ?
+         AND id IN (
+           SELECT id FROM (
+             SELECT id FROM play_history
+             WHERE user_id = ?
+             ORDER BY played_at DESC
+             LIMIT -1 OFFSET 100
+           )
+         )`,
+    )
+    .run(userId, userId);
+}
+
+/**
+ * Credit listening time toward a track. Creates/updates play_history and
+ * refreshes played_at once the listen has reached 15 seconds (and on every
+ * further credit so the “others listening” shelf stays current).
+ */
+export function creditTrackListen(
+  userId: string,
+  trackId: string,
+  seconds: number,
+) {
+  if (!userId || !trackId || trackId.startsWith("live:")) return;
+  const add = Math.max(0, Math.min(3600, Number(seconds) || 0));
+  if (add <= 0) return;
+  if (!getTrack(trackId)) return;
+
+  const existing = getDb()
+    .prepare(
+      `SELECT id, listened_seconds as listenedSeconds FROM play_history
+       WHERE user_id = ? AND track_id = ?
+       ORDER BY played_at DESC LIMIT 1`,
+    )
+    .get(userId, trackId) as
+    | { id: string; listenedSeconds: number | null }
+    | undefined;
+
+  const at = nowIso();
+  if (existing) {
+    const prev = Number(existing.listenedSeconds) || 0;
+    const next = prev + add;
+    // Bump played_at whenever this listen qualifies (or already had).
+    const bumpPlayedAt = next >= 15 || prev >= 15;
+    getDb()
+      .prepare(
+        `UPDATE play_history
+         SET listened_seconds = ?,
+             played_at = CASE WHEN ? THEN ? ELSE played_at END
+         WHERE id = ?`,
+      )
+      .run(next, bumpPlayedAt ? 1 : 0, at, existing.id);
+  } else {
+    getDb()
+      .prepare(
+        `INSERT INTO play_history(id, user_id, track_id, played_at, listened_seconds)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(newId(), userId, trackId, at, add);
+  }
+
+  getDb()
+    .prepare(
+      `DELETE FROM play_history
+       WHERE user_id = ?
+         AND id IN (
+           SELECT id FROM (
+             SELECT id FROM play_history
+             WHERE user_id = ?
+             ORDER BY played_at DESC
+             LIMIT -1 OFFSET 100
+           )
+         )`,
+    )
+    .run(userId, userId);
+}
+
+/** Unique tracks recently played by user, newest first. */
+export function listRecentPlays(
+  userId: string,
+  limit = 24,
+): (TrackRow & { playedAt: string; liked: boolean })[] {
+  if (!userId) return [];
+  const rows = getDb()
+    .prepare(
+      `SELECT t.id, t.title, t.artist, t.album, t.duration, t.path,
+              t.cover_path as coverPath, t.source, t.external_id as externalId,
+              t.file_size as fileSize, t.mtime_ms as mtimeMs,
+              t.added_at as addedAt, t.updated_at as updatedAt,
+              MAX(p.played_at) as playedAt,
+              CASE WHEN EXISTS (
+                SELECT 1 FROM track_likes l
+                WHERE l.user_id = ? AND l.track_id = p.track_id
+              ) THEN 1 ELSE 0 END as liked
+       FROM play_history p
+       INNER JOIN tracks t ON t.id = p.track_id
+       WHERE p.user_id = ?
+         AND (p.listened_seconds IS NULL OR p.listened_seconds >= 15)
+       GROUP BY p.track_id
+       ORDER BY playedAt DESC
+       LIMIT ?`,
+    )
+    .all(userId, userId, limit) as Record<string, unknown>[];
+
+  return rows.map((row) => ({
+    ...mapTrack(row),
+    playedAt: String(row.playedAt),
+    liked: Number(row.liked) === 1,
+  }));
+}
+
+/**
+ * Recent listens from everyone on this homeserver (unique tracks).
+ * Includes the current user. Only counts plays with ≥15s listened
+ * (NULL listened_seconds = legacy rows, treated as qualified).
+ */
+export function listOthersListening(
+  _viewerUserId: string,
+  limit = 16,
+): (TrackRow & {
+  playedAt: string;
+  listenedBy: string;
+  listenedByUserId: string;
+  listenedByAvatarUrl: string | null;
+})[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT t.id, t.title, t.artist, t.album, t.duration, t.path,
+              t.cover_path as coverPath, t.source, t.external_id as externalId,
+              t.file_size as fileSize, t.mtime_ms as mtimeMs,
+              t.added_at as addedAt, t.updated_at as updatedAt,
+              p.played_at as playedAt,
+              u.id as listenedByUserId,
+              u.username as listenedBy,
+              u.avatar_path as listenedByAvatarPath
+       FROM play_history p
+       INNER JOIN tracks t ON t.id = p.track_id
+       INNER JOIN users u ON u.id = p.user_id
+       WHERE p.id IN (
+         SELECT id FROM (
+           SELECT id,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY track_id
+                    ORDER BY played_at DESC, id DESC
+                  ) AS rn
+           FROM play_history
+           WHERE listened_seconds IS NULL OR listened_seconds >= 15
+         )
+         WHERE rn = 1
+       )
+       ORDER BY p.played_at DESC
+       LIMIT ?`,
+    )
+    .all(limit) as Record<string, unknown>[];
+
+  return rows.map((row) => {
+    const userId = String(row.listenedByUserId || "");
+    const publicId = userId ? scrambleUserId(userId) : "";
+    const hasAvatar = Boolean(row.listenedByAvatarPath);
+    return {
+      ...mapTrack(row),
+      playedAt: String(row.playedAt),
+      listenedBy: String(row.listenedBy || ""),
+      listenedByUserId: userId,
+      listenedByAvatarUrl:
+        hasAvatar && publicId
+          ? `/api/profiles/avatar/${encodeURIComponent(publicId)}`
+          : null,
+    };
+  });
+}
+
+export function isTrackLiked(
+  userId: string,
+  trackId: string,
+  meta?: LikeMeta,
+): boolean {
+  if (!userId || !trackId) return false;
+  const ids = likeCandidateIds(trackId, meta);
+  if (ids.length === 0) return false;
+  const placeholders = ids.map(() => "?").join(", ");
+  const row = getDb()
+    .prepare(
+      `SELECT 1 as ok FROM track_likes
+       WHERE user_id = ? AND track_id IN (${placeholders})
+       LIMIT 1`,
+    )
+    .get(userId, ...ids) as { ok: number } | undefined;
+  return Boolean(row);
+}
+
+/** Resolve player / live / stream ids into the set of like-row keys to check. */
+export function likeCandidateIds(
+  trackId: string,
+  meta?: LikeMeta,
+): string[] {
+  const ids = new Set<string>();
+  const artist = meta?.artist?.trim() || "";
+  const title = meta?.title?.trim() || "";
+
+  if (trackId.startsWith("live:")) {
+    // live session meta is resolved by the API; fall through on artist/title
+  } else if (trackId.startsWith("stream:")) {
+    ids.add(trackId);
+  } else if (trackId) {
+    ids.add(trackId);
+    const local = getTrack(trackId);
+    if (local) {
+      ids.add(streamLikeId(local.artist, local.title));
+    }
+  }
+
+  if (artist && title) {
+    ids.add(streamLikeId(artist, title));
+    const match = findTrack(artist, title);
+    if (match) ids.add(match.id);
+  }
+
+  return [...ids];
+}
+
+/**
+ * Canonical like key: library track id when available, else stable stream: key.
+ * Returns null when we lack enough identity to store a like.
+ */
+export function resolveLikeTrackId(
+  trackId: string,
+  meta?: LikeMeta,
+): { id: string; meta: Required<Pick<LikeMeta, "title" | "artist" | "album">> & {
+  coverPath: string | null;
+  duration: number;
+} } | null {
+  const artistHint = meta?.artist?.trim() || "";
+  const titleHint = meta?.title?.trim() || "";
+  const albumHint = meta?.album?.trim() || "";
+
+  let library =
+    trackId &&
+    !trackId.startsWith("live:") &&
+    !trackId.startsWith("stream:")
+      ? getTrack(trackId)
+      : null;
+
+  if (!library && artistHint && titleHint) {
+    library = findTrack(artistHint, titleHint);
+  }
+
+  if (library) {
+    return {
+      id: library.id,
+      meta: {
+        title: library.title,
+        artist: library.artist,
+        album: library.album,
+        coverPath: library.coverPath,
+        duration: library.duration || meta?.duration || 0,
+      },
+    };
+  }
+
+  const title = titleHint;
+  const artist = artistHint;
+  if (!title || !artist) return null;
+
+  return {
+    id: streamLikeId(artist, title),
+    meta: {
+      title,
+      artist,
+      album: albumHint || title,
+      coverPath: meta?.coverPath ?? null,
+      duration: meta?.duration || 0,
+    },
+  };
+}
+
+export function setTrackLiked(
+  userId: string,
+  trackId: string,
+  liked: boolean,
+  meta?: LikeMeta,
+): boolean {
+  if (!userId || !trackId) return false;
+  const resolved = resolveLikeTrackId(trackId, meta);
+  if (!resolved) return isTrackLiked(userId, trackId, meta);
+
+  const aliases = likeCandidateIds(resolved.id, {
+    artist: resolved.meta.artist,
+    title: resolved.meta.title,
+    album: resolved.meta.album,
+    coverPath: resolved.meta.coverPath,
+    duration: resolved.meta.duration,
+  });
+
+  const db = getDb();
+  if (liked) {
+    db.prepare(
+      `INSERT INTO track_likes(
+         user_id, track_id, liked_at, title, artist, album, cover_path, duration
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, track_id) DO UPDATE SET
+         liked_at = excluded.liked_at,
+         title = excluded.title,
+         artist = excluded.artist,
+         album = excluded.album,
+         cover_path = excluded.cover_path,
+         duration = excluded.duration`,
+    ).run(
+      userId,
+      resolved.id,
+      nowIso(),
+      resolved.meta.title,
+      resolved.meta.artist,
+      resolved.meta.album,
+      resolved.meta.coverPath,
+      resolved.meta.duration,
+    );
+    // Collapse duplicate stream/library aliases for the same song
+    for (const alias of aliases) {
+      if (alias === resolved.id) continue;
+      db.prepare(
+        `DELETE FROM track_likes WHERE user_id = ? AND track_id = ?`,
+      ).run(userId, alias);
+    }
+  } else {
+    for (const alias of aliases) {
+      db.prepare(
+        `DELETE FROM track_likes WHERE user_id = ? AND track_id = ?`,
+      ).run(userId, alias);
+    }
+  }
+  return isTrackLiked(userId, resolved.id, resolved.meta);
+}
+
+export function toggleTrackLiked(
+  userId: string,
+  trackId: string,
+  meta?: LikeMeta,
+): boolean {
+  const next = !isTrackLiked(userId, trackId, meta);
+  return setTrackLiked(userId, trackId, next, meta);
+}
+
+export function countLikedTracks(userId: string): number {
+  if (!userId) return 0;
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) as c FROM track_likes WHERE user_id = ?`)
+    .get(userId) as { c: number };
+  return Number(row?.c) || 0;
+}
+
+export function listLikedTracks(
+  userId: string,
+  limit = 500,
+): (TrackRow & { likedAt: string })[] {
+  if (!userId) return [];
+  const rows = getDb()
+    .prepare(
+      `SELECT
+          l.track_id as id,
+          coalesce(nullif(t.title, ''), nullif(l.title, ''), 'Unknown') as title,
+          coalesce(nullif(t.artist, ''), nullif(l.artist, ''), 'Unknown') as artist,
+          coalesce(nullif(t.album, ''), nullif(l.album, ''), '') as album,
+          coalesce(t.duration, l.duration, 0) as duration,
+          coalesce(t.path, '') as path,
+          coalesce(t.cover_path, l.cover_path) as coverPath,
+          coalesce(t.source, 'stream') as source,
+          t.external_id as externalId,
+          coalesce(t.file_size, 0) as fileSize,
+          coalesce(t.mtime_ms, 0) as mtimeMs,
+          coalesce(t.added_at, l.liked_at) as addedAt,
+          coalesce(t.updated_at, l.liked_at) as updatedAt,
+          l.liked_at as likedAt
+       FROM track_likes l
+       LEFT JOIN tracks t ON t.id = l.track_id
+       WHERE l.user_id = ?
+       ORDER BY l.liked_at DESC
+       LIMIT ?`,
+    )
+    .all(userId, limit) as Record<string, unknown>[];
+
+  return rows.map((row) => ({
+    id: String(row.id),
+    title: String(row.title),
+    artist: String(row.artist),
+    album: String(row.album || row.title || ""),
+    duration: Number(row.duration) || 0,
+    path: String(row.path || ""),
+    coverPath: (row.coverPath as string | null) || null,
+    source: (String(row.source || "stream") as TrackRow["source"]),
+    externalId: (row.externalId as string | null) || null,
+    fileSize: Number(row.fileSize) || 0,
+    mtimeMs: Number(row.mtimeMs) || 0,
+    addedAt: String(row.addedAt),
+    updatedAt: String(row.updatedAt),
+    likedAt: String(row.likedAt),
+  }));
+}
+
+/** Accumulate played seconds for a signed-in user (3-hour UTC buckets). */
+export function addListenSeconds(
+  userId: string,
+  seconds: number,
+  trackId?: string | null,
+) {
+  const add = Math.max(0, Math.min(3600, Number(seconds) || 0));
+  if (!userId || add <= 0) return;
+  const bucket = listenBucketKey();
+  getDb()
+    .prepare(
+      `INSERT INTO listen_bucket(user_id, bucket, seconds) VALUES (?, ?, ?)
+       ON CONFLICT(user_id, bucket) DO UPDATE SET
+         seconds = listen_bucket.seconds + excluded.seconds`,
+    )
+    .run(userId, bucket, add);
+  // Keep daily rollup for backwards/simple queries
+  const day = bucket.slice(0, 10);
+  getDb()
+    .prepare(
+      `INSERT INTO listen_daily(user_id, day, seconds) VALUES (?, ?, ?)
+       ON CONFLICT(user_id, day) DO UPDATE SET
+         seconds = listen_daily.seconds + excluded.seconds`,
+    )
+    .run(userId, day, add);
+
+  if (trackId) creditTrackListen(userId, trackId, add);
+}
+
+export function listenTotalMinutes(): number {
+  const row = getDb()
+    .prepare(`SELECT COALESCE(SUM(seconds), 0) as s FROM listen_bucket`)
+    .get() as { s: number };
+  return Math.round((Number(row?.s) || 0) / 60);
+}
+
+export function listenTopListener(): {
+  username: string;
+  minutes: number;
+} | null {
+  const row = getDb()
+    .prepare(
+      `SELECT u.username as username, COALESCE(SUM(l.seconds), 0) as s
+       FROM listen_bucket l
+       JOIN users u ON u.id = l.user_id
+       GROUP BY l.user_id
+       ORDER BY s DESC
+       LIMIT 1`,
+    )
+    .get() as { username: string; s: number } | undefined;
+  if (!row || !row.s) return null;
+  return {
+    username: row.username,
+    minutes: Math.round(Number(row.s) / 60),
+  };
+}
+
+/**
+ * All-time listening: single series of total hours per 3h bucket.
+ * Fills empty buckets from first listen to now.
+ */
+export function listenAllTimeChart(): {
+  buckets: string[];
+  hours: number[];
+} {
+  const bounds = getDb()
+    .prepare(
+      `SELECT MIN(bucket) as minB, MAX(bucket) as maxB FROM listen_bucket`,
+    )
+    .get() as { minB: string | null; maxB: string | null };
+
+  const nowKey = listenBucketKey();
+  if (!bounds?.minB) {
+    return { buckets: [nowKey], hours: [0] };
+  }
+
+  const end = bounds.maxB && bounds.maxB > nowKey ? bounds.maxB : nowKey;
+  const buckets = listBucketsInclusive(bounds.minB, end);
+  const rows = getDb()
+    .prepare(
+      `SELECT bucket, SUM(seconds) as s
+       FROM listen_bucket
+       GROUP BY bucket`,
+    )
+    .all() as { bucket: string; s: number }[];
+  const map = new Map(rows.map((r) => [r.bucket, Number(r.s) || 0]));
+  return {
+    buckets,
+    hours: buckets.map((b) => Math.round(((map.get(b) ?? 0) / 3600) * 100) / 100),
+  };
+}
+
+/**
+ * Per-user multi-line series over last `dayCount` days (3h buckets).
+ */
+export function listenPerUserChart(dayCount = 14): {
+  buckets: string[];
+  series: { userId: string; username: string; hours: number[] }[];
+} {
+  const days = Math.max(1, Math.min(60, Math.floor(dayCount)));
+  const now = new Date();
+  const start = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() - (days - 1),
+      0,
+      0,
+      0,
+      0,
+    ),
+  );
+  const startKey = listenBucketKey(start);
+  const endKey = listenBucketKey();
+  const buckets = listBucketsInclusive(startKey, endKey);
+
+  const users = listPublicProfiles();
+  const rows = getDb()
+    .prepare(
+      `SELECT user_id as userId, bucket, seconds
+       FROM listen_bucket
+       WHERE bucket >= ? AND bucket <= ?`,
+    )
+    .all(startKey, endKey) as {
+    userId: string;
+    bucket: string;
+    seconds: number;
+  }[];
+
+  const byUser = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    let m = byUser.get(r.userId);
+    if (!m) {
+      m = new Map();
+      byUser.set(r.userId, m);
+    }
+    m.set(r.bucket, Number(r.seconds) || 0);
+  }
+
+  const series = users.map((u) => {
+    const m = byUser.get(u.id) ?? new Map<string, number>();
+    return {
+      userId: u.publicId,
+      username: u.username,
+      hours: buckets.map(
+        (b) => Math.round(((m.get(b) ?? 0) / 3600) * 100) / 100,
+      ),
+    };
+  });
+
+  return { buckets, series };
+}
+
+/** Payload for admin Info listening widgets. */
+export function listenDashboard(dayCount = 14) {
+  return {
+    totalMinutes: listenTotalMinutes(),
+    topListener: listenTopListener(),
+    allTime: listenAllTimeChart(),
+    byUser: listenPerUserChart(dayCount),
+  };
+}
+
+/** @deprecated use listenDashboard */
+export function listenHoursChart(dayCount = 14) {
+  const byUser = listenPerUserChart(dayCount);
+  return {
+    days: byUser.buckets,
+    series: byUser.series,
+  };
+}
+
+
+

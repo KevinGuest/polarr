@@ -20,6 +20,48 @@ export function downloadsDir(): string {
   return dir;
 }
 
+/** True when filePath resolves under a Polarr-managed music root. */
+export function isManagedMusicPath(
+  filePath: string,
+  extraRoots: string[] = [],
+): boolean {
+  const abs = path.resolve(filePath);
+  const roots = Array.from(
+    new Set(
+      [musicDir(), downloadsDir(), ...extraRoots]
+        .filter(Boolean)
+        .map((r) => path.resolve(r)),
+    ),
+  );
+  return roots.some((root) => abs === root || abs.startsWith(root + path.sep));
+}
+
+/**
+ * Hard-delete an audio file from disk when it lives under a managed music root.
+ * Returns true if the file was removed (or already gone after a safe path check).
+ */
+export function unlinkManagedAudioFile(
+  filePath: string | null | undefined,
+  extraRoots: string[] = [],
+): boolean {
+  if (!filePath?.trim()) return false;
+  if (!isManagedMusicPath(filePath, extraRoots)) return false;
+  const abs = path.resolve(filePath);
+  try {
+    if (!fs.existsSync(abs)) return true;
+    fs.unlinkSync(abs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function dbPath(): string {
   return path.join(dataDir(), "polarr.db");
+}
+
+export function avatarsDir(): string {
+  const dir = path.join(dataDir(), "avatars");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
 }

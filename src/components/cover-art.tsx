@@ -6,19 +6,19 @@ export function CoverArt({
   className,
 }: {
   seed: string;
-  image?: string;
+  image?: string | null;
   className?: string;
 }) {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  const a = 20 + (h % 40);
-  const b = 40 + ((h >> 3) % 35);
+  const hue = h % 360;
+  const hue2 = (hue + 40 + (h % 50)) % 360;
   if (image) {
     return (
       <div
         className={className}
         style={{
-          backgroundImage: `url(${image})`,
+          backgroundImage: `url(${JSON.stringify(image)})`,
           backgroundSize: "cover",
           backgroundPosition: "center",
         }}
@@ -30,7 +30,7 @@ export function CoverArt({
     <div
       className={className}
       style={{
-        backgroundImage: `linear-gradient(${h % 360}deg, hsl(0 0% ${a}%), hsl(0 0% ${b}%))`,
+        backgroundImage: `linear-gradient(${h % 360}deg, hsl(${hue} 48% 38%), hsl(${hue2} 42% 22%))`,
       }}
       aria-hidden
     />

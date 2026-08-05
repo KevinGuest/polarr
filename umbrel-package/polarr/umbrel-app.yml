@@ -2,13 +2,13 @@ manifestVersion: 1
 id: polarr
 category: media
 name: Polarr
-version: "0.1.0"
+version: "0.2.0"
 tagline: Discover, request, and stream your homeserver music
 description: >-
   Polarr is a self-hosted music hub for umbrelOS. Point it at Lidarr (the same
   way Seerr connects to Sonarr and Radarr), request missing albums, fill gaps
   with an optional Downtify-style fallback downloader, and stream the catalog
-  from the browser or the Polarr iOS companion for offline listening.
+  from the browser.
 
 
   🛠️ SET-UP INSTRUCTIONS
@@ -17,7 +17,7 @@ description: >-
   After install, open Polarr and complete the first-run wizard in your browser.
 
 
-  - Create an admin account for the Polarr UI and mobile clients
+  - Create an admin account for the Polarr UI
 
 
   - Add your Lidarr URL and API key (Umbrel users can try
@@ -27,12 +27,14 @@ description: >-
   - Optionally enable fallback acquisition for titles Lidarr cannot fetch
 
 
-  - Scan your music folder, then connect the iOS app from Mobile → pair URL
+  - Scan your music folder and start listening
 
 
   Polarr does not ship Lidarr itself; install Lidarr from the Umbrel App Store
   first if you want automated *arr-style acquisition.
-releaseNotes: ""
+releaseNotes: >-
+  Web hub refresh: admin media covers, home More from shelves, Lidarr cover
+  proxy, featured-artist credits. iOS companion paused for now.
 developer: Polarr
 website: https://github.com/KevinGuest/polarr
 dependencies:

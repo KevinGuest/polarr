@@ -1,7 +1,7 @@
 import { json } from "@/lib/api";
 import { getSettings, hasUsers } from "@/lib/db";
 import { LidarrClient } from "@/lib/lidarr";
-import { ytDlpAvailable } from "@/lib/fallback-download";
+import { ffmpegAvailable, ytDlpAvailable } from "@/lib/tools";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +33,7 @@ export async function GET() {
     fallback: {
       enabled: settings.fallbackEnabled,
       ytDlp: await ytDlpAvailable(),
+      ffmpeg: await ffmpegAvailable(),
     },
   });
 }

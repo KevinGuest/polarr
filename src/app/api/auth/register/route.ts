@@ -6,7 +6,7 @@ import { authenticate, createAdminUser, hasUsers } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 const schema = z.object({
-  username: z.string().min(2).max(40).trim(),
+  username: z.string().min(1).max(40).trim(),
   password: z.string().min(8).max(128),
   confirmPassword: z.string().min(8).max(128),
 });

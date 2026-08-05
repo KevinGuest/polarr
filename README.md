@@ -1,6 +1,6 @@
 # Polarr — self-hosted music discovery, requests, and streaming
 
-Polarr is a homeserver music hub: point it at [Lidarr](https://github.com/Lidarr/Lidarr) (same pattern as [Seerr](https://docs.seerr.dev/) → Sonarr/Radarr), request missing music, optionally fall back to a [Downtify](https://github.com/henriquesebastiao/downtify)-inspired yt-dlp acquirer, and stream from the web UI or the Expo iOS companion for offline listening.
+Polarr is a homeserver music hub: point it at [Lidarr](https://github.com/Lidarr/Lidarr) (same pattern as [Seerr](https://docs.seerr.dev/) → Sonarr/Radarr), request missing music, optionally fall back to a [Downtify](https://github.com/henriquesebastiao/downtify)-inspired yt-dlp acquirer, and stream from the web UI.
 
 Packaging targets the [Umbrel App Store](https://github.com/getumbrel/umbrel-apps) model: browser first-run, Docker runtime, persisted volumes, no SSH setup.
 
@@ -13,8 +13,7 @@ Packaging targets the [Umbrel App Store](https://github.com/getumbrel/umbrel-app
 | Config / library DB | SQLite (`better-sqlite3`, WAL) — tracks, requests lifecycle, downloads, events |
 | Music manager | Lidarr API |
 | Fallback acquire | yt-dlp + ffmpeg (container includes both) |
-| Mobile | Expo (React Native) under `ios/` |
-| Umbrel host port | **3647** (unused across the official store at scaffold time) |
+| Umbrel host port | **3647** |
 
 ## Local dev
 
@@ -52,7 +51,7 @@ Production images publish from **[polarr-app](https://github.com/KevinGuest/pola
 
 Image build notes (kept fast on purpose):
 
-- Multi-stage + `npm` layer cache; source `COPY` only `src/` + config (not `ios/`)
+- Multi-stage + `npm` layer cache; source `COPY` only `src/` + config
 - Prefer `better-sqlite3` prebuilds (`npm_config_build_from_source=false`)
 - Standalone Next output (small runtime image)
 - Pinned `yt-dlp` release (cacheable layer)
@@ -74,19 +73,9 @@ Before a store PR:
 
 Suggested Umbrel Lidarr URL during setup: `http://lidarr_server_1:8686`
 
-API paths are whitelisted through `app_proxy` (`/api/*`) so the iOS app can authenticate with bearer tokens without Umbrel cookies.
+API paths are whitelisted through `app_proxy` (`/api/*`) for session and bearer auth without Umbrel cookies.
 
-## Mobile companion
-
-```bash
-cd ios
-npm install
-npx expo start
-```
-
-Flow: Connect → server URL (e.g. `http://<umbrel-ip>:3647`) → login → library play/offline download via byte-range `/api/stream/:id`.
-
-## API surface (clients)
+## API surface
 
 - `GET /api/v1/status` — health (no secrets)
 - `POST /api/auth/login` — session token

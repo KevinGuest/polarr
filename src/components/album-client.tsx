@@ -274,6 +274,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         type: "track" as const,
         prefer: "fallback" as const,
       };
+      // One create only — polling must not re-POST (that spammed Requests).
       const res = await fetch("/api/requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -289,17 +290,31 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         void load();
         return;
       }
+
+      const qs = new URLSearchParams();
+      if (title) qs.set("title", title);
+      if (artist) qs.set("artist", artist);
+      if (foreignAlbumId) qs.set("foreignAlbumId", foreignAlbumId);
+      if (lidarrAlbumId) qs.set("lidarrAlbumId", lidarrAlbumId);
+
       for (let i = 0; i < 40; i++) {
         await sleep(1500);
-        const poll = await fetch("/api/requests", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+        const poll = await fetch(`/api/album?${qs.toString()}`, {
+          cache: "no-store",
         });
-        const pj = await poll.json();
-        if (pj.track?.id) {
+        if (!poll.ok) continue;
+        const albumData = await poll.json();
+        const rows = (albumData.tracks || []) as AlbumTrack[];
+        const hit = rows.find(
+          (t) =>
+            t.key === track.key ||
+            (t.title === track.title && (t.localTrackId || t.downloaded)),
+        );
+        if (hit?.localTrackId || hit?.downloaded || hit?.hasFile) {
           setMsg(null);
-          void load();
+          setAlbum(albumData.album);
+          setTracks(rows);
+          setFallbackReady(Boolean(albumData.fallbackReady));
           return;
         }
       }

@@ -1993,10 +1993,12 @@ export function deleteAlbumTracks(artist: string, album: string): number {
 export function hasLibraryMatch(artist: string, albumOrTitle: string): boolean {
   const a = artist.trim().toLowerCase();
   const t = albumOrTitle.trim().toLowerCase();
+  // Must match findTrack filters — stream/live rows must not look like library.
   const row = getDb()
     .prepare(
       `SELECT 1 as ok FROM tracks
        WHERE lower(artist) = ? AND (lower(album) = ? OR lower(title) = ?)
+         AND ${LIBRARY_TRACK_FILTER}
        LIMIT 1`,
     )
     .get(a, t, t) as { ok: number } | undefined;
@@ -2116,6 +2118,18 @@ export function findActiveRequest(normalizedKey: string): RequestRow | null {
   return row ? mapRequest(row) : null;
 }
 
+/** Most recent request for a key (any status) — used to avoid activity spam. */
+export function findLatestRequest(normalizedKey: string): RequestRow | null {
+  const row = getDb()
+    .prepare(
+      `${REQUEST_SELECT}
+       WHERE normalized_key = ?
+       ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(normalizedKey) as Record<string, unknown> | undefined;
+  return row ? mapRequest(row) : null;
+}
+
 export function createRequest(input: {
   title: string;
   artist: string;
@@ -2152,6 +2166,11 @@ export function createRequest(input: {
     mediaType !== "artist" &&
     hasLibraryMatch(input.artist, mediaType === "track" ? input.title : album)
   ) {
+    // Reuse an earlier "available" row — re-POST poll must not spam Requests.
+    const latest = findLatestRequest(key);
+    if (latest?.status === "available") {
+      return latest;
+    }
     const now = nowIso();
     const row: RequestRow = {
       id: newId(),
@@ -2174,10 +2193,10 @@ export function createRequest(input: {
       createdAt: now,
       updatedAt: now,
     };
-  insertRequestRow(row);
-  appendRequestEvent(row.id, "available", "Already present in library");
-  // Already in library — no toast spam
-  return row;
+    insertRequestRow(row);
+    appendRequestEvent(row.id, "available", "Already present in library");
+    // Already in library — no toast spam
+    return row;
   }
 
   const now = nowIso();

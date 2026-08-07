@@ -69,10 +69,10 @@ export function ShelfHeader({
           <Title
             className={
               titleAs === "h1"
-                ? "truncate text-2xl font-bold tracking-tight text-foreground md:text-3xl"
+                ? "truncate text-xl font-semibold tracking-tight text-foreground md:text-2xl"
                 : eyebrow
-                  ? "truncate text-2xl font-bold tracking-tight text-foreground"
-                  : "truncate text-xl font-bold tracking-tight text-foreground"
+                  ? "truncate text-xl font-semibold tracking-tight text-foreground"
+                  : "truncate text-lg font-semibold tracking-tight text-foreground"
             }
           >
             {title}
@@ -184,6 +184,7 @@ export function MediaTileShell({
   ariaLabel,
   badge,
   playButton,
+  coverShape = "square",
 }: {
   cover: ReactNode;
   title: string;
@@ -192,6 +193,8 @@ export function MediaTileShell({
   ariaLabel: string;
   badge?: ReactNode;
   playButton?: ReactNode;
+  /** Artist tiles use circle — avoids square frame around a round face. */
+  coverShape?: "square" | "circle";
 }) {
   return (
     <div className="min-w-0 space-y-2.5">
@@ -199,7 +202,11 @@ export function MediaTileShell({
         <button
           type="button"
           onClick={onOpen}
-          className="relative block aspect-square w-full overflow-hidden rounded-md bg-muted text-left shadow-sm transition-opacity hover:opacity-90"
+          className={
+            coverShape === "circle"
+              ? "relative block aspect-square w-full overflow-hidden rounded-full bg-muted text-left shadow-sm transition-opacity hover:opacity-90"
+              : "relative block aspect-square w-full overflow-hidden rounded-md bg-muted text-left shadow-sm transition-opacity hover:opacity-90"
+          }
           aria-label={ariaLabel}
         >
           <div className="absolute inset-0">{cover}</div>

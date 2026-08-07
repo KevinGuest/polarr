@@ -42,6 +42,9 @@ export function AdminNotificationsClient() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [discordClientId, setDiscordClientId] = useState("");
+  const [discordClientSecret, setDiscordClientSecret] = useState("");
+  const [oauthMsg, setOauthMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,6 +70,8 @@ export function AdminNotificationsClient() {
         ...(settings.notifyDiscordEvents || {}),
       });
       setSmtpReady(Boolean(settings.smtpConfigured));
+      setDiscordClientId(settings.discordClientId || "");
+      setDiscordClientSecret(settings.discordClientSecret || "");
       setLoading(false);
     })();
     return () => {
@@ -168,7 +173,7 @@ export function AdminNotificationsClient() {
   if (forbidden) {
     return (
       <div className="space-y-3">
-        <h1 className="text-3xl font-semibold tracking-tight">Notifications</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Notifications</h1>
         <p className="text-sm text-muted-foreground">
           Admin only. Sign in with an admin account to configure notifications.
         </p>
@@ -186,7 +191,7 @@ export function AdminNotificationsClient() {
     <div className="mx-auto max-w-3xl space-y-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1">
-          <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
+          <h1 className="text-2xl font-semibold tracking-tight">
             {channel === "email" ? "Email" : "Discord"}
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -216,6 +221,69 @@ export function AdminNotificationsClient() {
       ) : (
         <>
           {channel === "discord" ? (
+            <>
+            <Card>
+              <CardHeader>
+                <CardTitle>Discord app (user linking)</CardTitle>
+                <CardDescription>
+                  Create an application at{" "}
+                  <a
+                    href="https://discord.com/developers/applications"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline underline-offset-2"
+                  >
+                    discord.com/developers
+                  </a>
+                  . Add redirect{" "}
+                  <code className="text-xs">
+                    {"{public URL}/api/discord/callback"}
+                  </code>
+                  . Users link Discord in Settings to show listening status.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="discord-client-id">Client ID</Label>
+                  <Input
+                    id="discord-client-id"
+                    value={discordClientId}
+                    onChange={(e) => setDiscordClientId(e.target.value)}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="discord-client-secret">Client secret</Label>
+                  <Input
+                    id="discord-client-secret"
+                    type="password"
+                    value={discordClientSecret}
+                    onChange={(e) => setDiscordClientSecret(e.target.value)}
+                    placeholder="••••••••"
+                    autoComplete="off"
+                  />
+                </div>
+                {oauthMsg ? (
+                  <p className="text-sm text-foreground">{oauthMsg}</p>
+                ) : null}
+                <Button
+                  size="sm"
+                  disabled={saving}
+                  onClick={() => {
+                    setOauthMsg(null);
+                    void persist(
+                      {
+                        discordClientId,
+                        discordClientSecret,
+                      },
+                      { successToast: "Discord app saved" },
+                    ).then(() => setOauthMsg("Saved"));
+                  }}
+                >
+                  Save Discord app
+                </Button>
+              </CardContent>
+            </Card>
             <Card>
               <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
                 <div className="space-y-1.5">
@@ -272,6 +340,7 @@ export function AdminNotificationsClient() {
                 </div>
               </CardContent>
             </Card>
+            </>
           ) : (
             <Card>
               <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">

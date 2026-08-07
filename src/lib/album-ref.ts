@@ -112,11 +112,54 @@ function decodeUtf8(bytes: Uint8Array): string {
  * Encode album identity into a short opaque path segment.
  * Image URLs are intentionally never included.
  *
- * Fallback layout (kind=2):
- *   kind(1) flags(1) titleLen(1) title titleLen artistLen(1) artist [lidarr u32]
+ * Kind 2 layout (preferred when title+artist known):
+ *   kind(1) flags(1) titleLen(1) title artistLen(1) artist
+ *   [lidarr u32 if flags&1] [16-byte MBID if flags&2]
+ * Kind 1 (MBID-only fallback):
+ *   kind(1) uuid(16)
  */
 export function encodeAlbumId(ref: AlbumRef): string {
   const mbid = normalizeUuid(ref.foreignAlbumId);
+  const title = ref.title.trim();
+  const artist = ref.artist.trim();
+
+  // Prefer title+artist so album pages work before the release is in Lidarr.
+  if (title && artist) {
+    const titleBytes = encodeUtf8Truncated(title, 255);
+    const artistBytes = encodeUtf8Truncated(artist, 255);
+    const hasLidarr =
+      ref.lidarrAlbumId != null &&
+      Number.isFinite(ref.lidarrAlbumId) &&
+      ref.lidarrAlbumId > 0;
+    const hasMbid = Boolean(mbid);
+    const flags = (hasLidarr ? 1 : 0) | (hasMbid ? 2 : 0);
+    const lidarrExtra = hasLidarr ? 4 : 0;
+    const mbidExtra = hasMbid ? 16 : 0;
+    const bytes = new Uint8Array(
+      4 + titleBytes.length + artistBytes.length + lidarrExtra + mbidExtra,
+    );
+    let o = 0;
+    bytes[o++] = 2;
+    bytes[o++] = flags;
+    bytes[o++] = titleBytes.length;
+    bytes.set(titleBytes, o);
+    o += titleBytes.length;
+    bytes[o++] = artistBytes.length;
+    bytes.set(artistBytes, o);
+    o += artistBytes.length;
+    if (hasLidarr) {
+      const id = ref.lidarrAlbumId!;
+      bytes[o++] = (id >>> 24) & 0xff;
+      bytes[o++] = (id >>> 16) & 0xff;
+      bytes[o++] = (id >>> 8) & 0xff;
+      bytes[o++] = id & 0xff;
+    }
+    if (hasMbid && mbid) {
+      bytes.set(uuidToBytes(mbid), o);
+    }
+    return base62Encode(bytes);
+  }
+
   if (mbid) {
     const bytes = new Uint8Array(17);
     bytes[0] = 1;
@@ -124,35 +167,7 @@ export function encodeAlbumId(ref: AlbumRef): string {
     return base62Encode(bytes);
   }
 
-  // Length fields are 1 byte — truncate by UTF-8 bytes, not characters.
-  const titleBytes = encodeUtf8Truncated(ref.title.trim(), 255);
-  const artistBytes = encodeUtf8Truncated(ref.artist.trim(), 255);
-  const hasLidarr =
-    ref.lidarrAlbumId != null &&
-    Number.isFinite(ref.lidarrAlbumId) &&
-    ref.lidarrAlbumId > 0;
-  const flags = hasLidarr ? 1 : 0;
-  const lidarrExtra = hasLidarr ? 4 : 0;
-  const bytes = new Uint8Array(
-    4 + titleBytes.length + artistBytes.length + lidarrExtra,
-  );
-  let o = 0;
-  bytes[o++] = 2;
-  bytes[o++] = flags;
-  bytes[o++] = titleBytes.length;
-  bytes.set(titleBytes, o);
-  o += titleBytes.length;
-  bytes[o++] = artistBytes.length;
-  bytes.set(artistBytes, o);
-  o += artistBytes.length;
-  if (hasLidarr) {
-    const id = ref.lidarrAlbumId!;
-    bytes[o++] = (id >>> 24) & 0xff;
-    bytes[o++] = (id >>> 16) & 0xff;
-    bytes[o++] = (id >>> 8) & 0xff;
-    bytes[o++] = id & 0xff;
-  }
-  return base62Encode(bytes);
+  return base62Encode(new Uint8Array([2, 0, 0, 0]));
 }
 
 /** Decode an opaque album path id. Returns null if invalid. */
@@ -191,9 +206,15 @@ export function decodeAlbumId(id: string): AlbumRef | null {
           (bytes[o + 2] << 8) |
           bytes[o + 3]) >>>
         0;
+      o += 4;
+    }
+    let foreignAlbumId: string | undefined;
+    if ((flags & 2) === 2) {
+      if (o + 16 > bytes.length) return null;
+      foreignAlbumId = bytesToUuid(bytes.subarray(o, o + 16));
     }
     if (!title || !artist) return null;
-    return { title, artist, lidarrAlbumId };
+    return { title, artist, lidarrAlbumId, foreignAlbumId };
   }
 
   return null;

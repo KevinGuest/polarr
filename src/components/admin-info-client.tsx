@@ -6,6 +6,9 @@ import {
   ListenHoursChart,
   type ListenDashboard,
 } from "@/components/listen-hours-chart";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type Snapshot = {
   version: string;
@@ -46,28 +49,60 @@ function formatMinutes(mins: number) {
 export function AdminInfoClient() {
   const [data, setData] = useState<Snapshot | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const [serverName, setServerName] = useState("Polarr");
+  const [publicUrl, setPublicUrl] = useState("");
+  const [serverMsg, setServerMsg] = useState<string | null>(null);
+  const [savingServer, setSavingServer] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const res = await fetch("/api/admin/stats");
+      const [statsRes, settingsRes] = await Promise.all([
+        fetch("/api/admin/stats"),
+        fetch("/api/settings"),
+      ]);
       if (cancelled) return;
-      if (res.status === 403 || res.status === 401) {
+      if (statsRes.status === 403 || statsRes.status === 401) {
         setForbidden(true);
         return;
       }
-      const json = await res.json();
+      const json = await statsRes.json();
       setData(json);
+      if (settingsRes.ok) {
+        const settings = await settingsRes.json();
+        setServerName(settings.serverName || "Polarr");
+        setPublicUrl(settings.publicUrl || "");
+      }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
 
+  async function saveServer() {
+    setSavingServer(true);
+    setServerMsg(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverName, publicUrl }),
+      });
+      const json = await res.json().catch(() => ({}));
+      setServerMsg(res.ok ? "Saved" : json.error || "Save failed");
+      if (res.ok && json.settings) {
+        setServerName(json.settings.serverName || serverName);
+        setPublicUrl(json.settings.publicUrl || publicUrl);
+      }
+    } finally {
+      setSavingServer(false);
+    }
+  }
+
   if (forbidden) {
     return (
       <div className="space-y-3">
-        <h1 className="text-3xl font-semibold tracking-tight">Info</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Info</h1>
         <p className="text-sm text-muted-foreground">
           Admin only. Sign in with an admin account to view server stats.
         </p>
@@ -84,13 +119,48 @@ export function AdminInfoClient() {
   return (
     <div className="mx-auto max-w-3xl space-y-10">
       <div className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
+        <h1 className="text-2xl font-semibold tracking-tight">
           Info
         </h1>
         <p className="text-sm text-muted-foreground">
           Overview of this Polarr homeserver.
         </p>
       </div>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">
+          Homeserver
+        </h2>
+        <div className="space-y-4 rounded-xl border border-border px-4 py-4">
+          <div className="space-y-2">
+            <Label htmlFor="server-name">Server name</Label>
+            <Input
+              id="server-name"
+              value={serverName}
+              onChange={(e) => setServerName(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="public-url">Public URL (for mobile clients)</Label>
+            <Input
+              id="public-url"
+              value={publicUrl}
+              onChange={(e) => setPublicUrl(e.target.value)}
+              placeholder="http://localhost:3000"
+            />
+          </div>
+          {serverMsg ? (
+            <p className="text-sm text-foreground">{serverMsg}</p>
+          ) : null}
+          <Button
+            type="button"
+            disabled={savingServer}
+            onClick={() => void saveServer()}
+          >
+            {savingServer ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </section>
 
       {!data ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
@@ -212,6 +282,17 @@ export function AdminInfoClient() {
                   Lidarr
                 </div>
                 <div className="mt-2 text-sm font-semibold">{data.lidarr}</div>
+              </Link>
+              <Link
+                href="/admin/import"
+                className="rounded-xl border border-border px-4 py-4 transition-colors hover:border-foreground/30"
+              >
+                <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                  Import
+                </div>
+                <div className="mt-2 text-sm font-semibold">
+                  Spotify playlists
+                </div>
               </Link>
               <Link
                 href="/admin/email"

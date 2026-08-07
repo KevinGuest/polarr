@@ -20,6 +20,8 @@ type NotifItem = {
   message: string;
   href: string | null;
   imageSeed: string | null;
+  image: string | null;
+  mediaType: string | null;
   createdAt: string;
   readAt: string | null;
   unread: boolean;
@@ -40,18 +42,33 @@ function relativeTime(iso: string): string {
   });
 }
 
-function CoverRing({ seed, unread }: { seed: string; unread: boolean }) {
+function CoverRing({
+  seed,
+  image,
+  unread,
+  round,
+}: {
+  seed: string;
+  image?: string | null;
+  unread: boolean;
+  round?: boolean;
+}) {
   return (
     <span
       className={cn(
-        "relative flex size-11 shrink-0 items-center justify-center rounded-md p-[2px]",
+        "relative flex size-11 shrink-0 items-center justify-center p-[2px]",
+        round ? "rounded-full" : "rounded-md",
         unread
           ? "bg-[linear-gradient(135deg,#f09433_0%,#e6683c_25%,#dc2743_50%,#cc2366_75%,#bc1888_100%)]"
           : "bg-transparent",
       )}
       aria-hidden
     >
-      <CoverArt seed={seed} className="size-full rounded-[5px]" />
+      <CoverArt
+        seed={seed}
+        image={image}
+        className={cn("size-full", round ? "rounded-full" : "rounded-[5px]")}
+      />
     </span>
   );
 }
@@ -171,7 +188,9 @@ export function NotificationsBell({
                 >
                   <CoverRing
                     seed={n.imageSeed || n.actorLabel || n.message}
+                    image={n.image}
                     unread={n.unread}
+                    round={n.mediaType === "artist"}
                   />
                   <div className="min-w-0 flex-1 pt-0.5">
                     <p className="text-sm leading-snug text-foreground">

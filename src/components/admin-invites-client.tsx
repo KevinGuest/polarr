@@ -135,7 +135,7 @@ export function AdminInvitesClient() {
   if (forbidden) {
     return (
       <div className="space-y-3">
-        <h1 className="text-3xl font-semibold tracking-tight">Invites</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Invites</h1>
         <p className="text-sm text-muted-foreground">
           Admin only. Sign in with an admin account to manage invites.
         </p>
@@ -150,7 +150,7 @@ export function AdminInvitesClient() {
     <div className="mx-auto max-w-3xl space-y-10">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="space-y-2">
-          <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
+          <h1 className="text-2xl font-semibold tracking-tight">
             Invites
           </h1>
           <p className="text-sm text-muted-foreground">

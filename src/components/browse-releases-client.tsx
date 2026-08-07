@@ -52,7 +52,18 @@ export function BrowseReleasesClient() {
     try {
       const res = await fetch("/api/discover");
       const data = await res.json();
-      setReleases(data.releases || []);
+      const catalog = Array.isArray(data.catalog) ? data.catalog : [];
+      const latest = Array.isArray(data.releases) ? data.releases : [];
+      const library = Array.isArray(data.library) ? data.library : [];
+      const seen = new Set<string>();
+      const merged: Release[] = [];
+      for (const r of [...catalog, ...latest, ...library]) {
+        const key = (r.foreignAlbumId || r.id || "").toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        merged.push(r);
+      }
+      setReleases(merged);
       setError(data.lidarrError || null);
     } finally {
       setLoading(false);
@@ -74,7 +85,7 @@ export function BrowseReleasesClient() {
           <ArrowLeft className="size-4" />
         </Link>
         <div className="min-w-0 flex-1">
-          <ShelfHeader title="Latest releases" titleAs="h1" />
+          <ShelfHeader title="Browse music" titleAs="h1" />
         </div>
       </div>
 
@@ -96,7 +107,9 @@ export function BrowseReleasesClient() {
           ))}
         </div>
       ) : releases.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No recent albums.</p>
+        <p className="text-sm text-muted-foreground">
+          No albums yet. Connect Lidarr or wait for MusicBrainz catalog.
+        </p>
       ) : (
         <MediaShelfGrid>
           {releases.map((r) => {

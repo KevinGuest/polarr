@@ -131,6 +131,11 @@ function albumTileFromLocal(
   };
 }
 
+function isSingleOrEpType(albumType?: string): boolean {
+  const t = (albumType || "").trim().toLowerCase();
+  return t === "single" || t === "ep";
+}
+
 function albumTileFromLidarr(
   album: LidarrAlbum,
   artistName: string,
@@ -138,19 +143,30 @@ function albumTileFromLidarr(
   const title = (album.title || "").trim();
   if (!title) return null;
   const image = coverFrom(album.images) || null;
+  const rawId = album.id;
+  const lidarrAlbumId =
+    typeof rawId === "number" && rawId > 0 ? rawId : undefined;
+  const singleish = isSingleOrEpType(album.albumType);
   return {
     kind: "album",
-    id: `lidarr-album-${album.id ?? album.foreignAlbumId ?? artistKey(title)}`,
+    id: `lidarr-album-${lidarrAlbumId ?? album.foreignAlbumId ?? artistKey(title)}`,
     title,
-    subtitle: artistName,
+    subtitle: singleish
+      ? album.albumType?.trim() || "Single"
+      : artistName,
     artist: artistName,
     album: title,
     image,
     trackCount: album.statistics?.totalTrackCount || 0,
     foreignAlbumId: album.foreignAlbumId,
-    lidarrAlbumId: album.id,
+    lidarrAlbumId,
     releaseDate: album.releaseDate,
   };
+}
+
+/** True when Lidarr albumType is Single or EP (openable release, not LP). */
+export function lidarrReleaseIsSingle(album: LidarrAlbum): boolean {
+  return isSingleOrEpType(album.albumType);
 }
 
 export function buildArtistCatalog(
@@ -205,21 +221,39 @@ export function buildArtistCatalog(
     localAlbums.push(albumTileFromLocal(sample, group, title));
   }
 
-  const lidarrAlbumTiles = (opts?.lidarrAlbums || [])
-    .map((a) => albumTileFromLidarr(a, name))
-    .filter((t): t is CatalogTile => Boolean(t));
+  const lidarrLPs: CatalogTile[] = [];
+  const lidarrSingles: CatalogTile[] = [];
+  for (const raw of opts?.lidarrAlbums || []) {
+    const tile = albumTileFromLidarr(raw, name);
+    if (!tile) continue;
+    if (lidarrReleaseIsSingle(raw)) lidarrSingles.push(tile);
+    else lidarrLPs.push(tile);
+  }
 
   // Prefer Lidarr album cards (covers + foreign ids); fill gaps from local
   const albumKeys = new Set(
-    lidarrAlbumTiles.map((a) => artistKey(a.kind === "album" ? a.album : a.title)),
+    [...lidarrLPs, ...lidarrSingles].map((a) =>
+      artistKey(a.kind === "album" ? a.album : a.title),
+    ),
   );
   const albums = [
-    ...lidarrAlbumTiles,
+    ...lidarrLPs,
     ...localAlbums.filter((a) => {
       if (a.kind !== "album") return false;
       return !albumKeys.has(artistKey(a.album));
     }),
   ];
+
+  // Drop local single tiles that duplicate a Lidarr single/EP release title
+  const singleReleaseKeys = new Set(
+    lidarrSingles.map((a) =>
+      artistKey(a.kind === "album" ? a.album : a.title),
+    ),
+  );
+  const localSingles = singles.filter(
+    (s) => !singleReleaseKeys.has(artistKey(s.title)) &&
+      !singleReleaseKeys.has(artistKey(s.album || "")),
+  );
 
   albums.sort((a, b) => {
     const da = a.kind === "album" ? a.releaseDate || "" : "";
@@ -227,7 +261,14 @@ export function buildArtistCatalog(
     if (da || db) return db.localeCompare(da);
     return a.title.localeCompare(b.title);
   });
-  singles.sort((a, b) => a.title.localeCompare(b.title));
+  lidarrSingles.sort((a, b) => {
+    const da = a.kind === "album" ? a.releaseDate || "" : "";
+    const db = b.kind === "album" ? b.releaseDate || "" : "";
+    if (da || db) return db.localeCompare(da);
+    return a.title.localeCompare(b.title);
+  });
+  localSingles.sort((a, b) => a.title.localeCompare(b.title));
+  const singlesOut = [...lidarrSingles, ...localSingles];
 
   const features: CatalogTile[] = featuresRaw.map((t) => ({
     kind: "feature" as const,
@@ -245,18 +286,18 @@ export function buildArtistCatalog(
   const image =
     opts?.artistImage ||
     albums.find((a) => a.image)?.image ||
-    singles.find((s) => s.image)?.image ||
+    singlesOut.find((s) => s.image)?.image ||
     features.find((f) => f.image)?.image ||
     own[0]?.coverPath ||
     null;
 
-  const tiles = [...albums, ...singles, ...features];
+  const tiles = [...albums, ...singlesOut, ...features];
 
   return {
     artist: name,
     image,
     albums,
-    singles,
+    singles: singlesOut,
     features,
     tiles,
     tracks: own,

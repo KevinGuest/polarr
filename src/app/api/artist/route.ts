@@ -1,7 +1,9 @@
 import { json } from "@/lib/api";
 import { buildArtistCatalog } from "@/lib/artist-catalog";
+import { resolveArtistPortrait } from "@/lib/artist-portrait";
 import {
   artistCoverKey,
+  coverFrom,
   getArtistCoverMap,
   LidarrClient,
   resolveTrackCover,
@@ -11,39 +13,149 @@ import { formatTrackArtistLine } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
+function artistMatches(
+  album: LidarrAlbum,
+  key: string,
+  foreignArtistId?: string,
+): boolean {
+  if (
+    foreignArtistId &&
+    album.artist?.foreignArtistId &&
+    album.artist.foreignArtistId === foreignArtistId
+  ) {
+    return true;
+  }
+  const name = (album.artist?.artistName || "").trim().toLowerCase();
+  if (!name) return false;
+  return name === key || name.includes(key) || key.includes(name);
+}
+
+/** Browse-only discography: Lidarr album lookup, never request/monitor. */
+async function lookupDiscography(
+  client: LidarrClient,
+  artist: string,
+  foreignArtistId?: string,
+): Promise<LidarrAlbum[]> {
+  const term = foreignArtistId
+    ? `lidarr:${foreignArtistId}`
+    : artist;
+  let hits = await client.searchAlbums(term).catch(() => [] as LidarrAlbum[]);
+  if (hits.length === 0 && foreignArtistId) {
+    hits = await client.searchAlbums(artist).catch(() => [] as LidarrAlbum[]);
+  }
+  const key = artist.trim().toLowerCase();
+  const filtered = hits.filter((a) =>
+    artistMatches(a, key, foreignArtistId),
+  );
+  // Dedup by foreign id / title
+  const seen = new Set<string>();
+  const out: LidarrAlbum[] = [];
+  for (const a of filtered.length ? filtered : hits) {
+    const id =
+      (a.foreignAlbumId || "").toLowerCase() ||
+      `${(a.artist?.artistName || "").toLowerCase()}::${(a.title || "").toLowerCase()}`;
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(a);
+  }
+  return out;
+}
+
 export async function GET(req: Request) {
-  const artist = (new URL(req.url).searchParams.get("name") || "").trim();
+  const url = new URL(req.url);
+  const artist = (url.searchParams.get("name") || "").trim();
+  const foreignFromQuery = (
+    url.searchParams.get("foreignArtistId") || ""
+  ).trim();
+  const imageHint = (url.searchParams.get("image") || "").trim();
   if (!artist) return json({ error: "name required" }, { status: 400 });
 
   const key = artist.trim().toLowerCase();
   const client = LidarrClient.fromSettings();
   let lidarrAlbums: LidarrAlbum[] = [];
-  let foreignArtistId: string | undefined;
+  let foreignArtistId: string | undefined = foreignFromQuery || undefined;
 
   if (client) {
     const [albums, artists] = await Promise.all([
       client.listAlbums().catch(() => [] as LidarrAlbum[]),
       client.listArtists().catch(() => []),
     ]);
-    const match = artists.find(
-      (a) => (a.artistName || "").trim().toLowerCase() === key,
-    );
-    foreignArtistId = match?.foreignArtistId;
+    const match = artists.find((a) => {
+      if (
+        foreignArtistId &&
+        a.foreignArtistId &&
+        a.foreignArtistId === foreignArtistId
+      ) {
+        return true;
+      }
+      return (a.artistName || "").trim().toLowerCase() === key;
+    });
+    if (!foreignArtistId) foreignArtistId = match?.foreignArtistId;
     const artistId = match?.id;
-    lidarrAlbums = albums.filter((a) => {
+    const libraryAlbums = albums.filter((a) => {
       const name = (a.artist?.artistName || "").trim().toLowerCase();
       if (name === key) return true;
       return artistId != null && a.artistId === artistId;
     });
+
+    // Always browse full discography via lookup; never request/monitor.
+    const lookedUp = await lookupDiscography(
+      client,
+      artist,
+      foreignArtistId,
+    );
+    const byKey = new Map<string, LidarrAlbum>();
+    for (const a of lookedUp) {
+      const id =
+        (a.foreignAlbumId || "").toLowerCase() ||
+        `${(a.title || "").toLowerCase()}`;
+      if (id) byKey.set(id, a);
+    }
+    for (const a of libraryAlbums) {
+      const id =
+        (a.foreignAlbumId || "").toLowerCase() ||
+        `${(a.title || "").toLowerCase()}`;
+      if (id) byKey.set(id, a); // library wins (real ids, stats)
+    }
+    lidarrAlbums = [...byKey.values()];
+
+    // Prefer canonical MBID from artist lookup when missing
+    if (!match && !foreignArtistId) {
+      const artistHits = await client
+        .searchArtists(artist)
+        .catch(() => []);
+      const best =
+        artistHits.find(
+          (a) => (a.artistName || "").trim().toLowerCase() === key,
+        ) || artistHits[0];
+      if (best?.foreignArtistId) foreignArtistId = best.foreignArtistId;
+    }
   }
 
   const artistCovers = await getArtistCoverMap();
-  const artistImage =
+  // Prefer Deezer (fresher) over Lidarr MediaCover posters
+  const fresh = await resolveArtistPortrait({
+    artist,
+    foreignArtistId,
+  }).catch(() => null);
+  let artistImage =
+    fresh ||
+    imageHint ||
     (foreignArtistId
       ? artistCovers.get(`mbid:${foreignArtistId}`)
       : null) ||
     artistCovers.get(artistCoverKey(artist)) ||
     null;
+
+  if (!artistImage && client && foreignArtistId) {
+    const artistHits = await client
+      .searchArtists(`lidarr:${foreignArtistId}`)
+      .catch(() => []);
+    const hit =
+      artistHits.find((a) => a.foreignArtistId === foreignArtistId) ||
+      artistHits[0];
+    artistImage = coverFrom(hit?.images) || artistImage;
+  }
 
   const catalog = buildArtistCatalog(artist, {
     lidarrAlbums,
@@ -109,6 +221,7 @@ export async function GET(req: Request) {
 
   return json({
     artist,
+    foreignArtistId: foreignArtistId || null,
     image:
       (catalog.image &&
       (/^https?:\/\//i.test(catalog.image) ||
@@ -120,7 +233,10 @@ export async function GET(req: Request) {
       const match = tiles.find((t) => t.id === tile.id);
       return match || tile;
     }),
-    singles: catalog.singles,
+    singles: catalog.singles.map((tile) => {
+      const match = tiles.find((t) => t.id === tile.id);
+      return match || tile;
+    }),
     features: catalog.features,
     tiles,
     tracks: catalog.tracks.map((t) => ({

@@ -13,6 +13,14 @@ import { usePathname } from "next/navigation";
 import { formatDuration, titleLooksExplicit } from "@/lib/utils";
 import { emitListenCredited } from "@/lib/ui-events";
 
+export type KaraokeUiStatus =
+  | "idle"
+  | "ready"
+  | "processing"
+  | "queued"
+  | "unavailable"
+  | "error";
+
 export type PlayerTrack = {
   id: string;
   title: string;
@@ -30,6 +38,55 @@ function withExplicit(track: PlayerTrack): PlayerTrack {
   return titleLooksExplicit(track.title)
     ? { ...track, explicit: true }
     : track;
+}
+
+function shuffleTracks(items: PlayerTrack[]): PlayerTrack[] {
+  const a = items.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = a[i]!;
+    a[i] = a[j]!;
+    a[j] = tmp;
+  }
+  return a;
+}
+
+/** Cached Discord presence prefs (invalidated ~60s). */
+let discordPresenceCache: {
+  at: number;
+  presenceOn: boolean;
+  appId: string | null;
+} = { at: 0, presenceOn: false, appId: null };
+
+/** Call after Settings toggles Discord presence so the player picks it up. */
+export function invalidateDiscordPresenceCache() {
+  discordPresenceCache.at = 0;
+}
+
+async function fetchLikedPlayerTracks(): Promise<PlayerTrack[]> {
+  try {
+    const res = await fetch("/api/likes", { cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const list = Array.isArray(data.tracks) ? data.tracks : [];
+    return list.map((t: {
+      id: string;
+      title: string;
+      artist: string;
+      album?: string;
+      coverPath?: string | null;
+    }) =>
+      withExplicit({
+        id: t.id,
+        title: t.title,
+        artist: t.artist,
+        album: t.album || "",
+        coverPath: t.coverPath,
+      }),
+    );
+  } catch {
+    return [];
+  }
 }
 
 export type PlayerPanelId = "lyrics" | "devices" | "nowPlaying" | "queue";
@@ -63,6 +120,16 @@ type PlayerContextValue = {
   progress: number;
   duration: number;
   volume: number;
+  /**
+   * Karaoke mix: 1 = full original, 0 = full Demucs instrumental.
+   * Requires a prepared stem (see karaokeStatus).
+   */
+  vocalLevel: number;
+  /** Instrumental stem pipeline for the current library track. */
+  karaokeStatus: KaraokeUiStatus;
+  karaokeProgress: number;
+  karaokeError: string | null;
+  shuffle: boolean;
   /** True when any overlay is open (legacy convenience). */
   panel: PlayerPanel;
   isPanelOpen: (id: PlayerPanelId) => boolean;
@@ -72,6 +139,8 @@ type PlayerContextValue = {
   next: () => void;
   prev: () => void;
   setVolume: (v: number) => void;
+  setVocalLevel: (v: number) => void;
+  toggleShuffle: () => void;
   addToQueue: (track: PlayerTrack) => void;
   removeFromQueue: (trackId: string) => void;
   playQueueIndex: (index: number) => void;
@@ -98,6 +167,7 @@ type SyncPayload = {
   progress: number;
   duration: number;
   volume: number;
+  shuffle?: boolean;
   ownerId: string;
   updatedAt: number;
 };
@@ -111,10 +181,120 @@ function audioSrcFor(track: PlayerTrack): string {
   return `/api/stream/${track.id}`;
 }
 
-/** Resolve stream/catalog tracks to a playable URL (library or live). */
+/** Browser throws this when play() is raced by pause/src change — not a real failure. */
+function isBenignPlayError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const name = "name" in err ? String((err as { name: unknown }).name) : "";
+  const msg = "message" in err ? String((err as { message: unknown }).message) : "";
+  return (
+    name === "AbortError" ||
+    name === "NotAllowedError" ||
+    /interrupted by a (new load request|call to pause)/i.test(msg)
+  );
+}
+
+/**
+ * play() that never rejects. AbortError / NotAllowedError → false.
+ * Stops Next/React overlay noise from rapid track changes.
+ */
+function safePlay(audio: HTMLAudioElement): Promise<boolean> {
+  try {
+    const p = audio.play();
+    if (p === undefined) return Promise.resolve(true);
+    return p.then(() => true).catch((err: unknown) => {
+      if (isBenignPlayError(err)) return false;
+      console.warn("[player] play() failed", err);
+      return false;
+    });
+  } catch (err) {
+    if (isBenignPlayError(err)) return Promise.resolve(false);
+    console.warn("[player] play() failed", err);
+    return Promise.resolve(false);
+  }
+}
+
+/** Apply a new media URL; no-op if the element already has it. */
+function setAudioSrc(audio: HTMLAudioElement, src: string) {
+  const abs = new URL(src, window.location.origin).href;
+  if (audio.src === abs) return false;
+  audio.pause();
+  audio.src = src;
+  // Force the element to abandon any in-flight fetch/play cleanly.
+  try {
+    audio.load();
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+/** Wait until the element can start playback. Timeout / error → false. */
+function waitForCanPlay(
+  audio: HTMLAudioElement,
+  isCurrent: () => boolean,
+  timeoutMs = 12_000,
+): Promise<boolean> {
+  if (!isCurrent()) return Promise.resolve(false);
+  if (audio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      audio.removeEventListener("canplay", onReady);
+      audio.removeEventListener("loadeddata", onReady);
+      audio.removeEventListener("error", onErr);
+      window.clearTimeout(timer);
+      resolve(ok && isCurrent());
+    };
+    const onReady = () => {
+      if (audio.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        finish(true);
+      }
+    };
+    const onErr = () => finish(false);
+    // Never treat timeout as success — that muted the mix with a silent inst bus
+    const timer = window.setTimeout(() => finish(false), timeoutMs);
+    audio.addEventListener("canplay", onReady);
+    audio.addEventListener("loadeddata", onReady);
+    audio.addEventListener("error", onErr, { once: true });
+  });
+}
+
+function audioLooksPlayable(el: HTMLAudioElement | null | undefined): boolean {
+  if (!el?.src) return false;
+  if (el.error) return false;
+  if (!(el.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA)) return false;
+  if (!Number.isFinite(el.duration) || el.duration <= 0) return false;
+  return true;
+}
+
+/** Live / catalog / stream ids may need resolve before play. */
+function isEphemeralTrack(track: PlayerTrack): boolean {
+  if (
+    track.id.startsWith("live:") ||
+    track.id.startsWith("stream:") ||
+    track.id.startsWith("catalog:")
+  ) {
+    return true;
+  }
+  return Boolean(track.streamUrl && /\/api\/live\//i.test(track.streamUrl));
+}
+
+/**
+ * Resolve stream/catalog/live tracks to a playable URL.
+ * Always re-POST /api/live for ephemeral ids — in-memory sessions die on
+ * refresh/restart (410 Gone). Server dedupes by artist|title so this is cheap
+ * when the session is still alive.
+ */
 async function resolveIfNeeded(track: PlayerTrack): Promise<PlayerTrack> {
-  if (track.streamUrl) return track;
-  if (!track.id.startsWith("stream:") && !track.id.startsWith("catalog:")) {
+  if (!isEphemeralTrack(track)) {
+    // Drop a stale live proxy URL stuck on a library track.
+    if (track.streamUrl && /\/api\/live\//i.test(track.streamUrl)) {
+      return { ...track, streamUrl: null };
+    }
     return track;
   }
   try {
@@ -175,13 +355,28 @@ function writeStored(payload: SyncPayload) {
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  /** Demucs instrumental bus (full-quality stereo stem). */
+  const instAudioRef = useRef<HTMLAudioElement | null>(null);
+  const instReadyRef = useRef(false);
   const queueRef = useRef<PlayerTrack[]>([]);
+  /** Queue snapshot before first “add/drop replaces upcoming” — restored if liked empty. */
+  const fallbackQueueRef = useRef<PlayerTrack[] | null>(null);
   const trackRef = useRef<PlayerTrack | null>(null);
   const playingRef = useRef(false);
   const progressRef = useRef(0);
   const durationRef = useRef(0);
   const volumeRef = useRef(0.8);
+  const vocalLevelRef = useRef(1);
+  const attachAudioListenersRef = useRef<(el: HTMLAudioElement) => void>(
+    () => {},
+  );
+  const detachAudioListenersRef = useRef<(el: HTMLAudioElement) => void>(
+    () => {},
+  );
+  const shuffleRef = useRef(false);
   const ownerIdRef = useRef<string | null>(null);
+  /** Bumps on each play request so stale play()/resolve races are ignored. */
+  const playGenRef = useRef(0);
   const tabIdRef = useRef(
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
@@ -197,6 +392,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(0.8);
+  const [vocalLevel, setVocalLevelState] = useState(1);
+  const [karaokeStatus, setKaraokeStatus] = useState<KaraokeUiStatus>("idle");
+  const [karaokeProgress, setKaraokeProgress] = useState(0);
+  const [karaokeError, setKaraokeError] = useState<string | null>(null);
+  const [shuffle, setShuffle] = useState(false);
   const [openPanels, setOpenPanelsState] = useState<OpenPanels>(DEFAULT_PANELS);
   const setOpenPanels = useCallback(
     (update: OpenPanels | ((prev: OpenPanels) => OpenPanels)) => {
@@ -245,6 +445,94 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     volumeRef.current = volume;
   }, [volume]);
 
+  useEffect(() => {
+    vocalLevelRef.current = vocalLevel;
+  }, [vocalLevel]);
+
+  /** Equal-power crossfade — never mute the original until instrumental is actually live. */
+  const applyMixVolumes = useCallback(() => {
+    const mix = audioRef.current;
+    const inst = instAudioRef.current;
+    if (!mix) return;
+    const vol = volumeRef.current;
+    const level = vocalLevelRef.current;
+
+    // Full original while stem isn't confirmed playing
+    const instUsable =
+      instReadyRef.current &&
+      audioLooksPlayable(inst) &&
+      // When user wants any instrumental mix, require inst to be running
+      (level > 0.995 || (!inst!.paused && !inst!.ended));
+
+    if (!instUsable) {
+      mix.volume = vol;
+      if (inst) inst.volume = 0;
+      return;
+    }
+
+    const theta = (1 - level) * 0.5 * Math.PI;
+    mix.volume = vol * Math.cos(theta);
+    inst!.volume = vol * Math.sin(theta);
+  }, []);
+
+  /** Start instrumental bus; returns true only if playback actually started. */
+  const ensureInstPlaying = useCallback(async (): Promise<boolean> => {
+    const mix = audioRef.current;
+    const inst = instAudioRef.current;
+    if (!mix || !inst || !instReadyRef.current || !audioLooksPlayable(inst)) {
+      return false;
+    }
+    try {
+      if (Math.abs(inst.currentTime - mix.currentTime) > 0.15) {
+        inst.currentTime = mix.currentTime;
+      }
+    } catch {
+      /* ignore seek failures */
+    }
+    if (inst.paused || inst.ended) {
+      const ok = await safePlay(inst);
+      if (!ok || inst.paused) return false;
+    }
+    return true;
+  }, []);
+
+  const syncInstToMix = useCallback(() => {
+    const mix = audioRef.current;
+    const inst = instAudioRef.current;
+    if (!mix || !inst || !instReadyRef.current || !inst.src) return;
+    try {
+      if (Math.abs(inst.currentTime - mix.currentTime) > 0.1) {
+        inst.currentTime = mix.currentTime;
+      }
+    } catch {
+      /* not ready */
+    }
+  }, []);
+
+  const playBoth = useCallback(async () => {
+    const mix = audioRef.current;
+    if (!mix) return false;
+    const ok = await safePlay(mix);
+    if (ok && instReadyRef.current && vocalLevelRef.current < 0.999) {
+      const instOk = await ensureInstPlaying();
+      if (!instOk) {
+        // Keep listening to original at full volume
+        instReadyRef.current = false;
+      }
+    }
+    applyMixVolumes();
+    return ok;
+  }, [applyMixVolumes, ensureInstPlaying]);
+
+  const pauseBoth = useCallback(() => {
+    audioRef.current?.pause();
+    instAudioRef.current?.pause();
+  }, []);
+
+  useEffect(() => {
+    shuffleRef.current = shuffle;
+  }, [shuffle]);
+
   const isOwner = useCallback(
     () => ownerIdRef.current === tabIdRef.current,
     [],
@@ -259,6 +547,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       progress: audioRef.current?.currentTime ?? progressRef.current,
       duration: durationRef.current,
       volume: volumeRef.current,
+      shuffle: shuffleRef.current,
       ownerId: ownerIdRef.current ?? tabIdRef.current,
       updatedAt: Date.now(),
       ...partial,
@@ -272,10 +561,57 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   publishRef.current = publish;
 
+  const resolveAdvanceTarget = useCallback(
+    async (current: PlayerTrack): Promise<PlayerTrack | null> => {
+      const q = queueRef.current;
+      const idx = q.findIndex((t) => t.id === current.id);
+      const queued = idx >= 0 ? q[idx + 1] : undefined;
+      if (queued) return queued;
+
+      // Empty upcoming — Liked Songs only when shuffle is on
+      if (!shuffleRef.current) {
+        return null;
+      }
+
+      const liked = await fetchLikedPlayerTracks();
+      const rest = shuffleTracks(liked.filter((t) => t.id !== current.id));
+      if (rest.length > 0) {
+        const nextQ = [current, ...rest];
+        queueRef.current = nextQ;
+        setQueue(nextQ);
+        publishRef.current({
+          queue: nextQ,
+          ownerId: tabIdRef.current,
+        });
+        return rest[0]!;
+      }
+
+      // No likes — restore pre-replace queue, then stop
+      const original = fallbackQueueRef.current;
+      if (original?.length) {
+        fallbackQueueRef.current = null;
+        queueRef.current = original;
+        setQueue(original);
+        publishRef.current({
+          queue: original,
+          ownerId: tabIdRef.current,
+        });
+      }
+      return null;
+    },
+    [],
+  );
+
+  const advanceTargetRef = useRef(resolveAdvanceTarget);
+  advanceTargetRef.current = resolveAdvanceTarget;
+
   const claimAndPlay = useCallback(
-    (raw: PlayerTrack, nextQueue?: PlayerTrack[]) => {
+    (raw: PlayerTrack, nextQueue?: PlayerTrack[], gen?: number) => {
       const audio = audioRef.current;
       if (!audio) return;
+      const playGen = gen ?? ++playGenRef.current;
+      if (playGen !== playGenRef.current) return;
+
       const next = withExplicit(raw);
       const queue = nextQueue?.map(withExplicit);
       ownerIdRef.current = tabIdRef.current;
@@ -287,8 +623,33 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setTrack(next);
       setProgress(0);
       progressRef.current = 0;
-      audio.src = audioSrcFor(next);
-      void audio.play().then(() => {
+
+      // Reset instrumental bus until stem loads for this track
+      instReadyRef.current = false;
+      const inst = instAudioRef.current;
+      if (inst) {
+        inst.pause();
+        inst.removeAttribute("src");
+        try {
+          inst.load();
+        } catch {
+          /* ignore */
+        }
+      }
+      setKaraokeStatus("idle");
+      setKaraokeProgress(0);
+      setKaraokeError(null);
+
+      const src = audioSrcFor(next);
+      setAudioSrc(audio, src);
+      applyMixVolumes();
+
+      void (async () => {
+        const current = () => playGen === playGenRef.current;
+        const ready = await waitForCanPlay(audio, current);
+        if (!ready || !current()) return;
+        const ok = await playBoth();
+        if (!ok || !current()) return;
         playingRef.current = true;
         setPlaying(true);
         publish({
@@ -298,9 +659,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           progress: 0,
           ownerId: tabIdRef.current,
         });
-      });
+      })();
     },
-    [publish],
+    [applyMixVolumes, playBoth, publish],
   );
 
   const applyRemote = useCallback((payload: SyncPayload) => {
@@ -310,6 +671,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const audio = audioRef.current;
     if (audio && !audio.paused) audio.pause();
+    instAudioRef.current?.pause();
 
     queueRef.current = payload.queue;
     trackRef.current = payload.track;
@@ -324,7 +686,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setProgress(payload.progress);
     setDuration(payload.duration);
     setVolumeState(payload.volume);
-    if (audio) audio.volume = payload.volume;
+    if (typeof payload.shuffle === "boolean") {
+      shuffleRef.current = payload.shuffle;
+      setShuffle(payload.shuffle);
+    }
+    if (audio) {
+      audio.volume = payload.volume;
+    }
+    applyMixVolumes();
 
     // Followers mirror UI only — never play local audio while another tab owns it.
     if (audio && payload.track) {
@@ -346,25 +715,34 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     queueMicrotask(() => {
       applyingRemoteRef.current = false;
     });
-  }, []);
+  }, [applyMixVolumes]);
 
   useEffect(() => {
-    const audio = new Audio();
-    audio.volume = volumeRef.current;
-    audioRef.current = audio;
-
     const onTime = () => {
-      if (!isOwner()) return;
+      const audio = audioRef.current;
+      if (!audio || !isOwner()) return;
       setProgress(audio.currentTime);
       progressRef.current = audio.currentTime;
+      const inst = instAudioRef.current;
+      if (inst && instReadyRef.current && inst.src) {
+        try {
+          if (Math.abs(inst.currentTime - audio.currentTime) > 0.12) {
+            inst.currentTime = audio.currentTime;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
     };
     const onMeta = () => {
-      if (!isOwner()) return;
+      const audio = audioRef.current;
+      if (!audio || !isOwner()) return;
       setDuration(audio.duration || 0);
       durationRef.current = audio.duration || 0;
     };
     const onEnded = () => {
-      if (!isOwner()) return;
+      const audio = audioRef.current;
+      if (!audio || !isOwner()) return;
       setPlaying(false);
       playingRef.current = false;
       const current = trackRef.current;
@@ -372,26 +750,32 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         publishRef.current({ playing: false });
         return;
       }
-      const q = queueRef.current;
-      const idx = q.findIndex((t) => t.id === current.id);
-      const nextTrack = q[idx + 1];
-      if (!nextTrack) {
-        publishRef.current({ playing: false, progress: audio.currentTime });
-        return;
-      }
       void (async () => {
+        const nextTrack = await advanceTargetRef.current(current);
+        if (!nextTrack) {
+          publishRef.current({ playing: false, progress: audio.currentTime });
+          return;
+        }
+        if (trackRef.current?.id !== current.id) return; // user skipped meanwhile
         const fromId = nextTrack.id;
         const ready = await resolveIfNeeded(nextTrack);
-        if (trackRef.current?.id !== current.id) return; // user skipped meanwhile
+        if (trackRef.current?.id !== current.id) return;
         const nextQ = replaceInQueue(queueRef.current, fromId, ready);
         queueRef.current = nextQ;
         setQueue(nextQ);
-        audio.src = audioSrcFor(ready);
+        const el = audioRef.current;
+        if (!el) return;
+        setAudioSrc(el, audioSrcFor(ready));
         setProgress(0);
         progressRef.current = 0;
         trackRef.current = ready;
         setTrack(ready);
-        void audio.play().then(() => {
+        const gen = ++playGenRef.current;
+        const currentGen = () => gen === playGenRef.current;
+        void waitForCanPlay(el, currentGen).then(async (ok) => {
+          if (!ok || !currentGen()) return;
+          const played = await safePlay(el);
+          if (!played || !currentGen()) return;
           playingRef.current = true;
           setPlaying(true);
           publishRef.current({
@@ -404,9 +788,95 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         });
       })();
     };
-    audio.addEventListener("timeupdate", onTime);
-    audio.addEventListener("loadedmetadata", onMeta);
-    audio.addEventListener("ended", onEnded);
+
+    /** 410 Gone / stale live URL mid-play — re-mint session and continue. */
+    let liveRecovering = false;
+    const onMediaError = () => {
+      const audio = audioRef.current;
+      if (!audio || !isOwner() || liveRecovering) return;
+      const current = trackRef.current;
+      if (!current || !isEphemeralTrack(current)) return;
+      liveRecovering = true;
+      const resumeAt = audio.currentTime || progressRef.current || 0;
+      const wantPlay = playingRef.current || !audio.paused;
+      void (async () => {
+        try {
+          const fromId = current.id;
+          const ready = await resolveIfNeeded({
+            ...current,
+            streamUrl: null,
+          });
+          if (trackRef.current?.id !== fromId && trackRef.current?.id !== ready.id) {
+            return;
+          }
+          if (!ready.streamUrl && isEphemeralTrack(ready)) return;
+          const nextQ = replaceInQueue(queueRef.current, fromId, ready);
+          queueRef.current = nextQ;
+          setQueue(nextQ);
+          trackRef.current = ready;
+          setTrack(ready);
+          const el = audioRef.current;
+          if (!el) return;
+          setAudioSrc(el, audioSrcFor(ready));
+          const seekTo = () => {
+            try {
+              if (resumeAt > 0) el.currentTime = resumeAt;
+            } catch {
+              /* ignore */
+            }
+          };
+          seekTo();
+          el.addEventListener("loadedmetadata", seekTo, { once: true });
+          if (wantPlay) {
+            const gen = ++playGenRef.current;
+            const currentGen = () => gen === playGenRef.current;
+            await waitForCanPlay(el, currentGen);
+            if (!currentGen()) return;
+            const played = await safePlay(el);
+            if (played && currentGen()) {
+              playingRef.current = true;
+              setPlaying(true);
+            }
+          }
+          publishRef.current({
+            track: ready,
+            queue: nextQ,
+            playing: wantPlay,
+            progress: resumeAt,
+            ownerId: tabIdRef.current,
+          });
+        } catch {
+          /* leave paused */
+        } finally {
+          liveRecovering = false;
+        }
+      })();
+    };
+
+    const attach = (el: HTMLAudioElement) => {
+      el.addEventListener("timeupdate", onTime);
+      el.addEventListener("loadedmetadata", onMeta);
+      el.addEventListener("ended", onEnded);
+      el.addEventListener("error", onMediaError);
+    };
+    const detach = (el: HTMLAudioElement) => {
+      el.removeEventListener("timeupdate", onTime);
+      el.removeEventListener("loadedmetadata", onMeta);
+      el.removeEventListener("ended", onEnded);
+      el.removeEventListener("error", onMediaError);
+    };
+    attachAudioListenersRef.current = attach;
+    detachAudioListenersRef.current = detach;
+
+    const audio = new Audio();
+    audio.volume = volumeRef.current;
+    audioRef.current = audio;
+    const inst = new Audio();
+    inst.volume = 0;
+    inst.preload = "auto";
+    instAudioRef.current = inst;
+    instReadyRef.current = false;
+    attach(audio);
 
     let channel: BroadcastChannel | null = null;
     try {
@@ -442,19 +912,65 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       progressRef.current = stored.progress ?? 0;
       durationRef.current = stored.duration ?? 0;
       volumeRef.current = stored.volume ?? 0.8;
+      const storedShuffle = Boolean(stored.shuffle);
+      shuffleRef.current = storedShuffle;
       setQueue(stored.queue ?? []);
       setTrack(stored.track);
       setPlaying(false);
       setProgress(stored.progress ?? 0);
       setDuration(stored.duration ?? 0);
       setVolumeState(stored.volume ?? 0.8);
+      setShuffle(storedShuffle);
       audio.volume = stored.volume ?? 0.8;
-      audio.src = audioSrcFor(stored.track);
-      try {
-        audio.currentTime = stored.progress ?? 0;
-      } catch {
-        /* ignore */
+
+      const savedProgress = stored.progress ?? 0;
+      const hydrateId = stored.track.id;
+      const applyHydrated = (ready: PlayerTrack) => {
+        // User may have started something else while we refreshed.
+        if (
+          trackRef.current &&
+          trackRef.current.id !== hydrateId &&
+          trackRef.current.title !== stored.track!.title
+        ) {
+          return;
+        }
+        const nextQ = replaceInQueue(queueRef.current, hydrateId, ready);
+        queueRef.current = nextQ;
+        setQueue(nextQ);
+        trackRef.current = ready;
+        setTrack(ready);
+        audio.src = audioSrcFor(ready);
+        const seekTo = () => {
+          try {
+            if (Number.isFinite(savedProgress) && savedProgress > 0) {
+              audio.currentTime = savedProgress;
+            }
+          } catch {
+            /* not seekable yet */
+          }
+        };
+        seekTo();
+        audio.addEventListener("loadedmetadata", seekTo, { once: true });
+        writeStored({
+          ...stored,
+          track: ready,
+          queue: nextQ,
+          playing: false,
+          progress: savedProgress,
+          updatedAt: Date.now(),
+        });
+      };
+
+      if (isEphemeralTrack(stored.track)) {
+        // Persisted /api/live URLs die with server memory — strip before resolve
+        void resolveIfNeeded({
+          ...stored.track,
+          streamUrl: null,
+        }).then(applyHydrated);
+      } else {
+        applyHydrated(stored.track);
       }
+
       queueMicrotask(() => {
         applyingRemoteRef.current = false;
       });
@@ -491,6 +1007,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         progress: audioRef.current?.currentTime ?? progressRef.current,
         duration: durationRef.current,
         volume: volumeRef.current,
+        shuffle: shuffleRef.current,
         ownerId: tabIdRef.current,
         updatedAt: Date.now(),
       };
@@ -511,10 +1028,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("pagehide", onUnload);
       onUnload();
-      audio.pause();
-      audio.removeEventListener("timeupdate", onTime);
-      audio.removeEventListener("loadedmetadata", onMeta);
-      audio.removeEventListener("ended", onEnded);
+      const el = audioRef.current ?? audio;
+      el.pause();
+      detach(el);
+      const instEl = instAudioRef.current;
+      if (instEl) {
+        instEl.pause();
+        instEl.removeAttribute("src");
+      }
+      instAudioRef.current = null;
       channel?.close();
       channelRef.current = null;
     };
@@ -523,39 +1045,102 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!playing || !track || !isOwner()) return;
     const tickSec = 15;
-    const trackId = track.id.startsWith("live:") ? undefined : track.id;
     const id = window.setInterval(() => {
       void fetch("/api/listen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           seconds: tickSec,
-          ...(trackId ? { trackId } : {}),
+          trackId: track.id,
+          title: track.title,
+          artist: track.artist,
+          album: track.album,
+          coverPath: track.coverPath ?? null,
         }),
         keepalive: true,
       })
         .then((res) => {
-          if (res.ok && trackId) emitListenCredited({ trackId });
+          if (res.ok) emitListenCredited({ trackId: track.id });
         })
         .catch(() => null);
     }, tickSec * 1000);
     return () => window.clearInterval(id);
-  }, [playing, track?.id, isOwner]);
+  }, [playing, track, isOwner]);
+
+  // Discord Rich Presence (local Discord desktop RPC) when user enabled it.
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        if (
+          discordPresenceCache.at === 0 ||
+          Date.now() - discordPresenceCache.at > 60_000
+        ) {
+          const res = await fetch("/api/account", { cache: "no-store" });
+          if (!res.ok) return;
+          const data = await res.json();
+          discordPresenceCache = {
+            at: Date.now(),
+            presenceOn: Boolean(
+              data.discord?.linked && data.discord?.presenceEnabled,
+            ),
+            appId:
+              typeof data.discordClientId === "string" &&
+              data.discordClientId.trim()
+                ? data.discordClientId.trim()
+                : null,
+          };
+        }
+        if (
+          cancelled ||
+          !discordPresenceCache.presenceOn ||
+          !discordPresenceCache.appId
+        ) {
+          return;
+        }
+
+        const { setDiscordListeningActivity, clearDiscordActivity } =
+          await import("@/lib/discord-rpc");
+        if (cancelled) return;
+        if (playing && track) {
+          await setDiscordListeningActivity(discordPresenceCache.appId, {
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            coverUrl: track.coverPath,
+          });
+        } else {
+          await clearDiscordActivity();
+        }
+      } catch {
+        /* Discord desktop may be closed */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [playing, track]);
 
   // Recently played / listening feed are driven by /api/listen after ≥15s.
 
   const play = useCallback(
     (next: PlayerTrack, nextQueue?: PlayerTrack[]) => {
+      const gen = ++playGenRef.current;
       void (async () => {
         const fromId = next.id;
         const ready = await resolveIfNeeded(next);
+        if (gen !== playGenRef.current) return;
         let queue = nextQueue?.map(withExplicit);
         if (queue) {
+          // Album / playlist / shelf play — clear add-to-queue restore snapshot
+          fallbackQueueRef.current = null;
           queue = replaceInQueue(queue, fromId, ready);
         } else if (fromId !== ready.id) {
           queue = replaceInQueue(queueRef.current, fromId, ready);
         }
-        claimAndPlay(ready, queue);
+        claimAndPlay(ready, queue, gen);
       })();
     },
     [claimAndPlay],
@@ -571,7 +1156,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     ownerIdRef.current = tabIdRef.current;
 
     if (shouldPause) {
-      audio.pause();
+      pauseBoth();
       playingRef.current = false;
       setPlaying(false);
       publish({
@@ -582,21 +1167,79 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const needLoad =
-      !audio.src ||
-      audio.src !==
-        new URL(audioSrcFor(track), window.location.origin).href;
-    if (needLoad) audio.src = audioSrcFor(track);
-    void audio.play().then(() => {
+    const resumeAt = audio.currentTime || progressRef.current || 0;
+
+    void (async () => {
+      const gen = ++playGenRef.current;
+      const currentGen = () => gen === playGenRef.current;
+
+      let ready = track;
+      if (isEphemeralTrack(track)) {
+        const fromId = track.id;
+        ready = await resolveIfNeeded({ ...track, streamUrl: null });
+        if (!currentGen()) return;
+        if (
+          trackRef.current?.id !== fromId &&
+          trackRef.current?.id !== ready.id
+        ) {
+          return;
+        }
+        const nextQ = replaceInQueue(queueRef.current, fromId, ready);
+        queueRef.current = nextQ;
+        setQueue(nextQ);
+        trackRef.current = ready;
+        setTrack(ready);
+      }
+
+      if (!currentGen()) return;
+      setAudioSrc(audio, audioSrcFor(ready));
+      const seekTo = () => {
+        try {
+          if (Number.isFinite(resumeAt) && resumeAt > 0) {
+            audio.currentTime = resumeAt;
+          }
+        } catch {
+          /* ignore */
+        }
+      };
+      seekTo();
+      audio.addEventListener("loadedmetadata", seekTo, { once: true });
+
+      await waitForCanPlay(audio, currentGen);
+      if (!currentGen()) return;
+      let ok = await playBoth();
+      if (!ok && isEphemeralTrack(ready) && currentGen()) {
+        // Stale media / autoplay — one more live refresh then retry
+        const fromId = ready.id;
+        const refreshed = await resolveIfNeeded({
+          ...ready,
+          streamUrl: null,
+        });
+        if (!currentGen()) return;
+        const nextQ = replaceInQueue(queueRef.current, fromId, refreshed);
+        queueRef.current = nextQ;
+        setQueue(nextQ);
+        trackRef.current = refreshed;
+        setTrack(refreshed);
+        setAudioSrc(audio, audioSrcFor(refreshed));
+        seekTo();
+        await waitForCanPlay(audio, currentGen);
+        if (!currentGen()) return;
+        ok = await playBoth();
+        ready = refreshed;
+      }
+      if (!ok || !currentGen()) return;
       playingRef.current = true;
       setPlaying(true);
       publish({
+        track: ready,
+        queue: queueRef.current,
         playing: true,
-        progress: audio.currentTime,
+        progress: audio.currentTime || resumeAt,
         ownerId: tabIdRef.current,
       });
-    });
-  }, [publish, track]);
+    })();
+  }, [pauseBoth, playBoth, publish, track]);
 
   const seek = useCallback(
     (ratio: number) => {
@@ -606,13 +1249,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       ownerIdRef.current = tabIdRef.current;
       const next = Math.max(0, Math.min(1, ratio)) * duration;
       if (track && (!audio.src || audio.src !== new URL(audioSrcFor(track), window.location.origin).href)) {
-        audio.src = audioSrcFor(track);
+        setAudioSrc(audio, audioSrcFor(track));
       }
       audio.currentTime = next;
+      const inst = instAudioRef.current;
+      if (inst && instReadyRef.current && inst.src) {
+        try {
+          inst.currentTime = next;
+        } catch {
+          /* ignore */
+        }
+      }
       setProgress(next);
       progressRef.current = next;
       if (wasPlaying && audio.paused) {
-        void audio.play().then(() => {
+        void playBoth().then((ok) => {
+          if (!ok) return;
           playingRef.current = true;
           setPlaying(true);
           publish({
@@ -628,7 +1280,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         ownerId: tabIdRef.current,
       });
     },
-    [duration, publish, track],
+    [duration, playBoth, publish, track],
   );
 
   const setVolume = useCallback(
@@ -636,18 +1288,208 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const next = Math.max(0, Math.min(1, v));
       setVolumeState(next);
       volumeRef.current = next;
-      if (audioRef.current) audioRef.current.volume = next;
+      applyMixVolumes();
       if (isOwner()) publish({ volume: next });
     },
-    [isOwner, publish],
+    [applyMixVolumes, isOwner, publish],
   );
+
+  const loadInstrumental = useCallback(
+    async (trackId: string, streamUrl: string) => {
+      const inst = instAudioRef.current;
+      const mix = audioRef.current;
+      if (!inst || !mix) return;
+
+      // Never leave the mix muted while we load
+      instReadyRef.current = false;
+      applyMixVolumes();
+
+      setAudioSrc(inst, streamUrl);
+      const ready = await waitForCanPlay(
+        inst,
+        () => trackRef.current?.id === trackId,
+        20_000,
+      );
+      if (!ready || trackRef.current?.id !== trackId) {
+        setKaraokeStatus("error");
+        setKaraokeError("Instrumental failed to load");
+        return;
+      }
+      if (!audioLooksPlayable(inst)) {
+        setKaraokeStatus("error");
+        setKaraokeError("Instrumental has no playable audio");
+        return;
+      }
+
+      try {
+        inst.currentTime = mix.currentTime;
+      } catch {
+        /* ignore */
+      }
+
+      instReadyRef.current = true;
+
+      // If user already wants instrumental, start bus before fading
+      if (vocalLevelRef.current < 0.999 && playingRef.current && !mix.paused) {
+        const ok = await ensureInstPlaying();
+        if (!ok) {
+          instReadyRef.current = false;
+          applyMixVolumes();
+          setKaraokeStatus("error");
+          setKaraokeError("Browser blocked instrumental playback — press play again");
+          return;
+        }
+      }
+
+      applyMixVolumes();
+      setKaraokeStatus("ready");
+      setKaraokeError(null);
+    },
+    [applyMixVolumes, ensureInstPlaying],
+  );
+
+  const prepareKaraoke = useCallback(
+    (trackId: string, artist: string, title: string, album?: string) => {
+      let cancelled = false;
+      let timer: number | undefined;
+
+      const poll = async () => {
+        if (cancelled) return;
+        try {
+          const res = await fetch(
+            `/api/karaoke/${encodeURIComponent(trackId)}`,
+            {
+              method: "POST",
+              cache: "no-store",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ artist, title, album }),
+            },
+          );
+          const data = (await res.json()) as {
+            status?: KaraokeUiStatus;
+            progress?: number;
+            error?: string;
+            streamUrl?: string;
+          };
+          if (cancelled || trackRef.current?.id !== trackId) return;
+          const status = data.status ?? "error";
+          setKaraokeStatus(status);
+          setKaraokeProgress(data.progress ?? 0);
+          setKaraokeError(data.error ?? null);
+
+          if (status === "ready" && data.streamUrl) {
+            await loadInstrumental(trackId, data.streamUrl);
+            return;
+          }
+          if (status === "processing" || status === "queued") {
+            // Keep original mix full while demucs runs
+            instReadyRef.current = false;
+            applyMixVolumes();
+            timer = window.setTimeout(poll, 1500);
+            return;
+          }
+          instReadyRef.current = false;
+          applyMixVolumes();
+        } catch {
+          if (cancelled) return;
+          setKaraokeStatus("error");
+          setKaraokeError("Could not prepare instrumental");
+          instReadyRef.current = false;
+          applyMixVolumes();
+        }
+      };
+
+      void poll();
+      return () => {
+        cancelled = true;
+        if (timer) window.clearTimeout(timer);
+      };
+    },
+    [applyMixVolumes, loadInstrumental],
+  );
+
+  const setVocalLevel = useCallback(
+    (v: number) => {
+      const next = Math.max(0, Math.min(1, v));
+      setVocalLevelState(next);
+      vocalLevelRef.current = next;
+
+      // Slider gesture is a good moment to start the second audio element
+      if (next < 0.999 && instReadyRef.current) {
+        void ensureInstPlaying().then((ok) => {
+          if (!ok) {
+            // Don't mute original
+            applyMixVolumes();
+            return;
+          }
+          applyMixVolumes();
+        });
+        return;
+      }
+      applyMixVolumes();
+    },
+    [applyMixVolumes, ensureInstPlaying],
+  );
+
+  // Safety: if mix was faded but inst stalled, restore original
+  useEffect(() => {
+    if (!playing) return;
+    const id = window.setInterval(() => {
+      const mix = audioRef.current;
+      const inst = instAudioRef.current;
+      if (!mix || vocalLevelRef.current >= 0.999) return;
+      if (!instReadyRef.current) {
+        if (mix.volume < volumeRef.current * 0.5) {
+          mix.volume = volumeRef.current;
+        }
+        return;
+      }
+      if (inst && (inst.paused || inst.error) && mix.volume < volumeRef.current * 0.2) {
+        mix.volume = volumeRef.current;
+        if (inst) inst.volume = 0;
+      }
+    }, 800);
+    return () => window.clearInterval(id);
+  }, [playing]);
+
+  // Demucs instrumental for library + live/stream (download then separate)
+  useEffect(() => {
+    if (!track?.id) return;
+    if (vocalLevel >= 0.999) return;
+    if (instReadyRef.current) return;
+    return prepareKaraoke(
+      track.id,
+      track.artist,
+      track.title,
+      track.album || undefined,
+    );
+  }, [
+    track?.id,
+    track?.artist,
+    track?.title,
+    track?.album,
+    vocalLevel,
+    prepareKaraoke,
+  ]);
+
+  const toggleShuffle = useCallback(() => {
+    setShuffle((prev) => {
+      const next = !prev;
+      shuffleRef.current = next;
+      ownerIdRef.current = tabIdRef.current;
+      publish({ shuffle: next, ownerId: tabIdRef.current });
+      return next;
+    });
+  }, [publish]);
 
   const next = useCallback(() => {
     if (!track) return;
-    const idx = queue.findIndex((t) => t.id === track.id);
-    const n = queue[idx + 1];
-    if (n) play(n);
-  }, [play, queue, track]);
+    void (async () => {
+      const current = track;
+      const n = await advanceTargetRef.current(current);
+      if (n) play(n);
+    })();
+  }, [play, track]);
 
   const prev = useCallback(() => {
     if (!track) return;
@@ -664,27 +1506,50 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (p) play(p);
   }, [play, publish, queue, track]);
 
+  /**
+   * Add / drop onto queue: wipe album upcoming on first add (keep now-playing),
+   * then append further adds. Snapshot original queue for restore when empty.
+   */
   const addToQueue = useCallback(
     (item: PlayerTrack) => {
       const normalized = withExplicit(item);
-      setQueue((prev) => {
-        let nextQ: PlayerTrack[];
-        if (!track) nextQ = [...prev, normalized];
-        else {
-          const idx = prev.findIndex((t) => t.id === track.id);
-          if (idx < 0) nextQ = [...prev, normalized];
-          else {
-            nextQ = [...prev];
-            nextQ.splice(idx + 1, 0, normalized);
-          }
+      const current = trackRef.current;
+      const prevQ = queueRef.current;
+      const inReplaceSession = fallbackQueueRef.current != null;
+
+      let nextQ: PlayerTrack[];
+      if (!inReplaceSession) {
+        if (prevQ.length > 0) fallbackQueueRef.current = prevQ.slice();
+        if (current) {
+          nextQ =
+            current.id === normalized.id
+              ? [current]
+              : [current, normalized];
+        } else {
+          nextQ = [normalized];
         }
-        queueRef.current = nextQ;
-        publish({ queue: nextQ, ownerId: tabIdRef.current });
-        return nextQ;
-      });
+      } else {
+        const base =
+          prevQ.length > 0
+            ? prevQ
+            : current
+              ? [current]
+              : [];
+        nextQ = base.some((t) => t.id === normalized.id)
+          ? base
+          : [...base, normalized];
+      }
+
+      queueRef.current = nextQ;
+      setQueue(nextQ);
       ownerIdRef.current = tabIdRef.current;
+      publish({ queue: nextQ, ownerId: tabIdRef.current });
+
+      if (!current) {
+        claimAndPlay(normalized, nextQ);
+      }
     },
-    [publish, track],
+    [claimAndPlay, publish],
   );
 
   const removeFromQueue = useCallback(
@@ -764,6 +1629,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       progress,
       duration,
       volume,
+      vocalLevel,
+      karaokeStatus,
+      karaokeProgress,
+      karaokeError,
+      shuffle,
       panel,
       isPanelOpen,
       play,
@@ -772,6 +1642,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       next,
       prev,
       setVolume,
+      setVocalLevel,
+      toggleShuffle,
       addToQueue,
       removeFromQueue,
       playQueueIndex,
@@ -790,6 +1662,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       progress,
       duration,
       volume,
+      vocalLevel,
+      karaokeStatus,
+      karaokeProgress,
+      karaokeError,
+      shuffle,
       panel,
       isPanelOpen,
       play,
@@ -798,6 +1675,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       next,
       prev,
       setVolume,
+      setVocalLevel,
+      toggleShuffle,
       addToQueue,
       removeFromQueue,
       playQueueIndex,

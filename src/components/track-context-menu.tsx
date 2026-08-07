@@ -349,7 +349,8 @@ export function TrackContextMenu({
           <ContextMenuItem
             onSelect={() => {
               addToQueue(track);
-              toast("Added to queue", {
+              toast("Queue updated", {
+                description: "Cleared upcoming tracks",
                 icon: <Info className="size-4" />,
                 style: {
                   background: "#000",

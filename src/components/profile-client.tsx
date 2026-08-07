@@ -315,7 +315,7 @@ export function ProfileClient({
               Profile
               {profile.isAdmin ? " · Admin" : ""}
             </p>
-            <h1 className="break-all text-5xl font-semibold tracking-tight sm:text-6xl md:text-7xl">
+            <h1 className="break-all text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
               {profile.username}
             </h1>
             <p className="text-sm text-muted-foreground">

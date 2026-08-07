@@ -1,4 +1,4 @@
-import { json, getAdminUser } from "@/lib/api";
+import { json, getStaffUser } from "@/lib/api";
 import {
   countUsers,
   getSettings,
@@ -15,7 +15,7 @@ import { ffmpegAvailable, ytDlpAvailable } from "@/lib/tools";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const admin = await getAdminUser();
+  const admin = await getStaffUser();
   if (!admin) return json({ error: "Admin only" }, { status: 403 });
 
   const lib = libraryStats();

@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   AtSign,
   AudioLines,
   Disc3,
   DoorOpen,
+  Download,
   Home,
   Info,
   ListMusic,
@@ -27,6 +28,7 @@ import { NotificationsBell } from "@/components/admin-error-notifications";
 import { UserMenu } from "@/components/user-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePlayer } from "@/components/player-provider";
+import { roleIsStaff, type UserRole } from "@/lib/roles";
 
 const primaryNav = [
   { href: "/", label: "Home", icon: Home },
@@ -35,6 +37,7 @@ const primaryNav = [
 const adminNavGroups = [
   {
     label: "Server",
+    staff: true as const,
     items: [
       { href: "/admin", label: "Info", icon: Info },
       { href: "/admin/users", label: "Users", icon: Users },
@@ -43,6 +46,7 @@ const adminNavGroups = [
   },
   {
     label: "Media",
+    staff: true as const,
     items: [
       { href: "/admin/requests", label: "Requests", icon: ListMusic },
       { href: "/admin/tracks", label: "Tracks", icon: AudioLines },
@@ -52,8 +56,10 @@ const adminNavGroups = [
   },
   {
     label: "Settings",
+    staff: false as const,
     items: [
       { href: "/admin/lidarr", label: "Lidarr", icon: Radio },
+      { href: "/admin/import", label: "Import", icon: Download },
       { href: "/admin/email", label: "Email", icon: AtSign },
       { href: "/admin/notifications", label: "Notifications", icon: Bell },
       { href: "/", label: "Exit", icon: DoorOpen },
@@ -122,13 +128,66 @@ function ShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { setPanel } = usePlayer();
   const [libraryExpanded, setLibraryExpanded] = useState(false);
-  const isAdmin =
+  const [role, setRole] = useState<UserRole | null>(null);
+  const isAdminPath =
     pathname === "/admin" || pathname.startsWith("/admin/");
   const dismissOverlays = () => setPanel("none");
 
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/auth/me", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { user: null }))
+      .then((data: { user?: { role?: string; isAdmin?: boolean } | null }) => {
+        if (cancelled) return;
+        const r = data.user?.role;
+        if (
+          r === "owner" ||
+          r === "admin" ||
+          r === "moderator" ||
+          r === "member"
+        ) {
+          setRole(r);
+        } else if (data.user?.isAdmin) {
+          setRole("admin");
+        } else if (data.user) {
+          setRole("member");
+        } else {
+          setRole(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRole(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
+
+  const visibleAdminGroups = useMemo(() => {
+    const isFullAdmin = role === "admin" || role === "owner";
+    const isStaff = roleIsStaff(role);
+    return adminNavGroups
+      .map((group) => {
+        if (group.label === "Settings") {
+          // Moderators: Exit only; full Settings are admin-only.
+          if (isFullAdmin) return group;
+          if (isStaff) {
+            return {
+              ...group,
+              items: group.items.filter((item) => item.href === "/"),
+            };
+          }
+          return null;
+        }
+        if (!isStaff) return null;
+        return group;
+      })
+      .filter(Boolean) as typeof adminNavGroups[number][];
+  }, [role]);
+
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      {!isAdmin ? (
+      {!isAdminPath ? (
         <header
           suppressHydrationWarning
           className="grid shrink-0 grid-cols-[1fr_minmax(0,28rem)_1fr] items-center gap-3 border-b border-border px-5 py-3"
@@ -164,14 +223,14 @@ function ShellInner({ children }: { children: React.ReactNode }) {
         <aside
           className={cn(
             "flex shrink-0 flex-col border-r border-border px-3 py-4 transition-[width] duration-200 ease-out",
-            isAdmin
+            isAdminPath
               ? "w-56 md:w-60"
               : libraryExpanded
                 ? "w-80 md:w-96"
                 : "w-56 md:w-60",
           )}
         >
-          {isAdmin ? (
+          {isAdminPath ? (
             <>
               <Link
                 href="/admin"
@@ -186,7 +245,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
               <div className="flex min-h-0 flex-1 flex-col">
                 <ScrollArea className="min-h-0 flex-1">
                   <nav className="space-y-5" aria-label="Admin">
-                    {adminNavGroups.map((group) => (
+                    {visibleAdminGroups.map((group) => (
                       <div key={group.label}>
                         <p className="mb-1 px-3 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                           {group.label}
@@ -194,7 +253,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                         <div className="space-y-0.5">
                           {group.items.map((item) => (
                             <NavLink
-                              key={item.href}
+                              key={item.href + item.label}
                               {...item}
                               active={adminNavActive(pathname, item.href)}
                             />
@@ -241,16 +300,16 @@ function ShellInner({ children }: { children: React.ReactNode }) {
           <div className="relative min-h-0 min-w-0 flex-1">
             <main className="h-full">
               <ScrollArea className="h-full">
-                <div className="px-6 py-6 md:px-8 lg:px-10">{children}</div>
+                <div className="min-w-0 px-6 py-6 md:px-8 lg:px-10">{children}</div>
               </ScrollArea>
             </main>
-            {!isAdmin && <PlayerPanels />}
+            {!isAdminPath && <PlayerPanels />}
           </div>
-          {!isAdmin && <PlayerQueueRail />}
+          {!isAdminPath && <PlayerQueueRail />}
         </div>
       </div>
 
-      {!isAdmin && <NowPlayingBar />}
+      {!isAdminPath && <NowPlayingBar />}
     </div>
   );
 }

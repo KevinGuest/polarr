@@ -47,10 +47,16 @@ function candidatePaths(): string[] {
 
 function probeCommand(cmd: string, args: string[]): Promise<boolean> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, {
+    // Always spawn an absolute path with shell:false — Node DEP0190 warns when
+    // shell:true is combined with an args array (args are concatenated unescaped).
+    const file = path.isAbsolute(cmd) ? cmd : whichSync(cmd);
+    if (!file) {
+      resolve(false);
+      return;
+    }
+    const child = spawn(file, args, {
       stdio: "ignore",
-      // PATH lookup only — no user args, so shell is safe here.
-      shell: process.platform === "win32" && !path.isAbsolute(cmd),
+      shell: false,
       env: process.env,
       windowsHide: true,
     });
@@ -104,10 +110,8 @@ export async function findYtDlp(): Promise<string | null> {
     if (await pathWorks(c)) return path.resolve(c);
   }
   for (const name of ["yt-dlp", "yt-dlp.exe"]) {
-    if (await probeCommand(name, ["--version"])) {
-      const resolved = whichSync(name);
-      if (resolved && (await pathWorks(resolved))) return resolved;
-    }
+    const resolved = whichSync(name);
+    if (resolved && (await pathWorks(resolved))) return resolved;
   }
   return null;
 }

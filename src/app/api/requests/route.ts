@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { json, getAuthUser, getAdminUser } from "@/lib/api";
+import { json, getAuthUser, getStaffUser } from "@/lib/api";
 import {
   createRequest,
   findTrack,
@@ -8,9 +8,14 @@ import {
   listRequests,
   requestStats,
   updateRequestStatus,
-  type RequestRow,
 } from "@/lib/db";
-import { albumCoverKey, artistCoverKey, getAlbumCoverMap, getArtistCoverMap, LidarrClient } from "@/lib/lidarr";
+import { coverFromRequestMaps } from "@/lib/request-cover";
+import {
+  coverFrom,
+  getAlbumCoverMap,
+  getArtistCoverMap,
+  LidarrClient,
+} from "@/lib/lidarr";
 import {
   enqueueFallbackDownload,
   stopDownloadJob,
@@ -19,39 +24,13 @@ import {
 
 export const dynamic = "force-dynamic";
 
-function requestCover(
-  r: RequestRow,
-  albumCovers: Map<string, string>,
-  artistCovers: Map<string, string>,
-): string | null {
-  if (r.mediaType === "artist") {
-    return (
-      (r.foreignArtistId
-        ? artistCovers.get(`mbid:${r.foreignArtistId}`)
-        : null) ||
-      artistCovers.get(artistCoverKey(r.artist)) ||
-      null
-    );
-  }
-
-  const album = (r.album || r.title || "").trim();
-  const fromLidarr = album
-    ? albumCovers.get(albumCoverKey(r.artist, album)) || null
-    : null;
-  if (fromLidarr) return fromLidarr;
-  if (r.foreignAlbumId) {
-    return `https://coverartarchive.org/release-group/${encodeURIComponent(r.foreignAlbumId)}/front-500`;
-  }
-  return artistCovers.get(artistCoverKey(r.artist)) || null;
-}
-
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   // Stats OK for dashboard badges; full log is admin-only.
   if (searchParams.get("stats") === "1") {
     return json({ stats: requestStats() });
   }
-  const admin = await getAdminUser();
+  const admin = await getStaffUser();
   if (!admin) {
     return json({ error: "Admin only" }, { status: 403 });
   }
@@ -65,7 +44,7 @@ export async function GET(req: Request) {
   ]);
   const requests = listRequests(200).map((r) => ({
     ...r,
-    coverPath: requestCover(r, albumCovers, artistCovers),
+    coverPath: coverFromRequestMaps(r, albumCovers, artistCovers),
   }));
   return json({ requests, stats: requestStats() });
 }
@@ -83,6 +62,7 @@ const schema = z.object({
   foreignId: z.string().optional(),
   foreignArtistId: z.string().optional(),
   foreignAlbumId: z.string().optional(),
+  image: z.string().min(1).max(2048).optional(),
   type: z.enum(["artist", "album", "track"]).default("album"),
   prefer: z.enum(["lidarr", "fallback", "auto"]).default("auto"),
 });
@@ -92,7 +72,7 @@ export async function POST(req: Request) {
 
   // Admin stop signal
   if (raw && typeof raw === "object" && raw.action === "stop") {
-    const admin = await getAdminUser();
+    const admin = await getStaffUser();
     if (!admin) {
       return json({ error: "Admin only" }, { status: 403 });
     }
@@ -166,6 +146,7 @@ export async function POST(req: Request) {
     foreignArtistId: foreignArtistId ?? null,
     foreignAlbumId: foreignAlbumId ?? null,
     requestedBy: user?.username ?? null,
+    imageUrl: body.image?.trim() || null,
   };
 
   if (wantLidarr && foreignArtistId && body.type === "artist") {
@@ -180,6 +161,7 @@ export async function POST(req: Request) {
         externalId: String(artist.id ?? foreignArtistId),
         lidarrArtistId: artist.id ?? null,
         foreignArtistId,
+        imageUrl: base.imageUrl || coverFrom(artist.images) || null,
       });
       if (request.status === "available") {
         return json({ request, path: "library", alreadyAvailable: true });
@@ -222,6 +204,11 @@ export async function POST(req: Request) {
             externalId: artistHit.foreignId,
             foreignArtistId: artistHit.foreignId,
             lidarrArtistId: artist.id ?? null,
+            imageUrl:
+              base.imageUrl ||
+              artistHit.image ||
+              coverFrom(artist.images) ||
+              null,
           });
           if (request.status === "available") {
             return json({ request, path: "library", alreadyAvailable: true });

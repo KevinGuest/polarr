@@ -11,6 +11,8 @@ services:
       - HOSTNAME=0.0.0.0
       - PORT=3000
     volumes:
+      # Bind mounts: entrypoint chowns these to node (uid 1000) when started as root.
+      # If you still see SQLITE_CANTOPEN: sudo chown -R 1000:1000 ./data ./music
       - ./data:/data
       - ./music:/music
     restart: unless-stopped

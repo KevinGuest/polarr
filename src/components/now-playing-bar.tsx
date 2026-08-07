@@ -52,12 +52,14 @@ export function NowPlayingBar() {
     progress,
     duration,
     volume,
+    shuffle,
     isPanelOpen,
     toggle,
     seek,
     next,
     prev,
     setVolume,
+    toggleShuffle,
     togglePanel,
   } = usePlayer();
   const [downloaded, setDownloaded] = useState(false);
@@ -76,13 +78,13 @@ export function NowPlayingBar() {
         : null;
     setCoverUrl(fromTrack);
 
-    if (track.id.startsWith("live:")) {
+    if (track.id.startsWith("live:") || track.id.startsWith("stream:")) {
       setDownloaded(false);
       return;
     }
 
-    // Local/server tracks are in the library; live streams are not
-    setDownloaded(true);
+    // Only mark in-library after the track API confirms a real file
+    setDownloaded(false);
 
     let cancelled = false;
     void fetch(`/api/tracks/${encodeURIComponent(track.id)}`, {
@@ -97,6 +99,12 @@ export function NowPlayingBar() {
         const cover = data.track.coverUrl || data.track.coverPath;
         if (cover && /^https?:\/\//i.test(cover)) {
           setCoverUrl(cover);
+        }
+        if (data.downloaded || data.track?.path) {
+          const path = String(data.track.path || "");
+          if (path && !path.startsWith("stream:") && !path.startsWith("stream://")) {
+            setDownloaded(true);
+          }
         }
       })
       .catch(() => null);
@@ -161,8 +169,15 @@ export function NowPlayingBar() {
               <BarTooltip label="Shuffle">
                 <button
                   type="button"
-                  className="text-muted-foreground transition-colors hover:text-foreground"
+                  onClick={toggleShuffle}
+                  className={cn(
+                    "transition-colors",
+                    shuffle
+                      ? "text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
                   aria-label="Shuffle"
+                  aria-pressed={shuffle}
                 >
                   <Shuffle className="size-3.5" />
                 </button>

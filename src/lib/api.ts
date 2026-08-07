@@ -1,5 +1,6 @@
 import { cookies, headers } from "next/headers";
 import { getUserByToken } from "./db";
+import { roleIsAdmin, roleIsStaff } from "./roles";
 
 export async function getAuthUser() {
   const headerStore = await headers();
@@ -12,10 +13,17 @@ export async function getAuthUser() {
   return getUserByToken(token);
 }
 
-/** Returns the signed-in admin user, or null. */
+/** Full admin (Settings + all panels). */
 export async function getAdminUser() {
   const user = await getAuthUser();
-  if (!user?.isAdmin) return null;
+  if (!user || !roleIsAdmin(user.role)) return null;
+  return user;
+}
+
+/** Admin or moderator — Server + Media admin APIs. */
+export async function getStaffUser() {
+  const user = await getAuthUser();
+  if (!user || !roleIsStaff(user.role)) return null;
   return user;
 }
 

@@ -92,7 +92,7 @@ export function AdminEmailClient() {
   if (forbidden) {
     return (
       <div className="space-y-3">
-        <h1 className="text-3xl font-semibold tracking-tight">Email</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Email</h1>
         <p className="text-sm text-muted-foreground">
           Admin only. Sign in with an admin account to configure SMTP.
         </p>
@@ -106,7 +106,7 @@ export function AdminEmailClient() {
   return (
     <div className="mx-auto max-w-2xl space-y-8">
       <div className="space-y-1">
-        <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
+        <h1 className="text-2xl font-semibold tracking-tight">
           Email
         </h1>
         <p className="text-sm text-muted-foreground">

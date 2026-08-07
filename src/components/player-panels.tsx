@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import * as SliderPrimitive from "@radix-ui/react-slider";
 import {
   Check,
   Info,
   Laptop,
+  Mic2,
   MonitorSpeaker,
+  Music2,
   Pause,
   Play,
   SkipBack,
@@ -40,8 +43,19 @@ function lyricsBackdrop(seed: string): string {
 }
 
 function LyricsPanel() {
-  const { track, progress, duration, seek, isPanelOpen, closePanel } =
-    usePlayer();
+  const {
+    track,
+    progress,
+    duration,
+    seek,
+    isPanelOpen,
+    closePanel,
+    vocalLevel,
+    setVocalLevel,
+    karaokeStatus,
+    karaokeProgress,
+    karaokeError,
+  } = usePlayer();
   const [lines, setLines] = useState<LyricLine[]>([]);
   const [synced, setSynced] = useState(false);
   const [status, setStatus] = useState<"loading" | "ready" | "empty" | "error">(
@@ -163,7 +177,7 @@ function LyricsPanel() {
                   seek(Math.min(1, Math.max(0, line.time / duration)));
                 }}
                 className={cn(
-                  "block max-w-3xl py-3 text-left text-3xl font-bold leading-snug tracking-tight transition-all duration-300 md:text-4xl md:leading-snug",
+                  "block max-w-3xl py-3 text-left text-2xl font-semibold leading-snug tracking-tight transition-all duration-300 md:text-3xl md:leading-snug",
                   canSeek && "cursor-pointer hover:text-white",
                   !canSeek && "cursor-default",
                   active
@@ -177,6 +191,77 @@ function LyricsPanel() {
               </button>
             );
           })}
+      </div>
+
+      {/* Bottom-right: full mix ↔ Demucs instrumental */}
+      <div className="absolute bottom-8 right-6 z-20 flex flex-col items-center gap-2 rounded-full bg-black/45 px-2.5 py-3.5 ring-1 ring-white/12 backdrop-blur-md">
+        <button
+          type="button"
+          aria-label="Full original mix"
+          onClick={() => setVocalLevel(1)}
+          className={cn(
+            "shrink-0 transition-colors",
+            vocalLevel > 0.85
+              ? "text-white"
+              : "text-white/40 hover:text-white/75",
+          )}
+        >
+          <Mic2 className="size-4" />
+        </button>
+        <SliderPrimitive.Root
+          orientation="vertical"
+          value={[Math.round(vocalLevel * 100)]}
+          onValueChange={(vals) => {
+            const next = vals[0];
+            if (typeof next === "number") setVocalLevel(next / 100);
+          }}
+          max={100}
+          step={1}
+          aria-label="Vocals vs instrumental"
+          className="relative flex h-36 w-6 touch-none select-none flex-col items-center data-[orientation=vertical]:h-36"
+        >
+          <SliderPrimitive.Track className="relative w-1 grow overflow-hidden rounded-full bg-white/25 data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1">
+            <SliderPrimitive.Range className="absolute bg-white data-[orientation=vertical]:w-full" />
+          </SliderPrimitive.Track>
+          <SliderPrimitive.Thumb className="block size-3.5 rounded-full bg-white shadow-md ring-0 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 active:scale-105" />
+        </SliderPrimitive.Root>
+        <button
+          type="button"
+          aria-label="Instrumental only"
+          onClick={() => setVocalLevel(0)}
+          className={cn(
+            "shrink-0 transition-colors",
+            vocalLevel < 0.15
+              ? "text-white"
+              : "text-white/40 hover:text-white/75",
+            karaokeStatus === "processing" || karaokeStatus === "queued"
+              ? "animate-pulse"
+              : "",
+          )}
+        >
+          <Music2 className="size-4" />
+        </button>
+        {(karaokeStatus === "processing" || karaokeStatus === "queued") && (
+          <span className="mt-0.5 max-w-[4.5rem] text-center text-[9px] leading-tight text-white/50">
+            {Math.round((karaokeProgress || 0) * 100)}%
+          </span>
+        )}
+        {karaokeStatus === "error" && karaokeError && (
+          <span
+            className="mt-0.5 max-w-[4.5rem] text-center text-[9px] leading-tight text-red-300/80"
+            title={karaokeError}
+          >
+            fail
+          </span>
+        )}
+        {karaokeStatus === "unavailable" && (
+          <span
+            className="mt-0.5 max-w-[4.5rem] text-center text-[9px] leading-tight text-white/40"
+            title={karaokeError ?? "Unavailable"}
+          >
+            n/a
+          </span>
+        )}
       </div>
     </div>
   );
@@ -414,10 +499,16 @@ function QueuePanel() {
   const upcoming = queue
     .map((t, i) => ({ t, i }))
     .filter(({ i }) => i > currentIdx);
-  const nextFrom =
-    track?.album?.trim() ||
-    upcoming[0]?.t.album?.trim() ||
-    null;
+  // Only label "Next from: Album" when every upcoming track shares that album
+  const nextFrom = (() => {
+    if (upcoming.length === 0) return null;
+    const albums = upcoming
+      .map(({ t }) => t.album?.trim())
+      .filter((a): a is string => Boolean(a));
+    if (albums.length === 0 || albums.length !== upcoming.length) return null;
+    const first = albums[0];
+    return albums.every((a) => a === first) ? first : null;
+  })();
 
   function playRecentItem(
     item: PlayerTrack & { playedAt: string; liked?: boolean },
@@ -457,7 +548,8 @@ function QueuePanel() {
         const dropped = getDragTrack(e);
         if (!dropped) return;
         addToQueue(dropped);
-        toast("Added to queue", {
+        toast("Queue updated", {
+          description: "Cleared upcoming tracks",
           icon: <Info className="size-4" />,
           style: {
             background: "#000",
@@ -602,7 +694,7 @@ function QueuePanel() {
           </div>
         ) : recent.length === 0 ? (
           <p className="px-3 py-2 text-sm text-muted-foreground">
-            Nothing yet — play a track and it’ll show up here.
+            Tracks you listen to for 15+ seconds show up here across sessions.
           </p>
         ) : (
           <ul className="space-y-0.5 px-1">
@@ -680,7 +772,7 @@ export function PlayerPanels() {
   if (!anyOpen) return null;
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+    <div className="pointer-events-none absolute inset-0 z-10">
       <LyricsPanel />
       <DevicesPanel />
       <NowPlayingPopup />

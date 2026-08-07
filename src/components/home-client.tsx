@@ -41,6 +41,12 @@ type Release = {
   lidarrAlbumId?: number;
 };
 
+type CatalogArtist = {
+  name: string;
+  image?: string;
+  foreignArtistId?: string;
+};
+
 type OthersItem = PlayerTrack & {
   playedAt: string;
   listenedBy: string;
@@ -79,11 +85,27 @@ type MoreFromShelf = {
   items: MoreFromItem[];
 };
 
+function ShelfSkeleton({ count = 6 }: { count?: number }) {
+  return (
+    <div className="flex gap-5" aria-busy>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="w-36 shrink-0 space-y-2.5">
+          <Skeleton className="aspect-square w-full rounded-md" />
+          <Skeleton className="h-3.5 w-4/5" />
+          <Skeleton className="h-3 w-3/5" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function HomeClient() {
   const router = useRouter();
   const { play } = usePlayer();
   const [moreFrom, setMoreFrom] = useState<MoreFromShelf[]>([]);
+  const [catalog, setCatalog] = useState<Release[]>([]);
   const [releases, setReleases] = useState<Release[]>([]);
+  const [artists, setArtists] = useState<CatalogArtist[]>([]);
   const [others, setOthers] = useState<OthersItem[]>([]);
   const [lidarrError, setLidarrError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,8 +128,10 @@ export function HomeClient() {
     try {
       const res = await fetch("/api/discover", { cache: "no-store" });
       const data = await res.json();
+      setCatalog(Array.isArray(data.catalog) ? data.catalog : []);
       setMoreFrom(Array.isArray(data.moreFrom) ? data.moreFrom : []);
       setReleases(data.releases || []);
+      setArtists(Array.isArray(data.artists) ? data.artists : []);
       setLidarrError(data.lidarrError || null);
     } finally {
       setLoading(false);
@@ -155,6 +179,31 @@ export function HomeClient() {
     play(pt, [pt]);
   }
 
+  function openArtist(a: CatalogArtist) {
+    const qs = new URLSearchParams({ name: a.name });
+    if (a.foreignArtistId) qs.set("foreignArtistId", a.foreignArtistId);
+    if (a.image) qs.set("image", a.image);
+    router.push(`/artist?${qs.toString()}`);
+  }
+
+  function releaseTiles(list: Release[], visible: number) {
+    return list.slice(0, visible).map((r) => {
+      const href = catalogAlbumHref(r);
+      return (
+        <MediaTileShell
+          key={r.id}
+          title={r.title}
+          subtitle={r.artist}
+          ariaLabel={`Open ${r.title}`}
+          onOpen={() => router.push(href)}
+          cover={
+            <CoverArt seed={r.title} image={r.image} className="size-full" />
+          }
+        />
+      );
+    });
+  }
+
   return (
     <div className="space-y-10">
       {lidarrError && (
@@ -178,7 +227,7 @@ export function HomeClient() {
               <div className="min-w-0">
                 <MediaTileShell
                   title={item.title}
-                  subtitle={`${formatTrackArtistLine(item.artist, item.title)} · ${item.listenedBy}`}
+                  subtitle={formatTrackArtistLine(item.artist, item.title)}
                   ariaLabel={`Play ${item.title}`}
                   onOpen={() => playOthers(item)}
                   cover={
@@ -189,16 +238,6 @@ export function HomeClient() {
                       avatarUrl={item.listenedByAvatarUrl}
                       delayMs={(i % 5) * 700}
                     />
-                  }
-                  playButton={
-                    <button
-                      type="button"
-                      aria-label={`Play ${item.title}`}
-                      onClick={() => playOthers(item)}
-                      className="absolute bottom-2 right-2 flex size-9 items-center justify-center rounded-full border border-border bg-background/95 shadow-md transition-transform hover:scale-105"
-                    >
-                      <Play className="size-3.5" fill="currentColor" />
-                    </button>
                   }
                 />
               </div>
@@ -212,43 +251,67 @@ export function HomeClient() {
         seeAllHref="/browse/releases"
         itemCount={releases.length}
         empty={
-          <div className="flex gap-5" aria-busy={loading || undefined}>
-            {loading
-              ? Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="w-36 shrink-0 space-y-2.5">
-                    <Skeleton className="aspect-square w-full rounded-md" />
-                    <Skeleton className="h-3.5 w-4/5" />
-                    <Skeleton className="h-3 w-3/5" />
-                  </div>
-                ))
-              : (
-                  <p className="text-sm text-muted-foreground">
-                    No recent albums. Connect Lidarr in Admin, then open an album to pick tracks.
-                  </p>
-                )}
-          </div>
+          loading ? (
+            <ShelfSkeleton />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              New albums from Lidarr and MusicBrainz show up here.
+            </p>
+          )
+        }
+      >
+        {(visible) => releaseTiles(releases, visible)}
+      </MediaShelfRow>
+
+      <MediaShelfRow
+        title="Explore"
+        seeAllHref="/browse/releases"
+        itemCount={catalog.length}
+        empty={
+          loading ? (
+            <ShelfSkeleton />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              What’s trending, nudged by what you play and like.
+            </p>
+          )
+        }
+      >
+        {(visible) => releaseTiles(catalog, visible)}
+      </MediaShelfRow>
+
+      <MediaShelfRow
+        title="Artists"
+        itemCount={artists.length}
+        empty={
+          loading ? (
+            <ShelfSkeleton />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Artists you play, like, or keep in the library show up here —
+              plus what’s charting.
+            </p>
+          )
         }
       >
         {(visible) =>
-          releases.slice(0, visible).map((r) => {
-            const href = catalogAlbumHref(r);
-            return (
-              <MediaTileShell
-                key={r.id}
-                title={r.title}
-                subtitle={r.artist}
-                ariaLabel={`Open ${r.title}`}
-                onOpen={() => router.push(href)}
-                cover={
-                  <CoverArt
-                    seed={r.title}
-                    image={r.image}
-                    className="size-full"
-                  />
-                }
-              />
-            );
-          })
+          artists.slice(0, visible).map((a) => (
+            <MediaTileShell
+              key={a.foreignArtistId || a.name}
+              title={a.name}
+              subtitle="Artist"
+              ariaLabel={`Open ${a.name}`}
+              onOpen={() => openArtist(a)}
+              coverShape="circle"
+              cover={
+                <CoverArt
+                  seed={a.name}
+                  image={a.image}
+                  className="size-full rounded-full"
+                />
+              }
+            />
+          ))
         }
       </MediaShelfRow>
 
@@ -262,15 +325,7 @@ export function HomeClient() {
                   <Skeleton className="h-6 w-40" />
                 </div>
               </div>
-              <div className="flex gap-5">
-                {Array.from({ length: 5 }).map((__, j) => (
-                  <div key={j} className="w-36 shrink-0 space-y-2.5">
-                    <Skeleton className="aspect-square w-full rounded-md" />
-                    <Skeleton className="h-3.5 w-4/5" />
-                    <Skeleton className="h-3 w-3/5" />
-                  </div>
-                ))}
-              </div>
+              <ShelfSkeleton count={5} />
             </div>
           ))
         : null}

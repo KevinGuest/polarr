@@ -18,6 +18,7 @@ type AuthUser = {
   publicId?: string;
   username: string;
   isAdmin: boolean;
+  role?: string;
   avatarUrl?: string | null;
 };
 
@@ -140,7 +141,10 @@ export function UserMenu({
           <User className="size-3.5 shrink-0 text-muted-foreground" />
           Profile
         </DropdownMenuItem>
-        {user?.isAdmin && (
+        {(user?.isAdmin ||
+          user?.role === "owner" ||
+          user?.role === "admin" ||
+          user?.role === "moderator") && (
           <DropdownMenuItem
             className="gap-2"
             onSelect={() => router.push("/admin")}

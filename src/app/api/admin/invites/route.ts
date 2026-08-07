@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { json, getAdminUser } from "@/lib/api";
+import { json, getStaffUser } from "@/lib/api";
 import {
   createInvite,
   deleteInvite,
@@ -14,7 +14,7 @@ import { sendInviteEmail } from "@/lib/mail";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const admin = await getAdminUser();
+  const admin = await getStaffUser();
   if (!admin) return json({ error: "Admin only" }, { status: 403 });
 
   const settings = getSettings();
@@ -35,7 +35,7 @@ const createSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const admin = await getAdminUser();
+  const admin = await getStaffUser();
   if (!admin) return json({ error: "Admin only" }, { status: 403 });
 
   const settings = getSettings();
@@ -94,7 +94,7 @@ const revokeSchema = z.object({
 });
 
 export async function DELETE(req: Request) {
-  const admin = await getAdminUser();
+  const admin = await getStaffUser();
   if (!admin) return json({ error: "Admin only" }, { status: 403 });
 
   const parsed = revokeSchema.safeParse(await req.json());

@@ -14,7 +14,12 @@ import {
   serializeNotifyEvents,
   type NotifyEventFlags,
 } from "./notify-events";
+import {
+  isUserRole,
+  type UserRole,
+} from "./roles";
 
+export type { UserRole } from "./roles";
 export type { NotifyEventFlags, NotifyEventId } from "./notify-events";
 export {
   DEFAULT_NOTIFY_EVENTS,
@@ -41,6 +46,12 @@ export type Settings = {
   discordWebhookUrl: string;
   notifyEmailEvents: NotifyEventFlags;
   notifyDiscordEvents: NotifyEventFlags;
+  /** Spotify app credentials for public playlist import (Client Credentials). */
+  spotifyClientId: string;
+  spotifyClientSecret: string;
+  /** Discord OAuth app (user linking + Rich Presence client id). */
+  discordClientId: string;
+  discordClientSecret: string;
 };
 
 export type MediaType = "artist" | "album" | "track";
@@ -166,7 +177,24 @@ export function requestNormalizedKey(
 
 export function getDb(): Database.Database {
   if (db) return db;
-  db = new Database(dbPath());
+  const file = dbPath();
+  try {
+    db = new Database(file);
+  } catch (err) {
+    const code =
+      err && typeof err === "object" && "code" in err
+        ? String((err as { code: unknown }).code)
+        : "";
+    if (code === "SQLITE_CANTOPEN") {
+      throw new Error(
+        `Unable to open database at ${file}. ` +
+          `Data directory must be writable by the container user (uid 1000). ` +
+          `Fix: sudo chown -R 1000:1000 ./data ./music`,
+        { cause: err },
+      );
+    }
+    throw err;
+  }
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
@@ -193,9 +221,99 @@ function ensureColumn(
   }
 }
 
+/**
+ * Exactly one Server Owner. Promote the earliest admin if missing; demote extras.
+ */
+function ensureSingleServerOwner(database: Database.Database) {
+  const owners = database
+    .prepare(
+      `SELECT id FROM users WHERE role = 'owner' ORDER BY created_at ASC, id ASC`,
+    )
+    .all() as { id: string }[];
+
+  if (owners.length === 0) {
+    const candidate = database
+      .prepare(
+        `SELECT id FROM users
+         WHERE is_admin = 1 OR role IN ('admin', 'owner')
+         ORDER BY created_at ASC, id ASC
+         LIMIT 1`,
+      )
+      .get() as { id: string } | undefined;
+    if (candidate) {
+      database
+        .prepare(
+          `UPDATE users SET role = 'owner', is_admin = 1 WHERE id = ?`,
+        )
+        .run(candidate.id);
+    }
+    return;
+  }
+
+  if (owners.length > 1) {
+    const keep = owners[0]!.id;
+    for (const row of owners.slice(1)) {
+      database
+        .prepare(
+          `UPDATE users SET role = 'admin', is_admin = 1 WHERE id = ?`,
+        )
+        .run(row.id);
+    }
+    database
+      .prepare(`UPDATE users SET role = 'owner', is_admin = 1 WHERE id = ?`)
+      .run(keep);
+  }
+}
+
 /** Stable id for likes that aren't (yet) in the local library. */
 export function streamLikeId(artist: string, title: string): string {
   return `stream:${artist.trim().toLowerCase()}|${title.trim().toLowerCase()}`;
+}
+
+/**
+ * Ensure a tracks row exists for play history / recently played when the
+ * listen was live/stream-only (no library file yet). Prefers a real library
+ * match when one exists.
+ */
+export function ensureHistoryTrack(input: {
+  title: string;
+  artist: string;
+  album?: string;
+  coverPath?: string | null;
+}): TrackRow | null {
+  const title = input.title.trim();
+  const artist = input.artist.trim();
+  if (!title || !artist) return null;
+
+  const local = findTrack(artist, title);
+  if (local) return local;
+
+  const id = streamLikeId(artist, title);
+  const existing = getTrack(id);
+  if (existing) {
+    if (input.coverPath && !existing.coverPath) {
+      upsertTrack({
+        ...existing,
+        coverPath: input.coverPath,
+        album: input.album?.trim() || existing.album,
+      });
+      return getTrack(id);
+    }
+    return existing;
+  }
+
+  upsertTrack({
+    id,
+    title,
+    artist,
+    album: input.album?.trim() || title,
+    duration: 0,
+    path: `stream://${id}`,
+    coverPath: input.coverPath || null,
+    source: "stream",
+    externalId: null,
+  });
+  return getTrack(id);
 }
 
 /**
@@ -454,7 +572,50 @@ function migrate(database: Database.Database) {
   ensureColumn(database, "users", "is_admin", "is_admin INTEGER NOT NULL DEFAULT 0");
   ensureColumn(database, "users", "avatar_path", "avatar_path TEXT");
   ensureColumn(database, "users", "banner_colors", "banner_colors TEXT");
+  ensureColumn(database, "users", "email", "email TEXT");
+  ensureColumn(database, "users", "discord_id", "discord_id TEXT");
+  ensureColumn(database, "users", "discord_username", "discord_username TEXT");
+  ensureColumn(
+    database,
+    "users",
+    "discord_access_token",
+    "discord_access_token TEXT",
+  );
+  ensureColumn(
+    database,
+    "users",
+    "discord_refresh_token",
+    "discord_refresh_token TEXT",
+  );
+  ensureColumn(
+    database,
+    "users",
+    "discord_token_expires_at",
+    "discord_token_expires_at TEXT",
+  );
+  ensureColumn(
+    database,
+    "users",
+    "discord_presence_enabled",
+    "discord_presence_enabled INTEGER NOT NULL DEFAULT 0",
+  );
   ensureColumn(database, "invites", "emailed_to", "emailed_to TEXT");
+  ensureColumn(
+    database,
+    "users",
+    "role",
+    "role TEXT NOT NULL DEFAULT 'member'",
+  );
+  ensureColumn(database, "users", "last_ip", "last_ip TEXT");
+  ensureColumn(database, "users", "last_hwid", "last_hwid TEXT");
+  ensureColumn(
+    database,
+    "users",
+    "access_revoked_at",
+    "access_revoked_at TEXT",
+  );
+  ensureColumn(database, "sessions", "ip", "ip TEXT");
+  ensureColumn(database, "sessions", "hwid", "hwid TEXT");
   ensureColumn(database, "tracks", "file_size", "file_size INTEGER NOT NULL DEFAULT 0");
   ensureColumn(database, "tracks", "mtime_ms", "mtime_ms REAL NOT NULL DEFAULT 0");
   ensureColumn(database, "tracks", "updated_at", "updated_at TEXT NOT NULL DEFAULT ''");
@@ -474,6 +635,8 @@ function migrate(database: Database.Database) {
     "listened_seconds",
     "listened_seconds REAL",
   );
+  ensureColumn(database, "notifications", "image_url", "image_url TEXT");
+  ensureColumn(database, "notifications", "media_type", "media_type TEXT");
 
   // v3: likes may reference streamed tracks (no library file / no track FK)
   migrateTrackLikesV3(database);
@@ -486,13 +649,26 @@ function migrate(database: Database.Database) {
       WHERE normalized_key = '' OR normalized_key IS NULL;
   `);
 
-  // Single-user installs are admin
+  // Single-user installs are the server owner
   const userCount = database
     .prepare(`SELECT COUNT(*) as c FROM users`)
     .get() as { c: number };
   if (userCount.c === 1) {
-    database.prepare(`UPDATE users SET is_admin = 1 WHERE is_admin = 0`).run();
+    database
+      .prepare(
+        `UPDATE users SET is_admin = 1, role = 'owner'
+         WHERE is_admin = 0 OR role IS NULL OR role = '' OR role = 'member' OR role = 'admin'`,
+      )
+      .run();
   }
+
+  // Legacy is_admin / role sync, then ensure exactly one server owner
+  database.exec(`
+    UPDATE users SET role = 'admin' WHERE is_admin = 1 AND (role IS NULL OR role = '' OR role = 'member');
+    UPDATE users SET is_admin = 1 WHERE role IN ('admin', 'owner') AND is_admin = 0;
+    UPDATE users SET is_admin = 0 WHERE role NOT IN ('admin', 'owner') AND is_admin = 1;
+  `);
+  ensureSingleServerOwner(database);
 
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist);
@@ -576,6 +752,22 @@ export function getSettings(): Settings {
     notifyDiscordEvents: parseNotifyEvents(
       getSetting("notifyDiscordEvents", ""),
     ),
+    spotifyClientId:
+      getSetting("spotifyClientId", "") ||
+      process.env.POLARR_SPOTIFY_CLIENT_ID ||
+      "",
+    spotifyClientSecret:
+      getSetting("spotifyClientSecret", "") ||
+      process.env.POLARR_SPOTIFY_CLIENT_SECRET ||
+      "",
+    discordClientId:
+      getSetting("discordClientId", "") ||
+      process.env.POLARR_DISCORD_CLIENT_ID ||
+      "",
+    discordClientSecret:
+      getSetting("discordClientSecret", "") ||
+      process.env.POLARR_DISCORD_CLIENT_SECRET ||
+      "",
   };
 }
 
@@ -603,6 +795,10 @@ export function updateSettings(partial: Partial<Settings>): Settings {
     "notifyDiscordEvents",
     serializeNotifyEvents(next.notifyDiscordEvents),
   );
+  setSetting("spotifyClientId", next.spotifyClientId);
+  setSetting("spotifyClientSecret", next.spotifyClientSecret);
+  setSetting("discordClientId", next.discordClientId);
+  setSetting("discordClientSecret", next.discordClientSecret);
   return next;
 }
 
@@ -626,48 +822,291 @@ export function countUsers(): number {
 
 export function countAdmins(): number {
   const row = getDb()
-    .prepare(`SELECT COUNT(*) as c FROM users WHERE is_admin = 1`)
+    .prepare(
+      `SELECT COUNT(*) as c FROM users
+       WHERE role IN ('admin', 'owner') OR is_admin = 1`,
+    )
     .get() as { c: number };
   return row.c;
+}
+
+export function countOwners(): number {
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) as c FROM users WHERE role = 'owner'`)
+    .get() as { c: number };
+  return row.c;
+}
+
+export function getServerOwnerId(): string | null {
+  const row = getDb()
+    .prepare(
+      `SELECT id FROM users WHERE role = 'owner' ORDER BY created_at ASC LIMIT 1`,
+    )
+    .get() as { id: string } | undefined;
+  return row?.id ?? null;
+}
+
+function adminBit(role: UserRole): number {
+  return role === "owner" || role === "admin" ? 1 : 0;
+}
+
+function readUserRole(row: {
+  role: string | null;
+  isAdmin: number;
+}): UserRole {
+  if (row.role && isUserRole(row.role)) return row.role;
+  return row.isAdmin ? "admin" : "member";
 }
 
 export function createUser(
   username: string,
   password: string,
-  options?: { isAdmin?: boolean },
+  options?: { isAdmin?: boolean; role?: UserRole },
 ) {
   const id = newId();
-  const isAdmin = options?.isAdmin ? 1 : 0;
+  const role: UserRole =
+    options?.role || (options?.isAdmin ? "admin" : "member");
+  const isAdmin = adminBit(role);
   getDb()
     .prepare(
-      `INSERT INTO users(id, username, password_hash, is_admin, created_at)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO users(id, username, password_hash, is_admin, role, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .run(id, username, hashPassword(password), isAdmin, nowIso());
-  return { id, username, isAdmin: Boolean(isAdmin) };
+    .run(id, username, hashPassword(password), isAdmin, role, nowIso());
+  return {
+    id,
+    username,
+    isAdmin: Boolean(isAdmin),
+    role,
+  };
 }
 
-export function createAdminUser(username: string, password: string) {
+export function createAdminUser(
+  username: string,
+  password: string,
+  email: string,
+) {
   if (hasUsers()) throw new Error("Admin account already exists");
-  const user = createUser(username, password, { isAdmin: true });
+  // First account is always Server Owner
+  const user = createUser(username, password, { role: "owner" });
+  const mail = updateUserEmail(user.id, email);
+  if (!mail.ok) {
+    // Roll back empty install if email invalid
+    getDb().prepare(`DELETE FROM users WHERE id = ?`).run(user.id);
+    throw new Error(mail.error);
+  }
   updateSettings({ setupComplete: true });
-  return user;
+  return { ...user, email: mail.email };
 }
 
 export function setUserAdmin(userId: string, isAdmin: boolean) {
+  return setUserRole(userId, isAdmin ? "admin" : "member");
+}
+
+/**
+ * Assign member / moderator / admin.
+ * Cannot create a second owner, cannot demote the Server Owner
+ * (use transferServerOwnership for that).
+ */
+export function setUserRole(userId: string, role: UserRole) {
+  if (role === "owner") {
+    throw new Error(
+      "Use ownership transfer to assign Server Owner (only one allowed)",
+    );
+  }
+
   const db = getDb();
   const row = db
-    .prepare(`SELECT id, is_admin as isAdmin FROM users WHERE id = ?`)
-    .get(userId) as { id: string; isAdmin: number } | undefined;
+    .prepare(
+      `SELECT id, role, is_admin as isAdmin, access_revoked_at as revokedAt
+       FROM users WHERE id = ?`,
+    )
+    .get(userId) as
+    | { id: string; role: string; isAdmin: number; revokedAt: string | null }
+    | undefined;
   if (!row) throw new Error("User not found");
-  if (row.isAdmin && !isAdmin && countAdmins() <= 1) {
-    throw new Error("Cannot remove the last admin");
+  if (row.revokedAt) throw new Error("User access has been revoked");
+
+  const current = readUserRole(row);
+  if (current === "owner") {
+    throw new Error("Cannot change the Server Owner role; transfer ownership instead");
   }
-  db.prepare(`UPDATE users SET is_admin = ? WHERE id = ?`).run(
-    isAdmin ? 1 : 0,
+
+  db.prepare(`UPDATE users SET role = ?, is_admin = ? WHERE id = ?`).run(
+    role,
+    adminBit(role),
     userId,
   );
   return getPublicProfileById(userId);
+}
+
+/**
+ * Transfer Server Owner to another user. Previous owner becomes a regular member
+ * (no admin panel access). Only callable by the current owner (checked by API).
+ */
+export function transferServerOwnership(
+  currentOwnerId: string,
+  newOwnerId: string,
+) {
+  if (!currentOwnerId || !newOwnerId) {
+    throw new Error("Invalid ownership transfer");
+  }
+  if (currentOwnerId === newOwnerId) {
+    throw new Error("You are already the Server Owner");
+  }
+
+  const db = getDb();
+  const current = db
+    .prepare(
+      `SELECT id, role, is_admin as isAdmin, access_revoked_at as revokedAt
+       FROM users WHERE id = ?`,
+    )
+    .get(currentOwnerId) as
+    | { id: string; role: string; isAdmin: number; revokedAt: string | null }
+    | undefined;
+  if (!current) throw new Error("Current owner not found");
+  if (readUserRole(current) !== "owner") {
+    throw new Error("Only the Server Owner can transfer ownership");
+  }
+
+  const target = db
+    .prepare(
+      `SELECT id, role, is_admin as isAdmin, access_revoked_at as revokedAt
+       FROM users WHERE id = ?`,
+    )
+    .get(newOwnerId) as
+    | { id: string; role: string; isAdmin: number; revokedAt: string | null }
+    | undefined;
+  if (!target) throw new Error("User not found");
+  if (target.revokedAt) {
+    throw new Error("Cannot transfer ownership to a revoked user");
+  }
+
+  const txn = db.transaction(() => {
+    // Demote previous owner to plain member (no admin / moderator).
+    db.prepare(
+      `UPDATE users SET role = 'member', is_admin = 0 WHERE id = ?`,
+    ).run(currentOwnerId);
+    // Exactly one owner
+    db.prepare(
+      `UPDATE users SET role = 'admin', is_admin = 1 WHERE role = 'owner'`,
+    ).run();
+    db.prepare(
+      `UPDATE users SET role = 'owner', is_admin = 1, access_revoked_at = NULL
+       WHERE id = ?`,
+    ).run(newOwnerId);
+  });
+  txn();
+
+  return getPublicProfileById(newOwnerId);
+}
+
+/** End access: wipe sessions, soft-block login. Cannot revoke Server Owner. */
+export function revokeUserAccess(userId: string): { ok: true } {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT id, role, is_admin as isAdmin FROM users WHERE id = ?`,
+    )
+    .get(userId) as
+    | { id: string; role: string; isAdmin: number }
+    | undefined;
+  if (!row) throw new Error("User not found");
+
+  const role = readUserRole(row);
+  if (role === "owner") {
+    throw new Error("Cannot revoke the Server Owner; transfer ownership first");
+  }
+
+  const now = nowIso();
+  // Keep invite row for audit (used_by → user); block login via access_revoked_at.
+  db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(userId);
+  db.prepare(
+    `UPDATE users SET access_revoked_at = ?, role = 'member', is_admin = 0
+     WHERE id = ?`,
+  ).run(now, userId);
+  return { ok: true };
+}
+
+export function recordUserClientInfo(
+  userId: string,
+  info: { ip?: string | null; hwid?: string | null },
+  sessionToken?: string | null,
+) {
+  if (!userId) return;
+  const ip = (info.ip || "").trim().slice(0, 64) || null;
+  const hwid = (info.hwid || "").trim().slice(0, 128) || null;
+  if (!ip && !hwid) return;
+  const db = getDb();
+  if (ip || hwid) {
+    db.prepare(
+      `UPDATE users SET
+         last_ip = COALESCE(?, last_ip),
+         last_hwid = COALESCE(?, last_hwid)
+       WHERE id = ?`,
+    ).run(ip, hwid, userId);
+  }
+  if (sessionToken && (ip || hwid)) {
+    db.prepare(
+      `UPDATE sessions SET
+         ip = COALESCE(?, ip),
+         hwid = COALESCE(?, hwid)
+       WHERE token = ?`,
+    ).run(ip, hwid, sessionToken);
+  }
+}
+
+export function getAdminUserDetail(userId: string) {
+  const profile = getPublicProfileById(userId);
+  if (!profile) return null;
+
+  const row = getDb()
+    .prepare(
+      `SELECT email, last_ip as lastIp, last_hwid as lastHwid,
+              access_revoked_at as accessRevokedAt
+       FROM users WHERE id = ?`,
+    )
+    .get(userId) as
+    | {
+        email: string | null;
+        lastIp: string | null;
+        lastHwid: string | null;
+        accessRevokedAt: string | null;
+      }
+    | undefined;
+
+  const invite = getDb()
+    .prepare(
+      `SELECT id, code, emailed_to as emailedTo, used_at as usedAt,
+              created_at as createdAt
+       FROM invites WHERE used_by = ? ORDER BY used_at DESC LIMIT 1`,
+    )
+    .get(userId) as
+    | {
+        id: string;
+        code: string;
+        emailedTo: string | null;
+        usedAt: string | null;
+        createdAt: string;
+      }
+    | undefined;
+
+  return {
+    ...profile,
+    email: (row?.email || "").trim() || null,
+    lastIp: (row?.lastIp || "").trim() || null,
+    lastHwid: (row?.lastHwid || "").trim() || null,
+    accessRevokedAt: row?.accessRevokedAt || null,
+    invite: invite
+      ? {
+          id: invite.id,
+          code: invite.code,
+          emailedTo: invite.emailedTo,
+          usedAt: invite.usedAt,
+          createdAt: invite.createdAt,
+        }
+      : null,
+  };
 }
 
 export function getPublicProfileById(id: string): PublicProfile | null {
@@ -676,6 +1115,185 @@ export function getPublicProfileById(id: string): PublicProfile | null {
     .get(id) as UserProfileRow | undefined;
   if (!row) return null;
   return mapPublicProfile(row);
+}
+
+/** Account email (private — not on public profiles). */
+export function getUserEmail(userId: string): string | null {
+  if (!userId) return null;
+  const row = getDb()
+    .prepare(`SELECT email FROM users WHERE id = ?`)
+    .get(userId) as { email: string | null } | undefined;
+  const email = (row?.email || "").trim();
+  return email || null;
+}
+
+/**
+ * Set account email (required). Must be unique among users (case-insensitive).
+ */
+export function updateUserEmail(
+  userId: string,
+  email: string,
+): { ok: true; email: string } | { ok: false; error: string } {
+  if (!userId) return { ok: false, error: "Unauthorized" };
+  const next = email.trim().toLowerCase();
+  if (!next) {
+    return { ok: false, error: "Email is required" };
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next) || next.length > 255) {
+    return { ok: false, error: "Enter a valid email address" };
+  }
+  const taken = getDb()
+    .prepare(
+      `SELECT id FROM users WHERE lower(email) = ? AND id != ? LIMIT 1`,
+    )
+    .get(next, userId) as { id: string } | undefined;
+  if (taken) return { ok: false, error: "That email is already in use" };
+  getDb()
+    .prepare(`UPDATE users SET email = ? WHERE id = ?`)
+    .run(next, userId);
+  return { ok: true, email: next };
+}
+
+export function updateUsername(
+  userId: string,
+  username: string,
+): { ok: true; username: string } | { ok: false; error: string } {
+  if (!userId) return { ok: false, error: "Unauthorized" };
+  const next = username.trim();
+  if (next.length < 1 || next.length > 40) {
+    return { ok: false, error: "Username must be 1–40 characters" };
+  }
+  if (!/^[a-zA-Z0-9._-]+$/.test(next)) {
+    return {
+      ok: false,
+      error: "Username can only use letters, numbers, dots, _ and -",
+    };
+  }
+  const taken = getDb()
+    .prepare(
+      `SELECT id FROM users WHERE lower(username) = lower(?) AND id != ? LIMIT 1`,
+    )
+    .get(next, userId) as { id: string } | undefined;
+  if (taken) return { ok: false, error: "That username is taken" };
+  const prev = getDb()
+    .prepare(`SELECT username FROM users WHERE id = ?`)
+    .get(userId) as { username: string } | undefined;
+  getDb()
+    .prepare(`UPDATE users SET username = ? WHERE id = ?`)
+    .run(next, userId);
+  if (prev?.username && prev.username !== next) {
+    getDb()
+      .prepare(`UPDATE requests SET requested_by = ? WHERE requested_by = ?`)
+      .run(next, prev.username);
+  }
+  return { ok: true, username: next };
+}
+
+export function updateUserPassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+): { ok: true } | { ok: false; error: string } {
+  if (!userId) return { ok: false, error: "Unauthorized" };
+  if (newPassword.length < 8 || newPassword.length > 128) {
+    return { ok: false, error: "New password must be at least 8 characters" };
+  }
+  const row = getDb()
+    .prepare(`SELECT password_hash as passwordHash FROM users WHERE id = ?`)
+    .get(userId) as { passwordHash: string } | undefined;
+  if (!row) return { ok: false, error: "User not found" };
+  if (!verifyPassword(currentPassword, row.passwordHash)) {
+    return { ok: false, error: "Current password is incorrect" };
+  }
+  getDb()
+    .prepare(`UPDATE users SET password_hash = ? WHERE id = ?`)
+    .run(hashPassword(newPassword), userId);
+  return { ok: true };
+}
+
+export type DiscordLink = {
+  discordId: string;
+  discordUsername: string;
+  presenceEnabled: boolean;
+};
+
+export function getDiscordLink(userId: string): DiscordLink | null {
+  if (!userId) return null;
+  const row = getDb()
+    .prepare(
+      `SELECT discord_id as discordId, discord_username as discordUsername,
+              discord_presence_enabled as presenceEnabled
+       FROM users WHERE id = ?`,
+    )
+    .get(userId) as
+    | {
+        discordId: string | null;
+        discordUsername: string | null;
+        presenceEnabled: number;
+      }
+    | undefined;
+  if (!row?.discordId) return null;
+  return {
+    discordId: row.discordId,
+    discordUsername: row.discordUsername || "",
+    presenceEnabled: Number(row.presenceEnabled) === 1,
+  };
+}
+
+export function setDiscordLink(
+  userId: string,
+  input: {
+    discordId: string;
+    discordUsername: string;
+    accessToken: string;
+    refreshToken: string | null;
+    expiresAt: string | null;
+  },
+) {
+  getDb()
+    .prepare(
+      `UPDATE users SET
+         discord_id = ?,
+         discord_username = ?,
+         discord_access_token = ?,
+         discord_refresh_token = ?,
+         discord_token_expires_at = ?
+       WHERE id = ?`,
+    )
+    .run(
+      input.discordId,
+      input.discordUsername,
+      input.accessToken,
+      input.refreshToken,
+      input.expiresAt,
+      userId,
+    );
+}
+
+export function clearDiscordLink(userId: string) {
+  getDb()
+    .prepare(
+      `UPDATE users SET
+         discord_id = NULL,
+         discord_username = NULL,
+         discord_access_token = NULL,
+         discord_refresh_token = NULL,
+         discord_token_expires_at = NULL,
+         discord_presence_enabled = 0
+       WHERE id = ?`,
+    )
+    .run(userId);
+}
+
+export function setDiscordPresenceEnabled(userId: string, enabled: boolean) {
+  getDb()
+    .prepare(`UPDATE users SET discord_presence_enabled = ? WHERE id = ?`)
+    .run(enabled ? 1 : 0, userId);
+}
+
+export function discordOAuthConfigured(settings?: Settings): boolean {
+  const s = settings ?? getSettings();
+  return Boolean(s.discordClientId.trim() && s.discordClientSecret.trim());
 }
 
 // ─── Invites ────────────────────────────────────────────────────────────────
@@ -839,13 +1457,21 @@ export function redeemInvite(
   getDb()
     .prepare(`UPDATE invites SET used_by = ?, used_at = ? WHERE id = ?`)
     .run(user.id, nowIso(), invite.id);
+  if (invite.emailedTo?.trim()) {
+    updateUserEmail(user.id, invite.emailedTo.trim());
+  }
   return user;
 }
 
-export function authenticate(username: string, password: string) {
+export function authenticate(
+  username: string,
+  password: string,
+  client?: { ip?: string | null; hwid?: string | null },
+) {
   const row = getDb()
     .prepare(
-      `SELECT id, username, password_hash, is_admin as isAdmin
+      `SELECT id, username, password_hash, is_admin as isAdmin, role,
+              access_revoked_at as accessRevokedAt
        FROM users WHERE username = ?`,
     )
     .get(username) as
@@ -854,23 +1480,33 @@ export function authenticate(username: string, password: string) {
         username: string;
         password_hash: string;
         isAdmin: number;
+        role: string | null;
+        accessRevokedAt: string | null;
       }
     | undefined;
   if (!row || !verifyPassword(password, row.password_hash)) return null;
+  if (row.accessRevokedAt) return null;
+
+  const role = resolveRole(row.role, row.isAdmin);
   const token = randomBytes(32).toString("hex");
   const now = new Date();
   const expires = new Date(now.getTime() + 1000 * 60 * 60 * 24 * 30);
+  const ip = (client?.ip || "").trim().slice(0, 64) || null;
+  const hwid = (client?.hwid || "").trim().slice(0, 128) || null;
   getDb()
     .prepare(
-      `INSERT INTO sessions(token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`,
+      `INSERT INTO sessions(token, user_id, created_at, expires_at, ip, hwid)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .run(token, row.id, now.toISOString(), expires.toISOString());
+    .run(token, row.id, now.toISOString(), expires.toISOString(), ip, hwid);
+  recordUserClientInfo(row.id, { ip, hwid }, token);
   return {
     token,
     user: {
       id: row.id,
       username: row.username,
-      isAdmin: Boolean(row.isAdmin),
+      isAdmin: role === "admin" || role === "owner",
+      role,
     },
   };
 }
@@ -879,7 +1515,8 @@ export function getUserByToken(token: string | null | undefined) {
   if (!token) return null;
   const row = getDb()
     .prepare(
-      `SELECT u.id, u.username, u.is_admin as isAdmin, s.expires_at
+      `SELECT u.id, u.username, u.is_admin as isAdmin, u.role,
+              u.access_revoked_at as accessRevokedAt, s.expires_at
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token = ?`,
     )
@@ -888,16 +1525,29 @@ export function getUserByToken(token: string | null | undefined) {
         id: string;
         username: string;
         isAdmin: number;
+        role: string | null;
+        accessRevokedAt: string | null;
         expires_at: string;
       }
     | undefined;
   if (!row) return null;
+  if (row.accessRevokedAt) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) return null;
+  const role = resolveRole(row.role, row.isAdmin);
   return {
     id: row.id,
     username: row.username,
-    isAdmin: Boolean(row.isAdmin),
+    isAdmin: role === "admin" || role === "owner",
+    role,
   };
+}
+
+function resolveRole(
+  role: string | null | undefined,
+  isAdmin: number,
+): UserRole {
+  if (role && isUserRole(role)) return role;
+  return isAdmin ? "admin" : "member";
 }
 
 import { scrambleUserId } from "./user-id";
@@ -907,6 +1557,7 @@ export type PublicProfile = {
   publicId: string;
   username: string;
   isAdmin: boolean;
+  role: UserRole;
   createdAt: string;
   avatarUrl: string | null;
   bannerColors: string[] | null;
@@ -916,6 +1567,7 @@ type UserProfileRow = {
   id: string;
   username: string;
   isAdmin: number;
+  role?: string | null;
   createdAt: string;
   avatarPath?: string | null;
   bannerColors?: string | null;
@@ -941,11 +1593,13 @@ function parseBannerColors(raw: string | null | undefined): string[] | null {
 function mapPublicProfile(row: UserProfileRow): PublicProfile {
   const hasAvatar = Boolean(row.avatarPath);
   const publicId = scrambleUserId(row.id);
+  const role = resolveRole(row.role, row.isAdmin);
   return {
     id: row.id,
     publicId,
     username: row.username,
-    isAdmin: Boolean(row.isAdmin),
+    isAdmin: role === "admin" || role === "owner",
+    role,
     createdAt: row.createdAt,
     avatarUrl: hasAvatar
       ? `/api/profiles/avatar/${encodeURIComponent(publicId)}`
@@ -954,7 +1608,7 @@ function mapPublicProfile(row: UserProfileRow): PublicProfile {
   };
 }
 
-const PROFILE_SELECT = `SELECT id, username, is_admin as isAdmin, created_at as createdAt,
+const PROFILE_SELECT = `SELECT id, username, is_admin as isAdmin, role, created_at as createdAt,
   avatar_path as avatarPath, banner_colors as bannerColors FROM users`;
 
 /** Absolute filesystem path for a stored avatar, if any. */
@@ -1002,6 +1656,9 @@ export function getPublicProfile(username: string): PublicProfile | null {
   return mapPublicProfile(row);
 }
 
+/** Real library files only — excludes stream history stubs used for Recently played. */
+const LIBRARY_TRACK_FILTER = `source != 'stream' AND path NOT LIKE 'stream:%' AND path NOT LIKE 'stream://%'`;
+
 /** Artist frequency from shared library — used on public profiles. */
 export function topArtistsFromLibrary(limit = 12): {
   artist: string;
@@ -1012,11 +1669,34 @@ export function topArtistsFromLibrary(limit = 12): {
       `SELECT artist as artist, COUNT(*) as tracks
        FROM tracks
        WHERE artist IS NOT NULL AND trim(artist) != ''
+         AND ${LIBRARY_TRACK_FILTER}
        GROUP BY lower(artist)
        ORDER BY tracks DESC, artist ASC
        LIMIT ?`,
     )
     .all(limit) as { artist: string; tracks: number }[];
+}
+
+/**
+ * Artists ranked by household listening (≥15s plays).
+ * Includes stream stubs so live listens count — not Lidarr-only.
+ */
+export function topArtistsFromListening(limit = 24): {
+  artist: string;
+  plays: number;
+}[] {
+  return getDb()
+    .prepare(
+      `SELECT t.artist as artist, COUNT(*) as plays
+       FROM play_history p
+       INNER JOIN tracks t ON t.id = p.track_id
+       WHERE t.artist IS NOT NULL AND trim(t.artist) != ''
+         AND (p.listened_seconds IS NULL OR p.listened_seconds >= 15)
+       GROUP BY lower(t.artist)
+       ORDER BY plays DESC, artist ASC
+       LIMIT ?`,
+    )
+    .all(limit) as { artist: string; plays: number }[];
 }
 
 /** Recent / top tracks for public profile lists. */
@@ -1025,6 +1705,7 @@ export function topTracksFromLibrary(limit = 10): TrackRow[] {
     getDb()
       .prepare(
         `${TRACK_SELECT}
+         WHERE ${LIBRARY_TRACK_FILTER}
          ORDER BY mtime_ms DESC, added_at DESC
          LIMIT ?`,
       )
@@ -1052,6 +1733,7 @@ export function listLibraryNavItems(limit = 40): {
                 THEN cover_path END) as image
        FROM tracks
        WHERE album IS NOT NULL AND trim(album) != ''
+         AND ${LIBRARY_TRACK_FILTER}
        GROUP BY lower(artist), lower(album)
        ORDER BY mtime DESC, title ASC
        LIMIT ?`,
@@ -1108,6 +1790,7 @@ export function publicAlbumsFromLibrary(limit = 16): {
               COUNT(*) as tracks
        FROM tracks
        WHERE album IS NOT NULL AND trim(album) != ''
+         AND ${LIBRARY_TRACK_FILTER}
        GROUP BY lower(artist), lower(album)
        ORDER BY tracks DESC, title ASC
        LIMIT ?`,
@@ -1129,7 +1812,9 @@ export function libraryStats(): {
     getDb()
       .prepare(
         `SELECT COUNT(*) as c FROM (
-           SELECT 1 FROM tracks GROUP BY lower(artist), lower(album)
+           SELECT 1 FROM tracks
+           WHERE ${LIBRARY_TRACK_FILTER}
+           GROUP BY lower(artist), lower(album)
          )`,
       )
       .get() as { c: number }
@@ -1140,6 +1825,7 @@ export function libraryStats(): {
         `SELECT COUNT(*) as c FROM (
            SELECT 1 FROM tracks
            WHERE artist IS NOT NULL AND trim(artist) != ''
+             AND ${LIBRARY_TRACK_FILTER}
            GROUP BY lower(artist)
          )`,
       )
@@ -1189,6 +1875,9 @@ export function findTrack(artist: string, title: string): TrackRow | null {
     .prepare(
       `${TRACK_SELECT}
        WHERE lower(artist) = ? AND lower(title) = ?
+         AND source != 'stream'
+         AND path NOT LIKE 'stream:%'
+         AND path NOT LIKE 'stream://%'
        ORDER BY CASE source WHEN 'fallback' THEN 0 WHEN 'library' THEN 1 ELSE 2 END
        LIMIT 1`,
     )
@@ -1199,14 +1888,20 @@ export function findTrack(artist: string, title: string): TrackRow | null {
 export function listTracks(limit = 200, offset = 0): TrackRow[] {
   return (
     getDb()
-      .prepare(`${TRACK_SELECT} ORDER BY added_at DESC LIMIT ? OFFSET ?`)
+      .prepare(
+        `${TRACK_SELECT}
+         WHERE ${LIBRARY_TRACK_FILTER}
+         ORDER BY added_at DESC LIMIT ? OFFSET ?`,
+      )
       .all(limit, offset) as Record<string, unknown>[]
   ).map(mapTrack);
 }
 
 export function countTracks(): number {
   const row = getDb()
-    .prepare(`SELECT COUNT(*) as c FROM tracks`)
+    .prepare(
+      `SELECT COUNT(*) as c FROM tracks WHERE ${LIBRARY_TRACK_FILTER}`,
+    )
     .get() as { c: number };
   return row.c;
 }
@@ -1217,7 +1912,8 @@ export function searchTracksLocal(q: string, limit = 50): TrackRow[] {
     getDb()
       .prepare(
         `${TRACK_SELECT}
-         WHERE title LIKE ? OR artist LIKE ? OR album LIKE ?
+         WHERE (${LIBRARY_TRACK_FILTER})
+           AND (title LIKE ? OR artist LIKE ? OR album LIKE ?)
          ORDER BY title ASC LIMIT ?`,
       )
       .all(like, like, like, limit) as Record<string, unknown>[]
@@ -1435,6 +2131,7 @@ export function createRequest(input: {
   downloadJobId?: string | null;
   requestedBy?: string | null;
   error?: string | null;
+  imageUrl?: string | null;
 }): RequestRow {
   const mediaType = input.mediaType ?? "album";
   const album = input.album || input.title;
@@ -1509,7 +2206,7 @@ export function createRequest(input: {
   appendRequestEvent(row.id, row.status, "Request created");
   // Admin-only for new album/artist library requests — skip track acquire spam
   if (row.status !== "available" && row.mediaType !== "track") {
-    notifyFromRequest(row, "new");
+    notifyFromRequest(row, "new", input.imageUrl);
   }
   return row;
 }
@@ -1601,6 +2298,8 @@ export type AppNotification = {
   message: string;
   href: string | null;
   imageSeed: string | null;
+  imageUrl: string | null;
+  mediaType: string | null;
   requestId: string | null;
   createdAt: string;
   readAt: string | null;
@@ -1630,6 +2329,8 @@ function pushNotification(input: {
   message: string;
   href?: string | null;
   imageSeed?: string | null;
+  imageUrl?: string | null;
+  mediaType?: string | null;
   requestId?: string | null;
   dedupeKey?: string | null;
 }) {
@@ -1659,7 +2360,7 @@ function pushNotification(input: {
         .prepare(
           `UPDATE notifications SET
              kind = ?, actor_label = ?, message = ?, href = ?, image_seed = ?,
-             created_at = ?, request_id = ?
+             image_url = ?, media_type = ?, created_at = ?, request_id = ?
            WHERE id = ?`,
         )
         .run(
@@ -1668,6 +2369,8 @@ function pushNotification(input: {
           input.message,
           input.href ?? null,
           input.imageSeed ?? null,
+          input.imageUrl ?? null,
+          input.mediaType ?? null,
           nowIso(),
           input.requestId ?? null,
           existing.id,
@@ -1679,8 +2382,8 @@ function pushNotification(input: {
     .prepare(
       `INSERT INTO notifications(
          id, user_id, kind, actor_label, message, href, image_seed,
-         request_id, dedupe_key, created_at, read_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+         image_url, media_type, request_id, dedupe_key, created_at, read_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     )
     .run(
       newId(),
@@ -1690,6 +2393,8 @@ function pushNotification(input: {
       input.message,
       input.href ?? null,
       input.imageSeed ?? null,
+      input.imageUrl ?? null,
+      input.mediaType ?? null,
       input.requestId ?? null,
       dedupe,
       nowIso(),
@@ -1714,10 +2419,10 @@ function pushNotification(input: {
 function notifyFromRequest(
   req: RequestRow,
   event: "new" | "available" | "failed",
+  imageUrl?: string | null,
 ) {
   const seed = `${req.artist}-${req.title}`;
   const media = req.mediaType === "track" ? "track" : req.mediaType;
-  const subject = `${req.artist} — ${req.title}`;
   const requesterId = getUserIdByUsername(req.requestedBy);
 
   const adminIds = listAdminUserIds();
@@ -1741,11 +2446,24 @@ function notifyFromRequest(
 
   if (event === "new") {
     actorLabel = req.requestedBy || "Someone";
-    message = `requested a ${media}: ${subject}`;
+    if (media === "artist") {
+      message = `requested artist ${req.artist || req.title}`;
+      href = `/artist?name=${encodeURIComponent(req.artist || req.title)}`;
+      if (req.foreignArtistId) {
+        href += `&foreignArtistId=${encodeURIComponent(req.foreignArtistId)}`;
+      }
+    } else if (media === "album") {
+      message = `requested album ${req.title} by ${req.artist}`;
+    } else {
+      message = `requested track ${req.title} by ${req.artist}`;
+    }
     kind = "request_new";
   } else if (event === "available") {
     actorLabel = req.artist || "Library";
-    message = `${req.title} is ready to play`;
+    message =
+      media === "artist"
+        ? `${req.artist || req.title} is ready`
+        : `${req.title} is ready to play`;
     href = `/library?album=${encodeURIComponent(req.album)}&artist=${encodeURIComponent(req.artist)}`;
     kind = "request_available";
   } else {
@@ -1762,6 +2480,8 @@ function notifyFromRequest(
       message: message.slice(0, 280),
       href,
       imageSeed: seed,
+      imageUrl: imageUrl ?? null,
+      mediaType: req.mediaType,
       requestId: req.id,
       // One lifecycle row per request
       dedupeKey: `request:${req.id}`,
@@ -1777,7 +2497,8 @@ export function listNotifications(
   const rows = getDb()
     .prepare(
       `SELECT id, user_id as userId, kind, actor_label as actorLabel,
-              message, href, image_seed as imageSeed, request_id as requestId,
+              message, href, image_seed as imageSeed, image_url as imageUrl,
+              media_type as mediaType, request_id as requestId,
               created_at as createdAt, read_at as readAt
        FROM notifications
        WHERE user_id = ?
@@ -1792,6 +2513,8 @@ export function listNotifications(
     message: string;
     href: string | null;
     imageSeed: string | null;
+    imageUrl: string | null;
+    mediaType: string | null;
     requestId: string | null;
     createdAt: string;
     readAt: string | null;
@@ -1799,6 +2522,8 @@ export function listNotifications(
 
   return rows.map((r) => ({
     ...r,
+    imageUrl: r.imageUrl ?? null,
+    mediaType: r.mediaType ?? null,
     unread: !r.readAt,
   }));
 }
@@ -2240,6 +2965,7 @@ export function listTracksByArtist(artist: string, limit = 100): TrackRow[] {
       .prepare(
         `${TRACK_SELECT}
          WHERE lower(artist) = ?
+           AND ${LIBRARY_TRACK_FILTER}
          ORDER BY album ASC, title ASC
          LIMIT ?`,
       )
@@ -2261,6 +2987,7 @@ export function listTracksForAlbum(
       .prepare(
         `${TRACK_SELECT}
          WHERE lower(artist) = ? AND lower(album) = ?
+           AND ${LIBRARY_TRACK_FILTER}
          ORDER BY title ASC
          LIMIT ?`,
       )
@@ -2312,7 +3039,7 @@ export function getUserActivityStats(userId: string) {
        FROM requests
        WHERE lower(requested_by) = lower(?)
        ORDER BY created_at DESC
-       LIMIT 8`,
+       LIMIT 3`,
     )
     .all(username) as {
     id: string;
@@ -2338,7 +3065,24 @@ export function getUserActivityStats(userId: string) {
       .get() as { c: number }
   ).c;
 
-  const lib = libraryStats();
+  const listenRow = getDb()
+    .prepare(
+      `SELECT COALESCE(SUM(seconds), 0) as seconds FROM listen_bucket WHERE user_id = ?`,
+    )
+    .get(userId) as { seconds: number };
+  const listensMinutes = Math.max(
+    0,
+    Math.round((Number(listenRow?.seconds) || 0) / 60),
+  );
+
+  const playRow = getDb()
+    .prepare(
+      `SELECT COUNT(*) as c FROM play_history
+       WHERE user_id = ?
+         AND (listened_seconds IS NULL OR listened_seconds >= 15)`,
+    )
+    .get(userId) as { c: number };
+  const plays = Number(playRow?.c) || 0;
 
   return {
     user,
@@ -2350,7 +3094,9 @@ export function getUserActivityStats(userId: string) {
       active: Number(downloadRow?.active) || 0,
     },
     albumsListed,
-    libraryTracks: lib.tracks,
+    libraryTracks: libraryStats().tracks,
+    listensMinutes,
+    plays,
     recentRequests,
   };
 }
@@ -2452,16 +3198,43 @@ export function recordPlay(userId: string, trackId: string) {
  * Credit listening time toward a track. Creates/updates play_history and
  * refreshes played_at once the listen has reached 15 seconds (and on every
  * further credit so the “others listening” shelf stays current).
+ *
+ * Live/stream ids are resolved via metadata into a durable tracks row so
+ * Recently played survives across sessions.
  */
 export function creditTrackListen(
   userId: string,
   trackId: string,
   seconds: number,
+  meta?: {
+    title?: string;
+    artist?: string;
+    album?: string;
+    coverPath?: string | null;
+  },
 ) {
-  if (!userId || !trackId || trackId.startsWith("live:")) return;
+  if (!userId || !trackId) return;
   const add = Math.max(0, Math.min(3600, Number(seconds) || 0));
   if (add <= 0) return;
-  if (!getTrack(trackId)) return;
+
+  let resolvedId = trackId;
+  if (
+    trackId.startsWith("live:") ||
+    trackId.startsWith("stream:") ||
+    !getTrack(trackId)
+  ) {
+    const title = meta?.title?.trim() || "";
+    const artist = meta?.artist?.trim() || "";
+    if (!title || !artist) return;
+    const row = ensureHistoryTrack({
+      title,
+      artist,
+      album: meta?.album,
+      coverPath: meta?.coverPath,
+    });
+    if (!row) return;
+    resolvedId = row.id;
+  }
 
   const existing = getDb()
     .prepare(
@@ -2469,7 +3242,7 @@ export function creditTrackListen(
        WHERE user_id = ? AND track_id = ?
        ORDER BY played_at DESC LIMIT 1`,
     )
-    .get(userId, trackId) as
+    .get(userId, resolvedId) as
     | { id: string; listenedSeconds: number | null }
     | undefined;
 
@@ -2493,7 +3266,7 @@ export function creditTrackListen(
         `INSERT INTO play_history(id, user_id, track_id, played_at, listened_seconds)
          VALUES (?, ?, ?, ?, ?)`,
       )
-      .run(newId(), userId, trackId, at, add);
+      .run(newId(), userId, resolvedId, at, add);
   }
 
   getDb()
@@ -2839,6 +3612,12 @@ export function addListenSeconds(
   userId: string,
   seconds: number,
   trackId?: string | null,
+  meta?: {
+    title?: string;
+    artist?: string;
+    album?: string;
+    coverPath?: string | null;
+  },
 ) {
   const add = Math.max(0, Math.min(3600, Number(seconds) || 0));
   if (!userId || add <= 0) return;
@@ -2860,7 +3639,16 @@ export function addListenSeconds(
     )
     .run(userId, day, add);
 
-  if (trackId) creditTrackListen(userId, trackId, add);
+  if (trackId) creditTrackListen(userId, trackId, add, meta);
+  else if (meta?.title && meta?.artist) {
+    const row = ensureHistoryTrack({
+      title: meta.title,
+      artist: meta.artist,
+      album: meta.album,
+      coverPath: meta.coverPath,
+    });
+    if (row) creditTrackListen(userId, row.id, add, meta);
+  }
 }
 
 export function listenTotalMinutes(): number {

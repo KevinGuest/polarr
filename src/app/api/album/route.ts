@@ -7,6 +7,7 @@ import {
   setAlbumCover,
 } from "@/lib/db";
 import {
+  coverFrom,
   LidarrClient,
   relevanceScore,
   resolveTrackCover,
@@ -18,6 +19,7 @@ import {
   tracksForReleaseGroup,
 } from "@/lib/musicbrainz";
 import { ytDlpAvailable } from "@/lib/fallback-download";
+import { resolveArtistPortrait } from "@/lib/artist-portrait";
 import { titleLooksExplicit, formatTrackArtistLine } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -37,16 +39,39 @@ export type AlbumTrackDto = {
   artists: string;
 };
 
+type AlbumPayload = {
+  album: {
+    title: string;
+    artist: string;
+    image: string | null;
+    artistImage: string | null;
+    foreignArtistId: string | null;
+    year: number | null;
+    foreignAlbumId: string | null;
+    lidarrAlbumId: number | null;
+  };
+  tracks: AlbumTrackDto[];
+  source: "lidarr" | "musicbrainz" | "library" | "none";
+  fallbackReady: boolean;
+  error: string | null;
+};
+
+const albumResponseCache = new Map<
+  string,
+  { at: number; payload: AlbumPayload }
+>();
+const ALBUM_CACHE_TTL_MS = 2 * 60 * 1000;
+
 function coverFromAlbum(a: LidarrAlbum): string | undefined {
-  const imgs = a.images;
-  if (!imgs?.length) return undefined;
-  const preferred =
-    imgs.find((i) => i.coverType === "cover") ||
-    imgs.find((i) => i.coverType === "poster") ||
-    imgs[0];
-  const url = preferred?.remoteUrl || preferred?.url;
-  if (!url || !/^https?:\/\//i.test(url)) return undefined;
-  return url;
+  return coverFrom(a.images);
+}
+
+function artistIdFromAlbum(a: LidarrAlbum | null | undefined): string | undefined {
+  return a?.artist?.foreignArtistId || undefined;
+}
+
+function caaCover(foreignAlbumId: string): string {
+  return `https://coverartarchive.org/release-group/${encodeURIComponent(foreignAlbumId)}/front-500`;
 }
 
 function mapLocalFallback(
@@ -88,12 +113,31 @@ function mergeAvailability(
   });
 }
 
+function cacheKey(params: URLSearchParams): string {
+  return [
+    params.get("title") || "",
+    params.get("artist") || "",
+    params.get("foreignAlbumId") || "",
+    params.get("lidarrAlbumId") || "",
+  ]
+    .map((s) => s.trim().toLowerCase())
+    .join("|");
+}
+
 /**
  * Catalog album detail: Lidarr / MusicBrainz tracklist merged with local library.
  * Resolves album by lidarr id, foreign MBID, or artist+title lookup.
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
+  const key = cacheKey(searchParams);
+  const cached = albumResponseCache.get(key);
+  if (cached && Date.now() - cached.at < ALBUM_CACHE_TTL_MS) {
+    return json(cached.payload, {
+      headers: { "Cache-Control": "private, max-age=60" },
+    });
+  }
+
   let title = (searchParams.get("title") || "").trim();
   let artist = (searchParams.get("artist") || "").trim();
   let foreignAlbumId = (searchParams.get("foreignAlbumId") || "").trim();
@@ -119,6 +163,8 @@ export async function GET(req: Request) {
   let resolvedImage = image;
   let year: number | undefined;
   let error: string | null = null;
+  let albumMetaLoaded: LidarrAlbum | null = null;
+  let foreignArtistId: string | undefined;
 
   try {
     if (client) {
@@ -130,6 +176,9 @@ export async function GET(req: Request) {
           .getAlbumByForeignId(foreignAlbumId)
           .catch(() => []);
         if (byForeign[0]) {
+          albumMetaLoaded = byForeign[0];
+          foreignArtistId =
+            foreignArtistId || artistIdFromAlbum(byForeign[0]);
           albumId = byForeign[0].id ?? null;
           if (!title) title = (byForeign[0].title || "").trim();
           if (!artist) {
@@ -146,9 +195,11 @@ export async function GET(req: Request) {
       }
 
       // Resolve meta from lidarr album id when title/artist missing
-      if (albumId && albumId > 0 && (!title || !artist)) {
+      if (albumId && albumId > 0 && (!title || !artist) && !albumMetaLoaded) {
         const byId = await client.getAlbum(albumId).catch(() => null);
         if (byId) {
+          albumMetaLoaded = byId;
+          foreignArtistId = foreignArtistId || artistIdFromAlbum(byId);
           if (!title) title = (byId.title || "").trim();
           if (!artist) artist = (byId.artist?.artistName || "").trim();
           if (!foreignAlbumId && byId.foreignAlbumId) {
@@ -177,7 +228,6 @@ export async function GET(req: Request) {
           .filter((x) => x.score >= 45)
           .sort((a, b) => b.score - a.score);
 
-        // Prefer exact-ish title match for this artist
         const best =
           ranked.find(
             (x) =>
@@ -190,8 +240,9 @@ export async function GET(req: Request) {
           ) || ranked[0];
 
         if (best?.album) {
-          // Lookup hits for albums not in Lidarr often have id 0 / missing —
-          // only use a real library id for /track?albumId=
+          albumMetaLoaded = best.album;
+          foreignArtistId =
+            foreignArtistId || artistIdFromAlbum(best.album);
           const rawId = best.album.id;
           albumId =
             typeof rawId === "number" && rawId > 0 ? rawId : null;
@@ -207,9 +258,15 @@ export async function GET(req: Request) {
 
       if (albumId && albumId > 0) {
         lidarrAlbumId = albumId;
-        if (!foreignAlbumId || !title || !artist) {
+        // Fill missing meta only if we never loaded this album already
+        if (
+          (!foreignAlbumId || !title || !artist || !year) &&
+          !albumMetaLoaded
+        ) {
           const byId = await client.getAlbum(albumId).catch(() => null);
           if (byId) {
+            albumMetaLoaded = byId;
+            foreignArtistId = foreignArtistId || artistIdFromAlbum(byId);
             if (!title) title = (byId.title || "").trim();
             if (!artist) artist = (byId.artist?.artistName || "").trim();
             if (!foreignAlbumId && byId.foreignAlbumId) {
@@ -220,7 +277,23 @@ export async function GET(req: Request) {
               year = Number(byId.releaseDate.slice(0, 4)) || undefined;
             }
           }
+        } else if (albumMetaLoaded) {
+          foreignArtistId =
+            foreignArtistId || artistIdFromAlbum(albumMetaLoaded);
+          if (!title) title = (albumMetaLoaded.title || "").trim();
+          if (!artist) {
+            artist = (albumMetaLoaded.artist?.artistName || "").trim();
+          }
+          if (!foreignAlbumId && albumMetaLoaded.foreignAlbumId) {
+            foreignAlbumId = albumMetaLoaded.foreignAlbumId;
+          }
+          if (!resolvedImage) resolvedImage = coverFromAlbum(albumMetaLoaded);
+          if (!year && albumMetaLoaded.releaseDate) {
+            year =
+              Number(albumMetaLoaded.releaseDate.slice(0, 4)) || undefined;
+          }
         }
+
         const lidarrTracks = await client.getAlbumTracks(albumId);
         if (lidarrTracks.length > 0) {
           source = "lidarr";
@@ -251,32 +324,6 @@ export async function GET(req: Request) {
             })
             .filter((t) => t.title)
             .sort((a, b) => a.trackNumber - b.trackNumber);
-
-          // Lidarr track payloads omit guest credits — merge MusicBrainz when possible
-          if (tracks.length > 0 && foreignAlbumId) {
-            try {
-              const mb = await tracksForReleaseGroup(foreignAlbumId);
-              if (mb.length > 0) {
-                const byTitle = new Map(
-                  mb.map((t) => [t.title.trim().toLowerCase(), t] as const),
-                );
-                tracks = tracks.map((t) => {
-                  const hit = byTitle.get(t.title.trim().toLowerCase());
-                  if (!hit?.artists) return t;
-                  return {
-                    ...t,
-                    artists: formatTrackArtistLine(
-                      artist,
-                      t.title,
-                      hit.artists,
-                    ),
-                  };
-                });
-              }
-            } catch {
-              /* non-fatal */
-            }
-          }
         }
       }
     }
@@ -351,19 +398,52 @@ export async function GET(req: Request) {
     }
   }
 
-  if (!resolvedImage) {
-    resolvedImage =
-      (await resolveTrackCover({
-        coverPath: null,
-        artist,
-        album: title,
-      })) || undefined;
+  // Parallel tail: MB feature credits ∥ cover ∥ yt-dlp ready
+  const needMbCredits =
+    source === "lidarr" && tracks.length > 0 && Boolean(foreignAlbumId);
+  // Prefer CAA when we have MBID — skip expensive listAlbums cover map
+  if (!resolvedImage && foreignAlbumId) {
+    resolvedImage = caaCover(foreignAlbumId);
   }
 
-  // Cover Art Archive when Lidarr has no art (common for yt-dlp-only albums)
-  if (!resolvedImage && foreignAlbumId) {
-    resolvedImage = `https://coverartarchive.org/release-group/${encodeURIComponent(foreignAlbumId)}/front-500`;
+  const [mbCredits, coverHit, artistPortrait, fallbackReady] = await Promise.all([
+    needMbCredits
+      ? tracksForReleaseGroup(foreignAlbumId).catch(() => [] as Awaited<
+          ReturnType<typeof tracksForReleaseGroup>
+        >)
+      : Promise.resolve([] as Awaited<ReturnType<typeof tracksForReleaseGroup>>),
+    resolvedImage
+      ? Promise.resolve(null as string | null)
+      : resolveTrackCover({
+          coverPath: null,
+          artist,
+          album: title,
+        }).catch(() => null),
+    resolveArtistPortrait({
+      artist,
+      foreignArtistId,
+    }).catch(() => null),
+    settings.fallbackEnabled
+      ? ytDlpAvailable().catch(() => false)
+      : Promise.resolve(false),
+  ]);
+
+  if (mbCredits.length > 0) {
+    const byTitle = new Map(
+      mbCredits.map((t) => [t.title.trim().toLowerCase(), t] as const),
+    );
+    tracks = tracks.map((t) => {
+      const hit = byTitle.get(t.title.trim().toLowerCase());
+      if (!hit?.artists) return t;
+      return {
+        ...t,
+        artists: formatTrackArtistLine(artist, t.title, hit.artists),
+      };
+    });
   }
+
+  if (!resolvedImage && coverHit) resolvedImage = coverHit;
+  if (!resolvedImage && foreignAlbumId) resolvedImage = caaCover(foreignAlbumId);
 
   if (resolvedImage) {
     try {
@@ -373,21 +453,32 @@ export async function GET(req: Request) {
     }
   }
 
-  const fallbackReady =
-    settings.fallbackEnabled && (await ytDlpAvailable());
-
-  return json({
+  const payload: AlbumPayload = {
     album: {
       title,
       artist,
       image: resolvedImage || null,
+      artistImage: artistPortrait || null,
+      foreignArtistId: foreignArtistId || null,
       year: year ?? null,
       foreignAlbumId: foreignAlbumId || null,
       lidarrAlbumId: Number.isFinite(lidarrAlbumId) ? lidarrAlbumId : null,
     },
     tracks,
     source,
-    fallbackReady,
+    fallbackReady: Boolean(fallbackReady),
     error,
+  };
+
+  albumResponseCache.set(key, { at: Date.now(), payload });
+  if (albumResponseCache.size > 80) {
+    const oldest = [...albumResponseCache.entries()].sort(
+      (a, b) => a[1].at - b[1].at,
+    );
+    for (const [k] of oldest.slice(0, 20)) albumResponseCache.delete(k);
+  }
+
+  return json(payload, {
+    headers: { "Cache-Control": "private, max-age=60" },
   });
 }

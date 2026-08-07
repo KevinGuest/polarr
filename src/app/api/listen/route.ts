@@ -8,6 +8,10 @@ export const dynamic = "force-dynamic";
 const bodySchema = z.object({
   seconds: z.number().positive().max(3600),
   trackId: z.string().min(1).optional(),
+  title: z.string().optional(),
+  artist: z.string().optional(),
+  album: z.string().optional(),
+  coverPath: z.string().nullable().optional(),
 });
 
 /** Client heartbeat while audio plays — credited to the signed-in user. */
@@ -20,6 +24,12 @@ export async function POST(req: Request) {
     return json({ error: "Invalid payload" }, { status: 400 });
   }
 
-  addListenSeconds(user.id, parsed.data.seconds, parsed.data.trackId ?? null);
+  const { seconds, trackId, title, artist, album, coverPath } = parsed.data;
+  addListenSeconds(user.id, seconds, trackId ?? null, {
+    title,
+    artist,
+    album,
+    coverPath,
+  });
   return json({ ok: true });
 }

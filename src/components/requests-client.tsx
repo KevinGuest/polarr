@@ -114,7 +114,7 @@ export function RequestsClient() {
   if (forbidden) {
     return (
       <div className="space-y-3">
-        <h1 className="text-3xl font-semibold tracking-tight">Requests</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Requests</h1>
         <p className="text-sm text-muted-foreground">
           This activity log is for admins only. Sign in as admin to view and
           stop jobs.
@@ -129,7 +129,7 @@ export function RequestsClient() {
   return (
     <div className="mx-auto max-w-3xl space-y-10">
       <div className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
+        <h1 className="text-2xl font-semibold tracking-tight">
           Requests
         </h1>
         <p className="text-sm text-muted-foreground">

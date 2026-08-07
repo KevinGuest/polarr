@@ -360,8 +360,8 @@ export function LibraryClient({
               className={cn(
                 "font-semibold tracking-tight",
                 albumView
-                  ? "text-4xl sm:text-5xl md:text-6xl"
-                  : "text-4xl",
+                  ? "text-3xl sm:text-4xl md:text-5xl"
+                  : "text-3xl",
               )}
             >
               {heroTitle}

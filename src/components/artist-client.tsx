@@ -54,6 +54,8 @@ export function ArtistClient() {
   const router = useRouter();
   const { play } = usePlayer();
   const name = searchParams.get("name") || "";
+  const foreignArtistId = searchParams.get("foreignArtistId") || "";
+  const imageParam = searchParams.get("image") || "";
   const [tracks, setTracks] = useState<ArtistTrack[]>([]);
   const [tiles, setTiles] = useState<CatalogTile[]>([]);
   const [image, setImage] = useState<string | null>(null);
@@ -65,7 +67,10 @@ export function ArtistClient() {
       return;
     }
     setLoading(true);
-    void fetch(`/api/artist?name=${encodeURIComponent(name)}`, {
+    const qs = new URLSearchParams({ name });
+    if (foreignArtistId) qs.set("foreignArtistId", foreignArtistId);
+    if (imageParam) qs.set("image", imageParam);
+    void fetch(`/api/artist?${qs.toString()}`, {
       cache: "no-store",
     })
       .then((r) => r.json())
@@ -75,7 +80,7 @@ export function ArtistClient() {
         setImage(data.image || null);
       })
       .finally(() => setLoading(false));
-  }, [name]);
+  }, [name, foreignArtistId, imageParam]);
 
   if (!name) {
     return (
@@ -112,7 +117,7 @@ export function ArtistClient() {
           <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
             Artist
           </p>
-          <h1 className="text-4xl font-semibold tracking-tight md:text-5xl">
+          <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
             {name}
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -156,7 +161,7 @@ export function ArtistClient() {
         </div>
       ) : tracks.length === 0 && tiles.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No tracks for this artist on this server yet.
+          No albums or tracks found for this artist yet.
         </p>
       ) : (
         <>
@@ -169,7 +174,10 @@ export function ArtistClient() {
                     title: a.album,
                     artist: a.artist,
                     foreignAlbumId: a.foreignAlbumId,
-                    lidarrAlbumId: a.lidarrAlbumId,
+                    lidarrAlbumId:
+                      a.lidarrAlbumId != null && a.lidarrAlbumId > 0
+                        ? a.lidarrAlbumId
+                        : undefined,
                   });
                   return (
                     <MediaTileShell
@@ -196,6 +204,33 @@ export function ArtistClient() {
             <MediaShelfRow title="Singles" itemCount={singles.length}>
               {(visible) =>
                 singles.slice(0, visible).map((item) => {
+                  if (item.kind === "album") {
+                    const href = albumHref({
+                      title: item.album,
+                      artist: item.artist,
+                      foreignAlbumId: item.foreignAlbumId,
+                      lidarrAlbumId:
+                        item.lidarrAlbumId != null && item.lidarrAlbumId > 0
+                          ? item.lidarrAlbumId
+                          : undefined,
+                    });
+                    return (
+                      <MediaTileShell
+                        key={item.id}
+                        title={item.title}
+                        subtitle={item.subtitle}
+                        ariaLabel={`Open ${item.title}`}
+                        onOpen={() => router.push(href)}
+                        cover={
+                          <CoverArt
+                            seed={item.title}
+                            image={item.image || undefined}
+                            className="size-full"
+                          />
+                        }
+                      />
+                    );
+                  }
                   if (item.kind !== "single") return null;
                   const track: PlayerTrack = {
                     id: item.trackId,

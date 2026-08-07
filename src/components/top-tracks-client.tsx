@@ -147,7 +147,7 @@ export function TopTracksClient({
         >
           ← Back to profile
         </Link>
-        <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
           Top tracks this month
         </h1>
       </div>

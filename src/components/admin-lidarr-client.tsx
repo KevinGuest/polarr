@@ -85,7 +85,7 @@ export function AdminLidarrClient() {
   if (forbidden) {
     return (
       <div className="space-y-3">
-        <h1 className="text-3xl font-semibold tracking-tight">Lidarr</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Lidarr</h1>
         <p className="text-sm text-muted-foreground">
           Admin only. Sign in with an admin account to configure Lidarr.
         </p>
@@ -102,9 +102,7 @@ export function AdminLidarrClient() {
   return (
     <div className="mx-auto max-w-2xl space-y-8">
       <div className="space-y-1">
-        <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
-          Lidarr
-        </h1>
+        <h1 className="text-xl font-semibold tracking-tight">Lidarr</h1>
         <p className="text-sm text-muted-foreground">
           Catalog and request connection for this homeserver.
         </p>

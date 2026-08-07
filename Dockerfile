@@ -57,7 +57,7 @@ ARG YT_DLP_VERSION=2026.07.04
 ARG TARGETARCH
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg \
+  && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg gosu \
   && case "${TARGETARCH}" in \
        amd64) YT_ASSET=yt-dlp_linux ;; \
        arm64) YT_ASSET=yt-dlp_linux_aarch64 ;; \
@@ -75,20 +75,27 @@ RUN apt-get update \
 COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
-# Native sqlite module + whatever was pruned to nest under it
+# Native modules used by the app (sqlite) + optional high-quality karaoke (demucs)
 COPY --from=builder --chown=node:node /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
-COPY --from=builder /app/node_modules /tmp/nm
+COPY --from=builder --chown=node:node /app/node_modules /tmp/nm
 RUN set -eux; \
-    for pkg in bindings file-uri-to-path; do \
+    for pkg in bindings file-uri-to-path demucs onnxruntime-node mediabunny @mediabunny; do \
       if [ -d "/tmp/nm/$pkg" ]; then cp -a "/tmp/nm/$pkg" node_modules/; fi; \
     done; \
+    # mediabunny packages live under @mediabunny/* \
+    if [ -d "/tmp/nm/@mediabunny" ]; then cp -a "/tmp/nm/@mediabunny" node_modules/; fi; \
     chown -R node:node node_modules; \
     rm -rf /tmp/nm
 
-USER node
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
+  && chmod a+rx /usr/local/bin/docker-entrypoint.sh
+
+# Start as root so entrypoint can chown bind mounts, then drop to node.
 EXPOSE 3000
 
 HEALTHCHECK --interval=20s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${PORT}/api/v1/status" || exit 1
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "server.js"]

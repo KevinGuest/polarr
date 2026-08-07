@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Clock, Loader2, Play } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
@@ -35,6 +36,8 @@ type AlbumMeta = {
   title: string;
   artist: string;
   image: string | null;
+  artistImage: string | null;
+  foreignArtistId: string | null;
   year: number | null;
   foreignAlbumId: string | null;
   lidarrAlbumId: number | null;
@@ -46,6 +49,7 @@ async function sleep(ms: number) {
 
 export function AlbumClient({ albumId }: { albumId: string }) {
   const { play } = usePlayer();
+  const router = useRouter();
   const ref = useMemo(() => decodeAlbumId(albumId), [albumId]);
 
   const title = ref?.title || "";
@@ -174,18 +178,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
     [tracks, album, artist, title],
   );
 
-  function queueWithCurrent(current: PlayerTrack): PlayerTrack[] {
-    return albumQueue.map((t) =>
-      t.id === current.id ||
-      (t.id.startsWith("stream:") &&
-        t.title === current.title &&
-        t.artist === current.artist)
-        ? current
-        : t,
-    );
-  }
-
-  async function acquireAndPlay(track: AlbumTrack) {
+  async function playTrack(track: AlbumTrack) {
     const coverPath = album?.image || null;
     const trackArtists = artistsFor(track);
     if (track.localTrackId) {
@@ -197,12 +190,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         coverPath,
         explicit: track.explicit,
       };
-      play(pt, queueWithCurrent(pt));
-      return;
-    }
-
-    if (!fallbackReady) {
-      setMsg("Acquire path not ready — check yt-dlp / Admin Lidarr settings");
+      play(pt, [pt]);
       return;
     }
 
@@ -210,7 +198,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
     setMsg(null);
 
     try {
-      // Prefer live remote stream (no download); download is a separate control
+      // Stream only — never queue a library download from Play
       const liveRes = await fetch("/api/live", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -221,95 +209,28 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         }),
       });
       const live = await liveRes.json().catch(() => null);
-      if (liveRes.ok && live?.track?.id) {
-        const pt: PlayerTrack = {
-          id: live.track.id,
-          title: live.track.title || track.title,
-          artist: formatTrackArtistLine(
-            live.track.artist || album?.artist || artist,
-            live.track.title || track.title,
-            track.artists,
-          ),
-          album: live.track.album || title,
-          coverPath,
-          streamUrl: live.streamUrl || live.track.streamUrl,
-          explicit: track.explicit,
-        };
-        play(pt, queueWithCurrent(pt));
-        setMsg(null);
-        if (live.mode === "library") void load();
+      if (!liveRes.ok || !live?.track?.id) {
+        setMsg(
+          live?.error ||
+            "Couldn’t start stream — try Download if you want it in the library",
+        );
         return;
       }
-
-      // Fallback: queue acquire when live resolve fails
-      const body = {
-        title: track.title,
-        artist: album?.artist || artist,
-        album: album?.title || title,
-        foreignAlbumId: album?.foreignAlbumId || foreignAlbumId || undefined,
-        type: "track" as const,
-        prefer: "fallback" as const,
+      const pt: PlayerTrack = {
+        id: live.track.id,
+        title: live.track.title || track.title,
+        artist: formatTrackArtistLine(
+          live.track.artist || album?.artist || artist,
+          live.track.title || track.title,
+          track.artists,
+        ),
+        album: live.track.album || title,
+        coverPath,
+        streamUrl: live.streamUrl || live.track.streamUrl,
+        explicit: track.explicit,
       };
-
-      const res = await fetch("/api/requests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setMsg(data.error || live?.error || "Playback failed");
-        return;
-      }
-
-      if (data.track?.id) {
-        const pt: PlayerTrack = {
-          id: data.track.id,
-          title: data.track.title || track.title,
-          artist: formatTrackArtistLine(
-            data.track.artist || album?.artist || artist,
-            data.track.title || track.title,
-            track.artists,
-          ),
-          album: data.track.album || title,
-          coverPath,
-          explicit: track.explicit,
-        };
-        play(pt, queueWithCurrent(pt));
-        setMsg(null);
-        void load();
-        return;
-      }
-
-      for (let i = 0; i < 40; i++) {
-        await sleep(1500);
-        const poll = await fetch("/api/requests", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const pj = await poll.json();
-        if (pj.track?.id) {
-          const pt: PlayerTrack = {
-            id: pj.track.id,
-            title: pj.track.title || track.title,
-            artist: formatTrackArtistLine(
-              pj.track.artist || album?.artist || artist,
-              pj.track.title || track.title,
-              track.artists,
-            ),
-            album: pj.track.album || title,
-            coverPath,
-            explicit: track.explicit,
-          };
-          play(pt, queueWithCurrent(pt));
-          setMsg(null);
-          void load();
-          return;
-        }
-      }
-      setMsg("Still acquiring — try again in a moment");
-      void load();
+      play(pt, [pt]);
+      setMsg(null);
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Playback failed");
     } finally {
@@ -443,7 +364,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
     const first = albumQueue[0];
     if (!first) {
       const next = tracks[0];
-      if (next) void acquireAndPlay(next);
+      if (next) void playTrack(next);
       return;
     }
     play(first, albumQueue);
@@ -470,6 +391,17 @@ export function AlbumClient({ albumId }: { albumId: string }) {
   const displayArtist = album?.artist || artist;
   const coverSeed = displayTitle || foreignAlbumId || "album";
   const coverImage = album?.image || undefined;
+  const artistImage = album?.artistImage || undefined;
+
+  function openArtist() {
+    if (!displayArtist) return;
+    const qs = new URLSearchParams({ name: displayArtist });
+    if (album?.foreignArtistId) {
+      qs.set("foreignArtistId", album.foreignArtistId);
+    }
+    if (artistImage) qs.set("image", artistImage);
+    router.push(`/artist?${qs.toString()}`);
+  }
 
   return (
     <div className="flex min-h-full flex-col">
@@ -492,16 +424,36 @@ export function AlbumClient({ albumId }: { albumId: string }) {
             <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
               Album
             </p>
-            <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl md:text-6xl">
+            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
               {loading && !displayTitle ? "…" : displayTitle || "Album"}
             </h1>
-            <p className="text-sm text-muted-foreground">
-              {displayArtist}
-              {album?.year ? ` · ${album.year}` : ""}
-              {tracks.length
-                ? ` · ${tracks.length} song${tracks.length === 1 ? "" : "s"}, ${formatAlbumLength(totalSeconds)}`
-                : ""}
-            </p>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-muted-foreground">
+              {displayArtist ? (
+                <button
+                  type="button"
+                  onClick={() => openArtist()}
+                  className="inline-flex min-w-0 items-center gap-2 rounded-full pr-1 text-left transition-opacity hover:opacity-90"
+                >
+                  <CoverArt
+                    seed={displayArtist}
+                    image={artistImage}
+                    className="size-7 shrink-0 rounded-full"
+                  />
+                  <span className="truncate font-semibold text-foreground">
+                    {displayArtist}
+                  </span>
+                </button>
+              ) : null}
+              {album?.year ? (
+                <span className="tabular-nums">· {album.year}</span>
+              ) : null}
+              {tracks.length ? (
+                <span>
+                  · {tracks.length} song{tracks.length === 1 ? "" : "s"},{" "}
+                  {formatAlbumLength(totalSeconds)}
+                </span>
+              ) : null}
+            </div>
             {msg && <p className="text-sm text-foreground">{msg}</p>}
             {error && !tracks.length && (
               <p className="text-sm text-destructive">{error}</p>
@@ -537,8 +489,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
           </div>
         ) : tracks.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border px-6 py-16 text-center text-muted-foreground">
-            No tracklist found for this album yet. Search may still acquire by
-            title, or add it in Lidarr so Polarr can read tracks.
+            No tracklist found for this album yet.
           </div>
         ) : (
           <div className="w-full overflow-x-auto">
@@ -575,7 +526,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                       draggable
                       onDragStart={(e) => setDragTrack(e, playerTrack)}
                       className="group/row cursor-grab transition-colors active:cursor-grabbing"
-                      onClick={() => void acquireAndPlay(t)}
+                      onClick={() => void playTrack(t)}
                     >
                       <td className="rounded-l-md py-3 pl-3 tabular-nums text-muted-foreground group-hover/row:bg-muted/30">
                         {busy ? (

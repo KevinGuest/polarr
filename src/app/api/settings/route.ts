@@ -18,9 +18,17 @@ function maskSecrets(settings: ReturnType<typeof getSettings>) {
     ...settings,
     lidarrApiKey: settings.lidarrApiKey ? "••••••••" : "",
     smtpPassword: settings.smtpPassword ? "••••••••" : "",
+    spotifyClientSecret: settings.spotifyClientSecret ? "••••••••" : "",
+    discordClientSecret: settings.discordClientSecret ? "••••••••" : "",
     smtpConfigured: smtpConfigured(settings),
     discordWebhookUrl: "",
     discordWebhookConfigured: Boolean(settings.discordWebhookUrl.trim()),
+    spotifyConfigured: Boolean(
+      settings.spotifyClientId.trim() && settings.spotifyClientSecret.trim(),
+    ),
+    discordOAuthConfigured: Boolean(
+      settings.discordClientId.trim() && settings.discordClientSecret.trim(),
+    ),
   };
 }
 
@@ -82,6 +90,10 @@ const bodySchema = z.object({
   discordWebhookUrl: z.string().max(500).optional(),
   notifyEmailEvents: notifyEventsSchema,
   notifyDiscordEvents: notifyEventsSchema,
+  spotifyClientId: z.string().max(120).optional(),
+  spotifyClientSecret: z.string().max(120).optional(),
+  discordClientId: z.string().max(120).optional(),
+  discordClientSecret: z.string().max(120).optional(),
 });
 
 export async function POST(req: Request) {
@@ -98,7 +110,13 @@ export async function POST(req: Request) {
     body.testLidarr ||
     body.lidarrUrl !== undefined ||
     body.lidarrApiKey !== undefined ||
-    body.musicRoot !== undefined;
+    body.musicRoot !== undefined ||
+    body.spotifyClientId !== undefined ||
+    body.spotifyClientSecret !== undefined ||
+    body.discordClientId !== undefined ||
+    body.discordClientSecret !== undefined;
+  const touchesServer =
+    body.serverName !== undefined || body.publicUrl !== undefined;
   const touchesSmtp =
     body.smtpHost !== undefined ||
     body.smtpPort !== undefined ||
@@ -114,7 +132,7 @@ export async function POST(req: Request) {
     body.notifyEmailEvents !== undefined ||
     body.notifyDiscordEvents !== undefined;
 
-  if (touchesLidarr || touchesSmtp || touchesNotify) {
+  if (touchesLidarr || touchesSmtp || touchesNotify || touchesServer) {
     const admin = await getAdminUser();
     if (!admin) return json({ error: "Admin only" }, { status: 403 });
   }
@@ -200,6 +218,16 @@ export async function POST(req: Request) {
       current.notifyDiscordEvents,
       body.notifyDiscordEvents,
     ),
+    spotifyClientId: body.spotifyClientId ?? current.spotifyClientId,
+    spotifyClientSecret:
+      body.spotifyClientSecret && body.spotifyClientSecret !== "••••••••"
+        ? body.spotifyClientSecret
+        : current.spotifyClientSecret,
+    discordClientId: body.discordClientId ?? current.discordClientId,
+    discordClientSecret:
+      body.discordClientSecret && body.discordClientSecret !== "••••••••"
+        ? body.discordClientSecret
+        : current.discordClientSecret,
   });
 
   const isAdmin = Boolean(user.isAdmin);

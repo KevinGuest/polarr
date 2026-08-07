@@ -21,6 +21,8 @@ export type LidarrAlbum = {
   images?: { coverType: string; url: string; remoteUrl?: string }[];
   monitored?: boolean;
   releaseDate?: string;
+  albumType?: string;
+  secondaryTypes?: string[];
   statistics?: {
     trackFileCount?: number;
     totalTrackCount?: number;
@@ -376,19 +378,21 @@ export class LidarrClient {
 
   /**
    * Recent + upcoming albums from Lidarr (calendar + missing + library).
-   * Hard cutoff: releaseDate within the last 6 months (plus ~1 month upcoming).
-   * Albums without a releaseDate are excluded.
+   * Default window: last 12 months + ~1 month upcoming ("anything new").
    */
-  async latestReleases(limit = 24): Promise<DiscoverRelease[]> {
+  async latestReleases(
+    limit = 24,
+    monthsBack = 12,
+  ): Promise<DiscoverRelease[]> {
     const now = new Date();
     const start = new Date(now);
-    start.setMonth(start.getMonth() - 6);
+    start.setMonth(start.getMonth() - monthsBack);
     const end = new Date(now);
     end.setMonth(end.getMonth() + 1);
 
     const startIso = start.toISOString().slice(0, 10);
     const endIso = end.toISOString().slice(0, 10);
-    const maxAgeMs = 183 * 24 * 60 * 60 * 1000;
+    const maxAgeMs = (monthsBack + 1) * 31 * 24 * 60 * 60 * 1000;
 
     const [cal, missing, all] = await Promise.all([
       this.calendar(startIso, endIso).catch(() => [] as LidarrAlbum[]),
@@ -402,7 +406,6 @@ export class LidarrClient {
       if (day < startIso || day > endIso) return false;
       const released = Date.parse(day);
       if (!Number.isFinite(released)) return false;
-      // Belt-and-suspenders vs clock skew / bad ISO strings
       if (now.getTime() - released > maxAgeMs) return false;
       return true;
     };
@@ -422,6 +425,48 @@ export class LidarrClient {
       .sort((a, b) =>
         (b.releaseDate || "").localeCompare(a.releaseDate || ""),
       )
+      .slice(0, limit);
+  }
+
+  /** Browseable Lidarr library albums (not limited to last 6 months). */
+  async catalogLibrary(limit = 48): Promise<DiscoverRelease[]> {
+    const all = await this.listAlbums().catch(() => [] as LidarrAlbum[]);
+    const artists = await this.listArtists().catch(() => [] as LidarrArtist[]);
+    const nameById = new Map<number, string>();
+    for (const a of artists) {
+      if (a.id != null && a.artistName) nameById.set(a.id, a.artistName);
+    }
+    return [...all]
+      .map((a) => {
+        const card = this.toDiscover(a);
+        if (
+          (!card.artist || card.artist === "Unknown Artist") &&
+          a.artistId != null
+        ) {
+          card.artist = nameById.get(a.artistId) || card.artist;
+        }
+        return card;
+      })
+      .filter((r) => Boolean(r.image) && r.title)
+      .sort((a, b) =>
+        (b.releaseDate || "").localeCompare(a.releaseDate || "") ||
+        a.title.localeCompare(b.title),
+      )
+      .slice(0, limit);
+  }
+
+  /** Artist faces for home browse. */
+  async catalogArtists(limit = 24): Promise<
+    { name: string; image?: string; foreignArtistId?: string }[]
+  > {
+    const artists = await this.listArtists().catch(() => [] as LidarrArtist[]);
+    return artists
+      .map((a) => ({
+        name: (a.artistName || "").trim(),
+        image: coverFrom(a.images),
+        foreignArtistId: a.foreignArtistId,
+      }))
+      .filter((a) => a.name)
       .slice(0, limit);
   }
 
@@ -466,7 +511,7 @@ export class LidarrClient {
         image,
         foreignId: a.foreignAlbumId,
         lidarrId: a.id,
-        alreadyInLibrary: Boolean(a.id),
+        alreadyInLibrary: typeof a.id === "number" && a.id > 0,
         raw: a,
         score,
       });
@@ -486,7 +531,7 @@ export class LidarrClient {
         image,
         foreignId: a.foreignArtistId,
         lidarrId: a.id,
-        alreadyInLibrary: Boolean(a.id),
+        alreadyInLibrary: typeof a.id === "number" && a.id > 0,
         raw: a,
         score,
       });

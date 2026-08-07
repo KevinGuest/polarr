@@ -6,6 +6,7 @@ import {
   listTracks,
   type TrackRow,
 } from "@/lib/db";
+import { primaryArtistName } from "@/lib/artist-portrait";
 
 export type MadeForTrack = {
   id: string;
@@ -79,7 +80,112 @@ function seededShuffle<T>(items: T[], seed: string): T[] {
 }
 
 function artistKey(artist: string) {
-  return artist.trim().toLowerCase();
+  return primaryArtistName(artist).trim().toLowerCase() || artist.trim().toLowerCase();
+}
+
+/** Play + like weighted artist affinity for home Explore ranking. */
+export function tasteArtistScores(userId: string): Map<string, number> {
+  const excluded = new Set(listTasteExcludeIds(userId));
+  const recent = listRecentPlays(userId, 100).filter((t) => !excluded.has(t.id));
+  const liked = listLikedTracks(userId, 200).filter((t) => !excluded.has(t.id));
+  const artistScore = new Map<string, number>();
+
+  recent.forEach((t, i) => {
+    const k = artistKey(t.artist);
+    if (!k) return;
+    const weight = Math.max(1, 20 - i * 0.15);
+    artistScore.set(k, (artistScore.get(k) || 0) + weight);
+  });
+  for (const t of liked) {
+    const k = artistKey(t.artist);
+    if (!k) continue;
+    artistScore.set(k, (artistScore.get(k) || 0) + 8);
+  }
+  return artistScore;
+}
+
+/** Top artist display names by taste score (for MusicBrainz explore queries). */
+export function tasteArtistNames(userId: string, limit = 8): string[] {
+  const scores = tasteArtistScores(userId);
+  if (scores.size === 0) return [];
+  const recent = listRecentPlays(userId, 40);
+  const liked = listLikedTracks(userId, 40);
+  const label = new Map<string, string>();
+  for (const t of [...recent, ...liked]) {
+    const display = primaryArtistName(t.artist).trim() || t.artist.trim();
+    const k = artistKey(t.artist);
+    if (k && !label.has(k)) label.set(k, display);
+  }
+  return [...scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([k]) => label.get(k) || k)
+    .filter(Boolean);
+}
+
+/** Rank catalog cards by taste affinity (unknown artists keep mid priority). */
+export function rankByTasteArtist<T extends { artist: string }>(
+  userId: string | null | undefined,
+  items: T[],
+): T[] {
+  if (!userId || items.length === 0) return items;
+  const scores = tasteArtistScores(userId);
+  if (scores.size === 0) return items;
+  return [...items].sort((a, b) => {
+    const sa = scores.get(artistKey(a.artist)) || 0;
+    const sb = scores.get(artistKey(b.artist)) || 0;
+    if (sb !== sa) return sb - sa;
+    return (a.artist || "").localeCompare(b.artist || "");
+  });
+}
+
+/**
+ * Blend global trending with personal taste.
+ * ~60% chart heat, ~40% preference — chart items you already like float up.
+ */
+export function blendTrendingWithTaste<
+  T extends { artist: string; id: string },
+>(
+  userId: string | null | undefined,
+  trending: (T & { rank?: number })[],
+  preferencePool: T[],
+  limit = 28,
+): T[] {
+  const taste = userId ? tasteArtistScores(userId) : new Map<string, number>();
+  let maxTaste = 1;
+  for (const v of taste.values()) if (v > maxTaste) maxTaste = v;
+
+  const byKey = new Map<string, T & { rank?: number }>();
+  for (const t of trending) {
+    byKey.set(t.id.toLowerCase(), t);
+  }
+  for (const p of preferencePool) {
+    const k = p.id.toLowerCase();
+    if (!byKey.has(k)) byKey.set(k, p);
+  }
+
+  const trendRank = new Map<string, number>();
+  trending.forEach((t, i) => {
+    trendRank.set(t.id.toLowerCase(), t.rank ?? i + 1);
+  });
+  const trendCount = Math.max(trending.length, 1);
+
+  const scored = [...byKey.values()].map((item) => {
+    const key = item.id.toLowerCase();
+    const r = trendRank.get(key);
+    const trendingScore =
+      r != null ? Math.max(0, 1 - (r - 1) / trendCount) : 0.12;
+    const tasteRaw = taste.get(artistKey(item.artist)) || 0;
+    const tasteNorm = Math.min(1, tasteRaw / maxTaste);
+    // In both worlds → small boost
+    const both =
+      r != null && tasteRaw > 0 ? 0.12 : 0;
+    const score = trendingScore * 0.6 + tasteNorm * 0.4 + both;
+    return { item, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map((s) => s.item);
 }
 
 function formatArtistList(artists: string[], max = 3): string {

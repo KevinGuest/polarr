@@ -12,15 +12,26 @@ type LiveEntry = {
   artist: string;
   album: string;
   expiresAt: number;
+  queryKey: string;
 };
 
 const liveCache = new Map<string, LiveEntry>();
+/** artist|title → session id — reuse within TTL (skip next / replay). */
+const queryIndex = new Map<string, string>();
 const LIVE_TTL_MS = 45 * 60 * 1000;
+const inFlight = new Map<string, Promise<{ id: string; streamUrl: string } | null>>();
+
+function liveQueryKey(artist: string, title: string): string {
+  return `${artist.trim().toLowerCase()}|${title.trim().toLowerCase()}`;
+}
 
 function cleanupLiveCache() {
   const now = Date.now();
   for (const [id, entry] of liveCache) {
-    if (entry.expiresAt <= now) liveCache.delete(id);
+    if (entry.expiresAt <= now) {
+      liveCache.delete(id);
+      if (queryIndex.get(entry.queryKey) === id) queryIndex.delete(entry.queryKey);
+    }
   }
 }
 
@@ -75,6 +86,7 @@ export function getLiveSession(id: string): LiveEntry | null {
   if (!entry) return null;
   if (entry.expiresAt <= Date.now()) {
     liveCache.delete(id);
+    if (queryIndex.get(entry.queryKey) === id) queryIndex.delete(entry.queryKey);
     return null;
   }
   return entry;
@@ -89,24 +101,51 @@ export async function createLiveSession(input: {
   const query = `${input.artist} ${input.title}`.trim();
   if (!query) return null;
 
-  const remoteUrl = await resolveLiveRemoteUrl(query);
-  if (!remoteUrl) return null;
+  cleanupLiveCache();
+  const qKey = liveQueryKey(input.artist, input.title);
 
-  const id = createHash("sha256")
-    .update(`${query}:${randomBytes(6).toString("hex")}`)
-    .digest("hex")
-    .slice(0, 24);
+  const existingId = queryIndex.get(qKey);
+  if (existingId) {
+    const entry = liveCache.get(existingId);
+    if (entry && entry.expiresAt > Date.now()) {
+      return {
+        id: `live:${existingId}`,
+        streamUrl: `/api/live/${existingId}`,
+      };
+    }
+  }
 
-  liveCache.set(id, {
-    remoteUrl,
-    title: input.title,
-    artist: input.artist,
-    album: input.album || input.title,
-    expiresAt: Date.now() + LIVE_TTL_MS,
+  const pending = inFlight.get(qKey);
+  if (pending) return pending;
+
+  const work = (async () => {
+    const remoteUrl = await resolveLiveRemoteUrl(query);
+    if (!remoteUrl) return null;
+
+    const id = createHash("sha256")
+      .update(`${qKey}:${randomBytes(6).toString("hex")}`)
+      .digest("hex")
+      .slice(0, 24);
+
+    const expiresAt = Date.now() + LIVE_TTL_MS;
+    liveCache.set(id, {
+      remoteUrl,
+      title: input.title,
+      artist: input.artist,
+      album: input.album || input.title,
+      expiresAt,
+      queryKey: qKey,
+    });
+    queryIndex.set(qKey, id);
+
+    return {
+      id: `live:${id}`,
+      streamUrl: `/api/live/${id}`,
+    };
+  })().finally(() => {
+    inFlight.delete(qKey);
   });
 
-  return {
-    id: `live:${id}`,
-    streamUrl: `/api/live/${id}`,
-  };
+  inFlight.set(qKey, work);
+  return work;
 }

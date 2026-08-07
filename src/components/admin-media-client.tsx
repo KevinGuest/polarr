@@ -175,7 +175,7 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
   if (forbidden) {
     return (
       <div className="space-y-3">
-        <h1 className="text-3xl font-semibold tracking-tight">{copy.title}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{copy.title}</h1>
         <p className="text-sm text-muted-foreground">
           Admin only. Sign in with an admin account.
         </p>
@@ -190,7 +190,7 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
     <div className="mx-auto max-w-4xl space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="space-y-2">
-          <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
+          <h1 className="text-2xl font-semibold tracking-tight">
             {copy.title}
           </h1>
           <p className="text-sm text-muted-foreground">{copy.blurb}</p>

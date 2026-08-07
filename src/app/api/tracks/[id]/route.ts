@@ -1,4 +1,4 @@
-import { json, getAdminUser, getAuthUser } from "@/lib/api";
+import { json, getStaffUser, getAuthUser } from "@/lib/api";
 import {
   deleteTrack,
   getTrack,
@@ -66,7 +66,7 @@ export async function DELETE(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const admin = await getAdminUser();
+  const admin = await getStaffUser();
   if (!admin) {
     const user = await getAuthUser();
     if (!user) return json({ error: "Unauthorized" }, { status: 401 });

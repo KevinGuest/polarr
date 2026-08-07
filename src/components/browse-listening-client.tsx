@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Play } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { ListeningCover } from "@/components/listening-cover";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import {
@@ -110,7 +110,7 @@ export function BrowseListeningClient() {
               >
                 <MediaTileShell
                   title={item.title}
-                  subtitle={`${item.artist} · ${item.listenedBy}`}
+                  subtitle={item.artist}
                   ariaLabel={`Play ${item.title}`}
                   onOpen={() => playItem(item)}
                   cover={
@@ -121,16 +121,6 @@ export function BrowseListeningClient() {
                       avatarUrl={item.listenedByAvatarUrl}
                       delayMs={(i % 5) * 700}
                     />
-                  }
-                  playButton={
-                    <button
-                      type="button"
-                      aria-label={`Play ${item.title}`}
-                      onClick={() => playItem(item)}
-                      className="absolute bottom-2 right-2 flex size-9 items-center justify-center rounded-full border border-border bg-background/95 shadow-md transition-transform hover:scale-105"
-                    >
-                      <Play className="size-3.5" fill="currentColor" />
-                    </button>
                   }
                 />
               </div>

@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import Link from "next/link";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import {
   Check,
   Maximize2,
@@ -19,6 +26,7 @@ import {
 } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
+import { MiniplayerClient } from "@/components/miniplayer-client";
 import { TrackLikeButton } from "@/components/track-like-button";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { usePlayer } from "@/components/player-provider";
@@ -28,6 +36,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { albumHref } from "@/lib/album-ref";
+import {
+  copyDocumentStyles,
+  ensurePipMount,
+  getDocumentPipWindow,
+  openDocumentPip,
+  type DocumentPipWindow,
+} from "@/lib/document-pip";
 import { cn, formatDuration, formatTrackArtistLine } from "@/lib/utils";
 
 function BarTooltip({
@@ -64,6 +80,67 @@ export function NowPlayingBar() {
   } = usePlayer();
   const [downloaded, setDownloaded] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [pipMount, setPipMount] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    // Reattach if a PiP window was already open (HMR / remount).
+    const existing = getDocumentPipWindow();
+    if (!existing) return;
+    const mount = ensurePipMount(existing);
+    setPipMount(mount);
+    const onClose = () => setPipMount(null);
+    existing.addEventListener("pagehide", onClose);
+    return () => existing.removeEventListener("pagehide", onClose);
+  }, []);
+
+  const openMiniplayer = useCallback(async () => {
+    const w = 360;
+    const h = 560;
+
+    const attachToWindow = (pip: Window) => {
+      if (!pip.document.getElementById("polarr-miniplayer-root")) {
+        copyDocumentStyles(document, pip.document);
+      }
+      const mount = ensurePipMount(pip as DocumentPipWindow);
+      setPipMount(mount);
+      const onClose = () => setPipMount(null);
+      pip.addEventListener("pagehide", onClose, { once: true });
+      try {
+        pip.focus();
+      } catch {
+        /* ignore */
+      }
+    };
+
+    // Prefer Document PiP (always-on-top). Same React tree → audio uninterrupted.
+    try {
+      const pip = await openDocumentPip({ width: w, height: h });
+      if (pip) {
+        attachToWindow(pip);
+        return;
+      }
+    } catch {
+      /* fall through */
+    }
+
+    // Same-document popup (about:blank + styles), not /miniplayer — still one
+    // player instance. Avoids the pause/reload handoff of a second Next.js tab.
+    const left = Math.max(0, window.screenX + window.outerWidth - w - 24);
+    const top = Math.max(0, window.screenY + 48);
+    const features = [
+      "popup=yes",
+      `width=${w}`,
+      `height=${h}`,
+      `left=${left}`,
+      `top=${top}`,
+      "resizable=yes",
+      "scrollbars=no",
+    ].join(",");
+    const win = window.open("about:blank", "polarr-miniplayer", features);
+    if (win) {
+      attachToWindow(win);
+    }
+  }, []);
 
   useEffect(() => {
     if (!track?.id) {
@@ -114,25 +191,33 @@ export function NowPlayingBar() {
     };
   }, [track?.id, track?.coverPath]);
 
-  if (!track) return null;
+  if (!track) {
+    return pipMount
+      ? createPortal(<MiniplayerClient sameDocument />, pipMount)
+      : null;
+  }
 
   const pct = duration ? (progress / duration) * 100 : 0;
   const VolumeIcon =
     volume === 0 ? VolumeX : volume < 0.45 ? Volume1 : Volume2;
   const muteLabel = volume === 0 ? "Unmute" : "Mute";
   const playLabel = playing ? "Pause" : "Play";
+  const albumPath = albumHref({
+    title: (track.album || track.title).trim() || track.title,
+    artist: track.artist,
+  });
 
   return (
+    <>
     <TooltipProvider delayDuration={300}>
       <div className="shrink-0 border-t border-border bg-background px-3 py-2.5 md:px-4">
         <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,42%)_minmax(0,1fr)] items-center gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <TrackContextMenu track={track}>
-              <button
-                type="button"
-                onClick={() => togglePanel("nowPlaying")}
-                className="flex min-w-0 items-center gap-3 text-left"
-                aria-label="Open now playing"
+              <Link
+                href={albumPath}
+                className="flex min-w-0 items-center gap-3 text-left transition-opacity hover:opacity-90"
+                aria-label={`Open album ${track.album || track.title}`}
               >
                 <CoverArt
                   seed={track.album || track.title}
@@ -150,7 +235,7 @@ export function NowPlayingBar() {
                     </span>
                   </div>
                 </div>
-              </button>
+              </Link>
             </TrackContextMenu>
             {downloaded ? (
               <BarTooltip label="In library">
@@ -319,15 +404,11 @@ export function NowPlayingBar() {
             <BarTooltip label="Open Miniplayer">
               <button
                 type="button"
-                onClick={() => togglePanel("nowPlaying")}
-                className={cn(
-                  "rounded p-1.5 transition-colors",
-                  isPanelOpen("nowPlaying")
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-                aria-label="Open now playing"
-                aria-pressed={isPanelOpen("nowPlaying")}
+                onClick={() => {
+                  void openMiniplayer();
+                }}
+                className="rounded p-1.5 text-muted-foreground transition-colors hover:text-foreground"
+                aria-label="Open miniplayer window"
               >
                 <PictureInPicture2 className="size-3.5" />
               </button>
@@ -351,5 +432,9 @@ export function NowPlayingBar() {
         </div>
       </div>
     </TooltipProvider>
+    {pipMount
+      ? createPortal(<MiniplayerClient sameDocument />, pipMount)
+      : null}
+    </>
   );
 }

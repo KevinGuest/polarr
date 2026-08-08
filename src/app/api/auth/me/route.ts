@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { json, getAuthUser } from "@/lib/api";
+import { banPublicPayload, getActiveBan } from "@/lib/bans";
 import { getPublicProfileById, getUserEmail } from "@/lib/db";
 import { scrambleUserId } from "@/lib/user-id";
 
@@ -9,6 +10,7 @@ export async function GET() {
   const user = await getAuthUser();
   if (!user) return json({ user: null }, { status: 401 });
   const email = getUserEmail(user.id);
+  const ban = banPublicPayload(getActiveBan(user.id));
   const profile = getPublicProfileById(user.id);
   if (!profile) {
     return json({
@@ -22,6 +24,7 @@ export async function GET() {
         avatarUrl: null,
         bannerColors: null,
       },
+      ban,
     });
   }
   return json({
@@ -35,6 +38,7 @@ export async function GET() {
       avatarUrl: profile.avatarUrl,
       bannerColors: profile.bannerColors,
     },
+    ban,
   });
 }
 

@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,6 +29,7 @@ import {
   PASSWORD_TOO_SHORT_MSG,
 } from "@/lib/auth-password";
 import { invalidateDiscordPresenceCache } from "@/components/player-provider";
+import { toastError, toastSaved, toastSuccess } from "@/lib/toast";
 
 type SettingsTab = "profile" | "playlists" | "discord";
 
@@ -92,7 +92,6 @@ export function SettingsClient() {
 
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
-  const [profileMsg, setProfileMsg] = useState<string | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
 
   const [currentPassword, setCurrentPassword] = useState("");
@@ -111,14 +110,13 @@ export function SettingsClient() {
     apple: false,
   });
   const [importing, setImporting] = useState(false);
-  const [importMsg, setImportMsg] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<ImportSummary | null>(null);
 
   const [discordLinked, setDiscordLinked] = useState(false);
   const [discordUsername, setDiscordUsername] = useState<string | null>(null);
   const [discordPresence, setDiscordPresence] = useState(false);
   const [discordOAuthReady, setDiscordOAuthReady] = useState(false);
-  const [discordMsg, setDiscordMsg] = useState<string | null>(null);
+  const [discordPresenceReady, setDiscordPresenceReady] = useState(false);
   const [discordBusy, setDiscordBusy] = useState(false);
 
   function setTab(next: SettingsTab) {
@@ -149,6 +147,9 @@ export function SettingsClient() {
         );
         setDiscordPresence(Boolean(data.discord?.presenceEnabled));
         setDiscordOAuthReady(Boolean(data.discordOAuthReady));
+        setDiscordPresenceReady(
+          Boolean(data.discordPresenceReady || data.discordClientId),
+        );
       }
       if (servicesRes.ok) {
         const data = await servicesRes.json();
@@ -165,17 +166,18 @@ export function SettingsClient() {
     const flag = searchParams.get("discord");
     if (!flag) return;
     const messages: Record<string, string> = {
-      linked: "Discord linked.",
-      denied: "Discord authorization was cancelled.",
-      missing: "Discord callback was missing data.",
-      auth: "Sign in again, then link Discord.",
-      config: "Discord app isn’t configured on this server.",
-      state: "Discord link expired — try again.",
-      token: "Couldn’t finish Discord login.",
-      user: "Couldn’t read your Discord profile.",
+      linked: "Discord linked",
+      denied: "Discord authorization was cancelled",
+      missing: "Discord callback was missing data",
+      auth: "Sign in again, then link Discord",
+      config: "Discord app isn’t configured on this server",
+      state: "Discord link expired — try again",
+      token: "Couldn’t finish Discord login",
+      user: "Couldn’t read your Discord profile",
     };
-    setDiscordMsg(messages[flag] || null);
+    const text = messages[flag];
     if (flag === "linked") {
+      toastSuccess(text || "Discord linked");
       setDiscordLinked(true);
       setTab("discord");
       void fetch("/api/account")
@@ -186,13 +188,14 @@ export function SettingsClient() {
           setDiscordPresence(Boolean(data.discord?.presenceEnabled));
         })
         .catch(() => null);
+    } else if (text) {
+      toastError(text);
     }
     router.replace("/settings?tab=discord", { scroll: false });
   }, [searchParams, router]);
 
   async function saveProfile() {
     setSavingProfile(true);
-    setProfileMsg(null);
     try {
       const res = await fetch("/api/account", {
         method: "PATCH",
@@ -201,12 +204,14 @@ export function SettingsClient() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setProfileMsg(data.error || "Could not save");
+        toastError(
+          typeof data.error === "string" ? data.error : "Could not save",
+        );
         return;
       }
       setUsername(data.username || username);
       setEmail(data.email || email);
-      setProfileMsg("Saved");
+      toastSaved();
     } finally {
       setSavingProfile(false);
     }
@@ -216,15 +221,15 @@ export function SettingsClient() {
     setSavingPassword(true);
     try {
       if (!currentPassword) {
-        toast.error("Current password is required");
+        toastError("Current password is required");
         return;
       }
       if (!isPasswordLongEnough(newPassword)) {
-        toast.error(PASSWORD_TOO_SHORT_MSG);
+        toastError(PASSWORD_TOO_SHORT_MSG);
         return;
       }
       if (newPassword !== confirmPassword) {
-        toast.error("New passwords do not match");
+        toastError("New passwords do not match");
         return;
       }
       const res = await fetch("/api/account", {
@@ -238,7 +243,7 @@ export function SettingsClient() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(
+        toastError(
           typeof data.error === "string"
             ? data.error
             : "Could not update password",
@@ -248,7 +253,7 @@ export function SettingsClient() {
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      toast.success("Password updated");
+      toastSaved("Password updated");
     } finally {
       setSavingPassword(false);
     }
@@ -257,11 +262,10 @@ export function SettingsClient() {
   async function runImport() {
     const url = playlistUrl.trim();
     if (!url) {
-      setImportMsg("Paste a playlist link from the service you picked.");
+      toastError("Paste a playlist link from the service you picked.");
       return;
     }
     setImporting(true);
-    setImportMsg(null);
     setImportResult(null);
     try {
       const res = await fetch("/api/playlists/import", {
@@ -275,7 +279,9 @@ export function SettingsClient() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setImportMsg(data.error || "Import failed");
+        toastError(
+          typeof data.error === "string" ? data.error : "Import failed",
+        );
         return;
       }
       setImportResult({
@@ -286,6 +292,10 @@ export function SettingsClient() {
         total: data.total,
       });
       setPlaylistUrl("");
+      toastSuccess(
+        `Imported “${data.name || "playlist"}”`,
+        `${data.matched ?? 0}/${data.total ?? 0} matched`,
+      );
     } finally {
       setImporting(false);
     }
@@ -293,12 +303,15 @@ export function SettingsClient() {
 
   async function linkDiscord() {
     setDiscordBusy(true);
-    setDiscordMsg(null);
     try {
       const res = await fetch("/api/discord/oauth");
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.url) {
-        setDiscordMsg(data.error || "Could not start Discord link");
+        toastError(
+          typeof data.error === "string"
+            ? data.error
+            : "Could not start Discord link",
+        );
         return;
       }
       window.location.href = data.url as string;
@@ -309,17 +322,16 @@ export function SettingsClient() {
 
   async function unlinkDiscord() {
     setDiscordBusy(true);
-    setDiscordMsg(null);
     try {
       const res = await fetch("/api/discord/oauth", { method: "DELETE" });
       if (!res.ok) {
-        setDiscordMsg("Could not unlink Discord");
+        toastError("Could not unlink Discord");
         return;
       }
       setDiscordLinked(false);
       setDiscordUsername(null);
       setDiscordPresence(false);
-      setDiscordMsg("Discord unlinked");
+      toastSuccess("Discord unlinked");
     } finally {
       setDiscordBusy(false);
     }
@@ -327,7 +339,6 @@ export function SettingsClient() {
 
   async function togglePresence(enabled: boolean) {
     setDiscordPresence(enabled);
-    setDiscordMsg(null);
     const res = await fetch("/api/account", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -336,13 +347,17 @@ export function SettingsClient() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setDiscordPresence(!enabled);
-      setDiscordMsg(data.error || "Could not update presence");
+      toastError(
+        typeof data.error === "string"
+          ? data.error
+          : "Could not update presence",
+      );
       return;
     }
     invalidateDiscordPresenceCache();
-    setDiscordMsg(
+    toastSaved(
       enabled
-        ? "Listening status on — keep Discord desktop open while you play."
+        ? "Listening status on"
         : "Listening status off",
     );
   }
@@ -418,9 +433,6 @@ export function SettingsClient() {
                   placeholder="you@example.com"
                 />
               </div>
-              {profileMsg ? (
-                <p className="text-sm text-foreground">{profileMsg}</p>
-              ) : null}
               <Button
                 type="button"
                 disabled={savingProfile || !username.trim() || !email.trim()}
@@ -521,58 +533,66 @@ export function SettingsClient() {
           <CardHeader>
             <CardTitle>Discord</CardTitle>
             <CardDescription>
-              Link Discord and show what you’re playing as Rich Presence while
-              Discord desktop is open on this machine.
+              Show what you’re listening to as Rich Presence while Discord
+              desktop is open on this machine. An admin configures this
+              server’s Discord Application Client ID under Admin →
+              Notifications.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {!discordOAuthReady ? (
+            {!discordPresenceReady ? (
               <p className="text-sm text-muted-foreground">
-                An admin still needs to add a Discord Application Client ID &amp;
-                Secret under Admin → Notifications.
+                An admin hasn’t set a Discord Application Client ID yet (Admin →
+                Notifications).
               </p>
-            ) : null}
-            {discordLinked ? (
-              <>
-                <p className="text-sm text-foreground">
-                  Linked as{" "}
-                  <span className="font-medium">
-                    {discordUsername || "Discord"}
-                  </span>
-                </p>
-                <div className="flex items-center justify-between gap-4 rounded-lg border border-border px-3 py-3">
-                  <div>
-                    <p className="text-sm font-medium">Show listening status</p>
-                    <p className="text-xs text-muted-foreground">
-                      Requires Discord desktop running locally.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={discordPresence}
-                    onCheckedChange={(v) => void togglePresence(v)}
-                    aria-label="Show listening status on Discord"
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={discordBusy}
-                  onClick={() => void unlinkDiscord()}
-                >
-                  Unlink Discord
-                </Button>
-              </>
             ) : (
-              <Button
-                type="button"
-                disabled={discordBusy || !discordOAuthReady}
-                onClick={() => void linkDiscord()}
-              >
-                {discordBusy ? "Opening…" : "Link Discord"}
-              </Button>
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-border px-3 py-3">
+                <div>
+                  <p className="text-sm font-medium">Show listening status</p>
+                  <p className="text-xs text-muted-foreground">
+                    Requires Discord desktop running locally.
+                  </p>
+                </div>
+                <Switch
+                  checked={discordPresence}
+                  onCheckedChange={(v) => void togglePresence(v)}
+                  aria-label="Show listening status on Discord"
+                />
+              </div>
             )}
-            {discordMsg ? (
-              <p className="text-sm text-foreground">{discordMsg}</p>
+            {discordOAuthReady ? (
+              <div className="space-y-3 border-t border-border pt-4">
+                <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  Optional link
+                </p>
+                {discordLinked ? (
+                  <>
+                    <p className="text-sm text-foreground">
+                      Linked as{" "}
+                      <span className="font-medium">
+                        {discordUsername || "Discord"}
+                      </span>
+                    </p>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={discordBusy}
+                      onClick={() => void unlinkDiscord()}
+                    >
+                      Unlink Discord
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={discordBusy}
+                    onClick={() => void linkDiscord()}
+                  >
+                    {discordBusy ? "Opening…" : "Link Discord account"}
+                  </Button>
+                )}
+              </div>
             ) : null}
           </CardContent>
         </Card>
@@ -582,7 +602,6 @@ export function SettingsClient() {
         open={importOpen}
         onOpenChange={(open) => {
           setImportOpen(open);
-          if (!open) setImportMsg(null);
         }}
       >
         <DialogContent className="max-w-lg">
@@ -607,7 +626,6 @@ export function SettingsClient() {
                   disabled={disabled}
                   onClick={() => {
                     setService(s.id);
-                    setImportMsg(null);
                   }}
                   className={cn(
                     "rounded-lg border px-2 py-3 text-center text-sm font-medium transition-colors",
@@ -654,9 +672,6 @@ export function SettingsClient() {
                 maxLength={80}
               />
             </div>
-            {importMsg ? (
-              <p className="text-sm text-destructive">{importMsg}</p>
-            ) : null}
           </div>
 
           <DialogFooter>

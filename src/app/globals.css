@@ -141,3 +141,77 @@
 .animate-listener-drift {
   animation: polarr-listener-drift 4.5s ease-in-out infinite;
 }
+
+/* Holographic “Feeling lucky” ban lift */
+@keyframes ban-holo-wave {
+  0%,
+  100% {
+    background-position: 0% 50%;
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.12),
+      0 6px 18px rgba(120, 90, 255, 0.16),
+      inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  }
+  50% {
+    background-position: 100% 50%;
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.2),
+      0 8px 22px rgba(40, 200, 255, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  }
+}
+
+@keyframes ban-holo-sheen {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+.ban-holo-btn {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: none;
+  color: #0c0a14;
+  font-weight: 600;
+  background: linear-gradient(
+    120deg,
+    #7af0ff 0%,
+    #c4a8ff 22%,
+    #ff9ed8 45%,
+    #ffe08a 68%,
+    #7af0ff 100%
+  );
+  background-size: 220% 220%;
+  animation: ban-holo-wave 2.4s ease-in-out infinite;
+}
+
+.ban-holo-btn:hover,
+.ban-holo-btn:focus-visible {
+  filter: none;
+  opacity: 1;
+}
+
+.ban-holo-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.55) 48%,
+    transparent 62%
+  );
+  background-size: 200% 100%;
+  animation: ban-holo-sheen 2.8s linear infinite;
+  pointer-events: none;
+}
+
+.ban-holo-btn > span {
+  position: relative;
+  z-index: 1;
+}

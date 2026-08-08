@@ -1,11 +1,15 @@
 "use client";
 
+import {
+  toastError,
+  toastHeart,
+  toastInfo,
+  toastSuccess,
+} from "@/lib/toast";
 import { useCallback, useEffect, useState } from "react";
 import {
   CirclePlus,
   Copy,
-  Heart,
-  Info,
   Link2,
   ListEnd,
   ListMusic,
@@ -16,7 +20,6 @@ import {
   FileText,
   Trash2,
 } from "lucide-react";
-import { toast } from "sonner";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -136,7 +139,7 @@ export function TrackContextMenu({
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         setLiked(!next);
-        toast.error(
+        toastError(
           typeof data?.error === "string"
             ? data.error
             : "Couldn’t update Liked Songs",
@@ -150,17 +153,10 @@ export function TrackContextMenu({
         liked: persisted,
         count: typeof data?.count === "number" ? data.count : undefined,
       });
-      toast(persisted ? "Saved to Liked Songs" : "Removed from Liked Songs", {
-        icon: <Heart className="size-4 fill-current" />,
-        style: {
-          background: "#000",
-          color: "#fff",
-          border: "1px solid rgba(255,255,255,0.12)",
-        },
-      });
+      toastHeart(persisted ? "Saved to Liked Songs" : "Removed from Liked Songs");
     } catch {
       setLiked(!next);
-      toast.error("Couldn’t update Liked Songs");
+      toastError("Couldn’t update Liked Songs");
     }
   }
 
@@ -171,10 +167,10 @@ export function TrackContextMenu({
       body: JSON.stringify({ playlistId, trackId: track.id }),
     });
     if (!res.ok) {
-      toast.error("Couldn’t add to playlist");
+      toastError("Couldn’t add to playlist");
       return;
     }
-    toast.success(`Added to ${name}`);
+    toastSuccess(`Added to ${name}`);
     void loadPlaylists();
   }
 
@@ -190,10 +186,10 @@ export function TrackContextMenu({
       body: JSON.stringify({ name: name.trim(), trackId: track.id }),
     });
     if (!res.ok) {
-      toast.error("Couldn’t create playlist");
+      toastError("Couldn’t create playlist");
       return;
     }
-    toast.success(`Added to ${name.trim()}`);
+    toastSuccess(`Added to ${name.trim()}`);
     void loadPlaylists();
   }
 
@@ -204,10 +200,10 @@ export function TrackContextMenu({
       body: JSON.stringify({ trackId: track.id }),
     });
     if (!res.ok) {
-      toast.error("Couldn’t update taste profile");
+      toastError("Couldn’t update taste profile");
       return;
     }
-    toast.success("Excluded from your taste profile");
+    toastSuccess("Excluded from your taste profile");
   }
 
   async function removeFromLibrary() {
@@ -224,7 +220,7 @@ export function TrackContextMenu({
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        toast.error(
+        toastError(
           typeof data?.error === "string"
             ? data.error
             : "Couldn’t remove from library",
@@ -232,9 +228,9 @@ export function TrackContextMenu({
         return;
       }
       emitLibraryChanged({ trackId: track.id });
-      toast.success("Removed from library");
+      toastSuccess("Removed from library");
     } catch {
-      toast.error("Couldn’t remove from library");
+      toastError("Couldn’t remove from library");
     }
   }
 
@@ -263,9 +259,9 @@ export function TrackContextMenu({
     const url = trackShareUrl(track);
     try {
       await navigator.clipboard.writeText(url);
-      toast.success("Link copied");
+      toastSuccess("Link copied");
     } catch {
-      toast.error("Couldn’t copy link");
+      toastError("Couldn’t copy link");
     }
   }
 
@@ -273,9 +269,9 @@ export function TrackContextMenu({
     const text = `${track.title} — ${track.artist}${track.album ? ` · ${track.album}` : ""}`;
     try {
       await navigator.clipboard.writeText(text);
-      toast.success("Copied");
+      toastSuccess("Copied");
     } catch {
-      toast.error("Couldn’t copy");
+      toastError("Couldn’t copy");
     }
   }
 
@@ -349,15 +345,7 @@ export function TrackContextMenu({
           <ContextMenuItem
             onSelect={() => {
               addToQueue(track);
-              toast("Queue updated", {
-                description: "Cleared upcoming tracks",
-                icon: <Info className="size-4" />,
-                style: {
-                  background: "#000",
-                  color: "#fff",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                },
-              });
+              toastInfo("Queue updated", { description: "Cleared upcoming tracks" });
             }}
           >
             <ListEnd className="size-4 shrink-0 text-muted-foreground" />

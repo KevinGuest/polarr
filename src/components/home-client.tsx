@@ -51,6 +51,7 @@ type OthersItem = PlayerTrack & {
   playedAt: string;
   listenedBy: string;
   listenedByAvatarUrl?: string | null;
+  listeners?: { username: string; avatarUrl?: string | null }[];
 };
 
 type MoreFromItem =
@@ -154,17 +155,12 @@ export function HomeClient() {
     };
   }, [load, loadOthers]);
 
-  function playOthers(item: OthersItem) {
-    const queue = others.map((r) => ({
-      id: r.id,
-      title: r.title,
-      artist: formatTrackArtistLine(r.artist, r.title),
-      album: r.album,
-      coverPath: r.coverPath,
-    }));
-    play(
-      { ...item, artist: formatTrackArtistLine(item.artist, item.title) },
-      queue,
+  function openOthersAlbum(item: OthersItem) {
+    router.push(
+      albumHref({
+        title: (item.album || item.title).trim() || item.title,
+        artist: item.artist,
+      }),
     );
   }
 
@@ -228,14 +224,15 @@ export function HomeClient() {
                 <MediaTileShell
                   title={item.title}
                   subtitle={formatTrackArtistLine(item.artist, item.title)}
-                  ariaLabel={`Play ${item.title}`}
-                  onOpen={() => playOthers(item)}
+                  ariaLabel={`Open album for ${item.title}`}
+                  onOpen={() => openOthersAlbum(item)}
                   cover={
                     <ListeningCover
                       title={item.title}
                       coverPath={item.coverPath}
                       listenedBy={item.listenedBy}
                       avatarUrl={item.listenedByAvatarUrl}
+                      listeners={item.listeners}
                       delayMs={(i % 5) * 700}
                     />
                   }

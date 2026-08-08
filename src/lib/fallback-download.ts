@@ -25,16 +25,132 @@ import {
  * free-text / metadata search → yt-dlp audio extract → local library.
  * Resolves yt-dlp from image install, PATH, or auto-download under data/bin.
  * Admin stop signal kills the active child and marks the job cancelled.
+ * Jobs older than DOWNLOAD_TIMEOUT_MS are failed as "Request timed out".
  */
 export function ytDlpAvailable(): Promise<boolean> {
   return toolsYtDlpAvailable();
 }
 
+/** Max wall time for a fallback download before auto-fail. */
+export const DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
+
+export const REQUEST_TIMED_OUT = "Request timed out";
+export const TRACK_NOT_FOUND = "Track not found";
+export const ALBUM_NOT_FOUND = "Album not found";
+
 const activeProcs = new Map<string, ChildProcess>();
 const stopFlags = new Set<string>();
+const timeoutTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function isStopped(jobId: string): boolean {
   return stopFlags.has(jobId);
+}
+
+function clearTimeoutTimer(jobId: string) {
+  const t = timeoutTimers.get(jobId);
+  if (t) {
+    clearTimeout(t);
+    timeoutTimers.delete(jobId);
+  }
+}
+
+function killJobProcess(jobId: string) {
+  const child = activeProcs.get(jobId);
+  if (!child) return;
+  try {
+    child.kill("SIGTERM");
+  } catch {
+    /* already exiting */
+  }
+  setTimeout(() => {
+    try {
+      if (!child.killed) child.kill("SIGKILL");
+    } catch {
+      /* ignore */
+    }
+  }, 800);
+}
+
+/** Map yt-dlp / OS noise into short UI errors for hover. */
+export function friendlyDownloadError(
+  stderr: string,
+  code?: number,
+  mediaType?: string | null,
+): string {
+  const s = (stderr || "").toLowerCase();
+  if (
+    /timed?\s*out|timeout|deadline exceeded|etimedout/.test(s)
+  ) {
+    return REQUEST_TIMED_OUT;
+  }
+  if (
+    /no results?|no video results?|unable to (download|extract|download webpage)|does not exist|not found|unsupported url|entry not found|video unavailable|no suitable formats?|private video|copyright/.test(
+      s,
+    )
+  ) {
+    return mediaType === "album" || mediaType === "artist"
+      ? ALBUM_NOT_FOUND
+      : TRACK_NOT_FOUND;
+  }
+  const tail = (stderr || "").trim().slice(-280);
+  if (tail) return tail.split(/\r?\n/).filter(Boolean).slice(-1)[0] || "Download failed";
+  if (code != null && code !== 0) return "Download failed";
+  return "Download failed";
+}
+
+/**
+ * Fail a running/queued job as timed out (kills yt-dlp if active).
+ * Idempotent if already terminal.
+ */
+export function failDownloadTimedOut(jobId: string): boolean {
+  const job = getDownload(jobId);
+  if (!job) return false;
+  if (
+    job.status === "completed" ||
+    job.status === "failed" ||
+    job.status === "cancelled"
+  ) {
+    return false;
+  }
+
+  clearTimeoutTimer(jobId);
+  stopFlags.add(jobId);
+  killJobProcess(jobId);
+  updateDownloadJob(jobId, {
+    status: "failed",
+    error: REQUEST_TIMED_OUT,
+    progress: 0,
+  });
+  return true;
+}
+
+/** Sweep stuck jobs past 30m (orphan after restart or hung child). */
+export function failTimedOutDownloads(): number {
+  const cutoff = Date.now() - DOWNLOAD_TIMEOUT_MS;
+  let n = 0;
+  for (const job of listDownloads(200)) {
+    if (job.status !== "queued" && job.status !== "running") continue;
+    const started = Date.parse(job.createdAt);
+    if (!Number.isFinite(started) || started > cutoff) continue;
+    if (failDownloadTimedOut(job.id)) n += 1;
+  }
+  return n;
+}
+
+function scheduleJobTimeout(jobId: string, createdAt: string) {
+  clearTimeoutTimer(jobId);
+  const started = Date.parse(createdAt);
+  const elapsed = Number.isFinite(started) ? Date.now() - started : 0;
+  const remaining = Math.max(0, DOWNLOAD_TIMEOUT_MS - elapsed);
+  const timer = setTimeout(() => {
+    timeoutTimers.delete(jobId);
+    failDownloadTimedOut(jobId);
+  }, remaining);
+  // Don't keep process alive solely for idle timeout in rare edge cases
+  if (typeof timer === "object" && "unref" in timer) {
+    timer.unref();
+  }
+  timeoutTimers.set(jobId, timer);
 }
 
 function run(
@@ -97,23 +213,9 @@ export function stopDownloadJob(jobId: string): {
     return { ok: false, error: `Job already ${job.status}` };
   }
 
+  clearTimeoutTimer(jobId);
   stopFlags.add(jobId);
-  const child = activeProcs.get(jobId);
-  if (child) {
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      /* already exiting */
-    }
-    // Force on Windows if still alive shortly after
-    setTimeout(() => {
-      try {
-        if (!child.killed) child.kill("SIGKILL");
-      } catch {
-        /* ignore */
-      }
-    }, 800);
-  }
+  killJobProcess(jobId);
 
   updateDownloadJob(jobId, {
     status: "cancelled",
@@ -177,13 +279,24 @@ export async function processDownloadJob(id: string) {
   const jobs = listDownloads(200);
   const job = jobs.find((j) => j.id === id);
   if (!job) return;
-  if (isStopped(id) || job.status === "cancelled") return;
+  if (isStopped(id) || job.status === "cancelled" || job.status === "failed") {
+    return;
+  }
+
+  // Already past the wall clock — don't start
+  const started = Date.parse(job.createdAt);
+  if (Number.isFinite(started) && Date.now() - started >= DOWNLOAD_TIMEOUT_MS) {
+    failDownloadTimedOut(id);
+    return;
+  }
 
   updateDownloadJob(id, { status: "running", progress: 1 });
+  scheduleJobTimeout(id, job.createdAt);
 
   const ytDlp = await ensureYtDlp();
   if (isStopped(id)) return;
   if (!ytDlp) {
+    clearTimeoutTimer(id);
     updateDownloadJob(id, {
       status: "failed",
       error:
@@ -196,6 +309,7 @@ export async function processDownloadJob(id: string) {
   const hasFfmpeg = await ffmpegAvailable();
   if (isStopped(id)) return;
   if (!hasFfmpeg) {
+    clearTimeoutTimer(id);
     updateDownloadJob(id, {
       status: "failed",
       error:
@@ -240,15 +354,20 @@ export async function processDownloadJob(id: string) {
     );
 
     if (result.cancelled || isStopped(id)) {
-      // stopDownloadJob already wrote cancelled state
+      // stop / timeout already wrote terminal state
       stopFlags.delete(id);
       return;
     }
 
     if (result.code !== 0) {
+      const linked = job.requestId ? getRequest(job.requestId) : null;
       updateDownloadJob(id, {
         status: "failed",
-        error: result.stderr.slice(-500) || "Download failed",
+        error: friendlyDownloadError(
+          result.stderr,
+          result.code,
+          linked?.mediaType,
+        ),
         progress: 0,
       });
       return;
@@ -264,9 +383,13 @@ export async function processDownloadJob(id: string) {
       null;
 
     if (!outputPath) {
+      const linked = job.requestId ? getRequest(job.requestId) : null;
       updateDownloadJob(id, {
         status: "failed",
-        error: "Download finished but output file was not found",
+        error:
+          linked?.mediaType === "album" || linked?.mediaType === "artist"
+            ? ALBUM_NOT_FOUND
+            : TRACK_NOT_FOUND,
         progress: 0,
       });
       return;
@@ -299,6 +422,12 @@ export async function processDownloadJob(id: string) {
 
     const track = getTrackByPath(outputPath) as TrackRow | null;
 
+    // Timeout may have won the race — don't complete a failed job
+    const still = getDownload(id);
+    if (!still || still.status === "failed" || still.status === "cancelled") {
+      return track;
+    }
+
     updateDownloadJob(id, {
       status: "completed",
       progress: 100,
@@ -312,12 +441,14 @@ export async function processDownloadJob(id: string) {
       stopFlags.delete(id);
       return;
     }
+    const msg = err instanceof Error ? err.message : "Unknown download error";
     updateDownloadJob(id, {
       status: "failed",
-      error: err instanceof Error ? err.message : "Unknown download error",
+      error: friendlyDownloadError(msg),
       progress: 0,
     });
   } finally {
+    clearTimeoutTimer(id);
     stopFlags.delete(id);
   }
 }

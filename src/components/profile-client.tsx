@@ -15,6 +15,7 @@ import {
   extractBannerColorsFromUrl,
 } from "@/lib/banner-colors";
 import { AVATAR_UPDATED_EVENT } from "@/lib/ui-events";
+import { toastError, toastSaved } from "@/lib/toast";
 
 type Profile = {
   publicId: string;
@@ -92,7 +93,6 @@ export function ProfileClient({
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [avatarVer, setAvatarVer] = useState(0);
-  const [uploadError, setUploadError] = useState<string | null>(null);
   const [liveBanner, setLiveBanner] = useState<string[] | null>(null);
 
   useEffect(() => {
@@ -168,7 +168,6 @@ export function ProfileClient({
 
   async function onPickAvatar(file: File | null) {
     if (!file || !data?.isSelf) return;
-    setUploadError(null);
     setUploading(true);
     try {
       const colors = await extractBannerColors(file);
@@ -190,8 +189,9 @@ export function ProfileClient({
       setLiveBanner(colors);
       setAvatarVer(Date.now());
       window.dispatchEvent(new Event(AVATAR_UPDATED_EVENT));
+      toastSaved("Avatar updated");
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Upload failed");
+      toastError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -325,9 +325,6 @@ export function ProfileClient({
               {" · "}
               {stats.artists} artist{stats.artists === 1 ? "" : "s"}
             </p>
-            {uploadError ? (
-              <p className="text-sm text-destructive">{uploadError}</p>
-            ) : null}
           </div>
         </div>
       </section>

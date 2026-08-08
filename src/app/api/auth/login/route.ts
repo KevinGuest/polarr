@@ -4,6 +4,12 @@ import { json } from "@/lib/api";
 import { authenticate } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH } from "@/lib/auth-password";
 import { getRequestIp, normalizeHwid } from "@/lib/request-client";
+import {
+  loginBlockedForMs,
+  recordLoginFailure,
+  recordLoginSuccess,
+} from "@/lib/login-rate-limit";
+import { sessionCookieOptions, SESSION_COOKIE_NAME } from "@/lib/session-cookie";
 
 export const dynamic = "force-dynamic";
 
@@ -27,20 +33,42 @@ export async function POST(req: Request) {
     );
   }
   const ip = await getRequestIp();
+
+  const waitMs = loginBlockedForMs(ip, parsed.data.username);
+  if (waitMs > 0) {
+    const seconds = Math.ceil(waitMs / 1000);
+    return json(
+      { error: `Too many attempts. Try again in ${seconds}s.` },
+      { status: 429, headers: { "Retry-After": String(seconds) } },
+    );
+  }
+
   const hwid = normalizeHwid(parsed.data.hwid);
   const result = authenticate(parsed.data.username, parsed.data.password, {
     ip,
     hwid,
   });
   if (!result) {
+    recordLoginFailure(ip, parsed.data.username);
     return json({ error: "Invalid username or password" }, { status: 401 });
   }
+  if ("banned" in result && result.banned) {
+    return json(
+      {
+        error: result.banMessage,
+        banned: true,
+        expiresAt: result.expiresAt,
+        permanent: result.permanent,
+      },
+      { status: 403 },
+    );
+  }
+  recordLoginSuccess(ip, parsed.data.username);
   const cookieStore = await cookies();
-  cookieStore.set("polarr_token", result.token, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 30,
-  });
+  cookieStore.set(
+    SESSION_COOKIE_NAME,
+    result.token,
+    await sessionCookieOptions(),
+  );
   return json({ token: result.token, user: result.user });
 }

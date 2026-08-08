@@ -4,7 +4,6 @@ import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Heart, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
-import { toast } from "sonner";
 import { CoverArt } from "@/components/cover-art";
 import { albumHref, encodeAlbumId } from "@/lib/album-ref";
 import { LIKES_CHANGED_EVENT } from "@/lib/ui-events";
@@ -17,6 +16,7 @@ import {
 } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePlayer } from "@/components/player-provider";
+import { toastError, toastSuccess } from "@/lib/toast";
 
 type NavItem = {
   type: "album" | "playlist";
@@ -128,10 +128,10 @@ export function LibrarySidebar({
       body: JSON.stringify({ name: name.trim() }),
     });
     if (!res.ok) {
-      toast.error("Couldn’t create playlist");
+      toastError("Couldn’t create playlist");
       return;
     }
-    toast.success(`Created “${name.trim()}”`);
+    toastSuccess(`Created “${name.trim()}”`);
   }
 
   return (

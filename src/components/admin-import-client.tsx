@@ -12,12 +12,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { toastError, toastSaved } from "@/lib/toast";
 
 export function AdminImportClient() {
   const [spotifyClientId, setSpotifyClientId] = useState("");
   const [spotifyClientSecret, setSpotifyClientSecret] = useState("");
   const [spotifyConfigured, setSpotifyConfigured] = useState(false);
-  const [spotifyMsg, setSpotifyMsg] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -43,7 +43,6 @@ export function AdminImportClient() {
   }, []);
 
   async function saveSpotify() {
-    setSpotifyMsg(null);
     const res = await fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -58,14 +57,14 @@ export function AdminImportClient() {
     }
     const data = await res.json();
     if (!res.ok) {
-      setSpotifyMsg(data.error || "Save failed");
+      toastError(typeof data.error === "string" ? data.error : "Save failed");
       return;
     }
     setSpotifyConfigured(Boolean(data.settings?.spotifyConfigured));
     if (data.settings?.spotifyClientSecret) {
       setSpotifyClientSecret(data.settings.spotifyClientSecret);
     }
-    setSpotifyMsg("Saved");
+    toastSaved();
   }
 
   if (forbidden) {
@@ -136,9 +135,6 @@ export function AdminImportClient() {
                   autoComplete="off"
                 />
               </div>
-              {spotifyMsg ? (
-                <p className="text-sm text-foreground">{spotifyMsg}</p>
-              ) : null}
               <Button onClick={() => void saveSpotify()}>Save Spotify</Button>
             </CardContent>
           </Card>

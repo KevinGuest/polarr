@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +21,7 @@ import {
   PASSWORD_TOO_SHORT_MSG,
 } from "@/lib/auth-password";
 import { getOrCreateDeviceId } from "@/lib/device-id";
+import { toastError, toastSuccess, toastSaved } from "@/lib/toast";
 
 type Step = "account" | "lidarr" | "email";
 
@@ -66,19 +66,19 @@ export function SetupWizard() {
     e.preventDefault();
 
     if (!username.trim()) {
-      toast.error("Enter a username");
+      toastError("Enter a username");
       return;
     }
     if (!email.trim()) {
-      toast.error("Email is required");
+      toastError("Email is required");
       return;
     }
     if (!isPasswordLongEnough(password)) {
-      toast.error(PASSWORD_TOO_SHORT_MSG);
+      toastError(PASSWORD_TOO_SHORT_MSG);
       return;
     }
     if (password !== confirmPassword) {
-      toast.error("Passwords do not match");
+      toastError("Passwords do not match");
       return;
     }
 
@@ -98,16 +98,16 @@ export function SetupWizard() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        toast.error(
+        toastError(
           typeof data.error === "string" ? data.error : "Registration failed",
         );
         return;
       }
 
-      toast.success("Admin account created");
+      toastSuccess("Admin account created");
       setStep("lidarr");
     } catch {
-      toast.error("Could not reach the server");
+      toastError("Could not reach the server");
     } finally {
       setLoading(false);
     }
@@ -129,18 +129,18 @@ export function SetupWizard() {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          toast.error(
+          toastError(
             typeof data.error === "string"
               ? data.error
               : "Could not save Lidarr settings",
           );
           return;
         }
-        toast.success("Lidarr settings saved");
+        toastSaved("Lidarr settings saved");
       }
       if (andContinue) setStep("email");
     } catch {
-      toast.error("Could not reach the server");
+      toastError("Could not reach the server");
     } finally {
       setLoading(false);
     }
@@ -160,18 +160,18 @@ export function SetupWizard() {
       });
       const data = await res.json().catch(() => ({}));
       if (data.ok) {
-        toast.success(
+        toastSuccess(
           data.status?.version
             ? `Connected · Lidarr v${data.status.version}`
             : "Lidarr connection OK",
         );
       } else {
-        toast.error(
+        toastError(
           typeof data.error === "string" ? data.error : "Connection failed",
         );
       }
     } catch {
-      toast.error("Could not reach the server");
+      toastError("Could not reach the server");
     } finally {
       setLoading(false);
     }
@@ -196,18 +196,18 @@ export function SetupWizard() {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          toast.error(
+          toastError(
             typeof data.error === "string"
               ? data.error
-              : "Could not save email settings",
+              : "Could not save SMTP settings",
           );
           return;
         }
-        toast.success("Email settings saved");
+        toastSaved("SMTP settings saved");
       }
       if (andFinish) finish();
     } catch {
-      toast.error("Could not reach the server");
+      toastError("Could not reach the server");
     } finally {
       setLoading(false);
     }
@@ -375,7 +375,7 @@ export function SetupWizard() {
         {step === "email" ? (
           <>
             <CardHeader>
-              <CardTitle>Email service</CardTitle>
+              <CardTitle>SMTP</CardTitle>
               <CardDescription>
                 SMTP for invites and notifications. Skip if you’ll configure it
                 later.

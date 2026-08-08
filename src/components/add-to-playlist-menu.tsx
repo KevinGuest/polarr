@@ -8,7 +8,6 @@ import {
   type ReactNode,
 } from "react";
 import { Check, Circle, HardDrive, Heart, Plus, Search, Trash2 } from "lucide-react";
-import { toast } from "sonner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { emitLikesChanged } from "@/lib/ui-events";
 import { cn } from "@/lib/utils";
+import { toastError, toastInfo, toastHeart, toastSuccess } from "@/lib/toast";
 
 type PlaylistRow = {
   id: string;
@@ -145,10 +145,10 @@ export function AddToPlaylistMenu({
     if (!libraryTrack) {
       if (onDownload) {
         onDownload();
-        toast.message("Saving to your library first…");
+        toastInfo("Saving to your library first…");
         setOpen(false);
       } else {
-        toast.error("Save this track to your library first");
+        toastError("Save this track to your library first");
       }
       return;
     }
@@ -164,7 +164,7 @@ export function AddToPlaylistMenu({
         ),
       });
       if (!res.ok) {
-        toast.error(
+        toastError(
           p.contains
             ? "Couldn’t remove from playlist"
             : "Couldn’t add to playlist",
@@ -185,6 +185,7 @@ export function AddToPlaylistMenu({
             : row,
         ),
       );
+      toastSuccess(p.contains ? `Removed from ${p.name}` : `Added to ${p.name}`);
     } finally {
       setBusyId(null);
     }
@@ -212,7 +213,7 @@ export function AddToPlaylistMenu({
       const persisted = Boolean(data?.liked);
       if (!res.ok) {
         setLiked(!next);
-        toast.error("Couldn’t update Liked Songs");
+        toastError("Couldn’t update Liked Songs");
         return;
       }
       setLiked(persisted);
@@ -220,9 +221,12 @@ export function AddToPlaylistMenu({
         liked: persisted,
         count: typeof data?.count === "number" ? data.count : undefined,
       });
+      toastHeart(
+        persisted ? "Saved to Liked Songs" : "Removed from Liked Songs",
+      );
     } catch {
       setLiked(!next);
-      toast.error("Couldn’t update Liked Songs");
+      toastError("Couldn’t update Liked Songs");
     } finally {
       setBusyId(null);
     }
@@ -232,10 +236,10 @@ export function AddToPlaylistMenu({
     if (!libraryTrack) {
       if (onDownload) {
         onDownload();
-        toast.message("Saving to your library first…");
+        toastInfo("Saving to your library first…");
         setOpen(false);
       } else {
-        toast.error("Save this track to your library first");
+        toastError("Save this track to your library first");
       }
       return;
     }
@@ -252,9 +256,10 @@ export function AddToPlaylistMenu({
         body: JSON.stringify({ name: name.trim(), trackId }),
       });
       if (!res.ok) {
-        toast.error("Couldn’t create playlist");
+        toastError("Couldn’t create playlist");
         return;
       }
+      toastSuccess(`Added to ${name.trim()}`);
       void load();
     } finally {
       setBusyId(null);
@@ -270,7 +275,7 @@ export function AddToPlaylistMenu({
       return;
     }
     if (!onDownload) {
-      toast.error("Can’t save this track to the library");
+      toastError("Can’t save this track to the library");
       return;
     }
     onDownload();

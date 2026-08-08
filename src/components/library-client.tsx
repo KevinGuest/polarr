@@ -21,7 +21,7 @@ import {
 } from "@/lib/ui-events";
 import { setDragTrack } from "@/lib/drag-track";
 import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine } from "@/lib/utils";
-import { toast } from "sonner";
+import { toastError, toastSuccess } from "@/lib/toast";
 
 type Track = PlayerTrack & {
   source: string;
@@ -298,7 +298,7 @@ export function LibraryClient({
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        toast.error(
+        toastError(
           typeof data?.error === "string"
             ? data.error
             : "Couldn’t remove from library",
@@ -307,9 +307,9 @@ export function LibraryClient({
       }
       setTracks((prev) => prev.filter((row) => row.id !== t.id));
       emitLibraryChanged({ trackId: t.id });
-      toast.success("Removed from library");
+      toastSuccess("Removed from library");
     } catch {
-      toast.error("Couldn’t remove from library");
+      toastError("Couldn’t remove from library");
     }
   }
 
@@ -544,7 +544,7 @@ export function LibraryClient({
                         {t.streamOnly
                           ? "stream"
                           : t.source === "fallback"
-                            ? "acquire"
+                            ? "download"
                             : t.source}
                       </td>
                       <td className="py-3 group-hover/row:bg-muted/30">

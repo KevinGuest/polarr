@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { toast } from "sonner";
 import { MoreHorizontal, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { roleLabel, type UserRole } from "@/lib/roles";
 import { cn } from "@/lib/utils";
+import { toastError, toastSuccess } from "@/lib/toast";
 
 type UserRow = {
   publicId: string;
@@ -127,6 +127,7 @@ export function AdminUsersClient() {
   const [detailsError, setDetailsError] = useState<string | null>(null);
 
   const [revokeTarget, setRevokeTarget] = useState<UserRow | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<UserRow | null>(null);
   const [transferTarget, setTransferTarget] = useState<UserRow | null>(null);
 
   async function refresh() {
@@ -229,11 +230,11 @@ export function AdminUsersClient() {
 
   async function setRole(user: UserRow, role: UserRole) {
     if (!canManage) {
-      toast.error("Only admins can change roles");
+      toastError("Only admins can change roles");
       return;
     }
     if (user.publicId === mePublicId) {
-      toast.error("You cannot change your own role here");
+      toastError("You cannot change your own role here");
       return;
     }
     if (role === "owner") {
@@ -241,7 +242,7 @@ export function AdminUsersClient() {
       return;
     }
     if (user.role === "owner") {
-      toast.error("Cannot change the Server Owner role");
+      toastError("Cannot change the Server Owner role");
       return;
     }
     if (role === user.role) return;
@@ -255,12 +256,12 @@ export function AdminUsersClient() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(
+        toastError(
           typeof data.error === "string" ? data.error : "Could not update role",
         );
         return;
       }
-      toast.success(`${user.username} is now ${roleLabel(role)}`);
+      toastSuccess(`${user.username} is now ${roleLabel(role)}`);
       await refresh();
     } finally {
       setBusy(null);
@@ -282,14 +283,14 @@ export function AdminUsersClient() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(
+        toastError(
           typeof data.error === "string"
             ? data.error
             : "Could not transfer ownership",
         );
         return;
       }
-      toast.success(
+      toastSuccess(
         `${transferTarget.username} is now the Server Owner. You are a member.`,
       );
       setTransferTarget(null);
@@ -317,14 +318,14 @@ export function AdminUsersClient() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(
+        toastError(
           typeof data.error === "string"
             ? data.error
             : "Could not revoke access",
         );
         return;
       }
-      toast.success(`Access revoked for ${revokeTarget.username}`);
+      toastSuccess(`Access revoked for ${revokeTarget.username}`);
       if (detailsUser?.publicId === revokeTarget.publicId) {
         setDetailsUser(null);
       }
@@ -333,6 +334,49 @@ export function AdminUsersClient() {
       }
       setRevokeTarget(null);
       await refresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function confirmRestore() {
+    if (!restoreTarget) return;
+    setBusy(restoreTarget.publicId);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: restoreTarget.publicId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toastError(
+          typeof data.error === "string"
+            ? data.error
+            : "Could not restore access",
+        );
+        return;
+      }
+      toastSuccess(`Access restored for ${restoreTarget.username}`);
+      const restoredId = restoreTarget.publicId;
+      setRestoreTarget(null);
+      await refresh();
+      if (detailsUser?.publicId === restoredId && data.user) {
+        setDetailsUser(data.user as UserRow);
+        setDetails((prev) =>
+          prev
+            ? {
+                ...prev,
+                accessRevokedAt: null,
+                role: (data.user as UserRow).role ?? prev.role,
+                isAdmin: Boolean((data.user as UserRow).isAdmin),
+              }
+            : prev,
+        );
+      }
+      if (activityUser?.publicId === restoredId && data.user) {
+        setActivityUser(data.user as UserRow);
+      }
     } finally {
       setBusy(null);
     }
@@ -371,8 +415,8 @@ export function AdminUsersClient() {
       <div className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
         <p className="text-sm text-muted-foreground">
-          Click a member for activity. Use the menu for account details and
-          roles, or to revoke access.
+          Click a member for activity. Use the menu for account details, roles,
+          or to revoke and restore access.
         </p>
       </div>
 
@@ -456,19 +500,29 @@ export function AdminUsersClient() {
                         User details
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="text-destructive focus:text-destructive"
-                        disabled={
-                          !canManage ||
-                          isSelf ||
-                          role === "owner" ||
-                          Boolean(u.accessRevokedAt) ||
-                          busy === u.publicId
-                        }
-                        onSelect={() => setRevokeTarget(u)}
-                      >
-                        Revoke
-                      </DropdownMenuItem>
+                      {u.accessRevokedAt ? (
+                        <DropdownMenuItem
+                          disabled={
+                            !canManage || isSelf || busy === u.publicId
+                          }
+                          onSelect={() => setRestoreTarget(u)}
+                        >
+                          Restore access
+                        </DropdownMenuItem>
+                      ) : (
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          disabled={
+                            !canManage ||
+                            isSelf ||
+                            role === "owner" ||
+                            busy === u.publicId
+                          }
+                          onSelect={() => setRevokeTarget(u)}
+                        >
+                          Revoke
+                        </DropdownMenuItem>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </li>
@@ -734,6 +788,23 @@ export function AdminUsersClient() {
                   ) : null}
                 </dl>
 
+                {details.accessRevokedAt && canManage ? (
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                      Access
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      disabled={busy === detailsUser.publicId}
+                      onClick={() => setRestoreTarget(detailsUser)}
+                    >
+                      Restore access
+                    </Button>
+                  </div>
+                ) : null}
+
                 {detailsRole === "owner" &&
                 detailsUser.publicId === mePublicId ? null : (
                 <div className="space-y-2">
@@ -878,9 +949,8 @@ export function AdminUsersClient() {
             <DialogTitle>Revoke access?</DialogTitle>
             <DialogDescription>
               This signs {revokeTarget?.username} out of Polarr, ends their
-              sessions, and blocks them from logging in again. Their invite
-              code stays on file for audit. Create a new invite if they should
-              rejoin later.
+              sessions, and blocks login. Their account and invite stay on
+              file — you can restore access later without a new invite.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
@@ -898,6 +968,42 @@ export function AdminUsersClient() {
               onClick={() => void confirmRevoke()}
             >
               {busy === revokeTarget?.publicId ? "Revoking…" : "Revoke access"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(restoreTarget)}
+        onOpenChange={(open) => {
+          if (!open) setRestoreTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Restore access?</DialogTitle>
+            <DialogDescription>
+              {restoreTarget?.username} will be able to sign in again with their
+              existing username and password. Role stays member until you
+              promote them.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRestoreTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={busy === restoreTarget?.publicId}
+              onClick={() => void confirmRestore()}
+            >
+              {busy === restoreTarget?.publicId
+                ? "Restoring…"
+                : "Restore access"}
             </Button>
           </DialogFooter>
         </DialogContent>

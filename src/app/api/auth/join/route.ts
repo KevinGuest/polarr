@@ -4,6 +4,7 @@ import { json } from "@/lib/api";
 import { authenticate, redeemInvite } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH } from "@/lib/auth-password";
 import { getRequestIp, normalizeHwid } from "@/lib/request-client";
+import { sessionCookieOptions, SESSION_COOKIE_NAME } from "@/lib/session-cookie";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
     const ip = await getRequestIp();
     const hwid = normalizeHwid(parsed.data.hwid);
     const session = authenticate(username, password, { ip, hwid });
-    if (!session) {
+    if (!session || "banned" in session) {
       return json(
         { error: "Account created but sign-in failed" },
         { status: 500 },
@@ -46,12 +47,11 @@ export async function POST(req: Request) {
     }
 
     const cookieStore = await cookies();
-    cookieStore.set("polarr_token", session.token, {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 30,
-    });
+    cookieStore.set(
+      SESSION_COOKIE_NAME,
+      session.token,
+      await sessionCookieOptions(),
+    );
 
     return json({
       token: session.token,

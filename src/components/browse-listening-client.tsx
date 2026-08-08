@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { ListeningCover } from "@/components/listening-cover";
 import { TrackContextMenu } from "@/components/track-context-menu";
@@ -11,7 +12,8 @@ import {
   ShelfHeader,
 } from "@/components/media-shelf";
 import { Skeleton } from "@/components/ui/skeleton";
-import { usePlayer, type PlayerTrack } from "@/components/player-provider";
+import type { PlayerTrack } from "@/components/player-provider";
+import { albumHref } from "@/lib/album-ref";
 import { setDragTrack } from "@/lib/drag-track";
 import { LISTEN_CREDITED_EVENT } from "@/lib/ui-events";
 
@@ -19,10 +21,11 @@ type OthersItem = PlayerTrack & {
   playedAt: string;
   listenedBy: string;
   listenedByAvatarUrl?: string | null;
+  listeners?: { username: string; avatarUrl?: string | null }[];
 };
 
 export function BrowseListeningClient() {
-  const { play } = usePlayer();
+  const router = useRouter();
   const [items, setItems] = useState<OthersItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -53,16 +56,12 @@ export function BrowseListeningClient() {
     };
   }, [load]);
 
-  function playItem(item: OthersItem) {
-    play(
-      item,
-      items.map((r) => ({
-        id: r.id,
-        title: r.title,
-        artist: r.artist,
-        album: r.album,
-        coverPath: r.coverPath,
-      })),
+  function openAlbum(item: OthersItem) {
+    router.push(
+      albumHref({
+        title: (item.album || item.title).trim() || item.title,
+        artist: item.artist,
+      }),
     );
   }
 
@@ -111,14 +110,15 @@ export function BrowseListeningClient() {
                 <MediaTileShell
                   title={item.title}
                   subtitle={item.artist}
-                  ariaLabel={`Play ${item.title}`}
-                  onOpen={() => playItem(item)}
+                  ariaLabel={`Open album for ${item.title}`}
+                  onOpen={() => openAlbum(item)}
                   cover={
                     <ListeningCover
                       title={item.title}
                       coverPath={item.coverPath}
                       listenedBy={item.listenedBy}
                       avatarUrl={item.listenedByAvatarUrl}
+                      listeners={item.listeners}
                       delayMs={(i % 5) * 700}
                     />
                   }

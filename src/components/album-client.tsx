@@ -16,7 +16,7 @@ import {
   emitLibraryChanged,
 } from "@/lib/ui-events";
 import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine } from "@/lib/utils";
-import { toast } from "sonner";
+import { toastError, toastSuccess, toastInfo } from "@/lib/toast";
 
 type AlbumTrack = {
   key: string;
@@ -64,7 +64,6 @@ export function AlbumClient({ albumId }: { albumId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
   const load = useCallback(async () => {
@@ -195,7 +194,6 @@ export function AlbumClient({ albumId }: { albumId: string }) {
     }
 
     setBusyKey(track.key);
-    setMsg(null);
 
     try {
       // Stream only — never queue a library download from Play
@@ -210,7 +208,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
       });
       const live = await liveRes.json().catch(() => null);
       if (!liveRes.ok || !live?.track?.id) {
-        setMsg(
+        toastError(
           live?.error ||
             "Couldn’t start stream — try Download if you want it in the library",
         );
@@ -230,9 +228,8 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         explicit: track.explicit,
       };
       play(pt, [pt]);
-      setMsg(null);
     } catch (err) {
-      setMsg(err instanceof Error ? err.message : "Playback failed");
+      toastError(err instanceof Error ? err.message : "Playback failed");
     } finally {
       setBusyKey(null);
     }
@@ -260,11 +257,10 @@ export function AlbumClient({ albumId }: { albumId: string }) {
 
     // Explicit download / library acquire (not live stream)
     if (!fallbackReady) {
-      setMsg("Acquire path not ready — check yt-dlp");
+      toastError("Download path not ready — check yt-dlp");
       return;
     }
     setBusyKey(track.key);
-    setMsg(null);
     try {
       const body = {
         title: track.title,
@@ -282,11 +278,11 @@ export function AlbumClient({ albumId }: { albumId: string }) {
       });
       const data = await res.json();
       if (!res.ok) {
-        setMsg(data.error || "Download failed");
+        toastError(data.error || "Download failed");
         return;
       }
       if (data.track?.id) {
-        setMsg(null);
+        toastSuccess("Downloaded");
         void load();
         return;
       }
@@ -311,17 +307,17 @@ export function AlbumClient({ albumId }: { albumId: string }) {
             (t.title === track.title && (t.localTrackId || t.downloaded)),
         );
         if (hit?.localTrackId || hit?.downloaded || hit?.hasFile) {
-          setMsg(null);
+          toastSuccess("Downloaded");
           setAlbum(albumData.album);
           setTracks(rows);
           setFallbackReady(Boolean(albumData.fallbackReady));
           return;
         }
       }
-      setMsg("Still downloading — check Requests if needed");
+      toastInfo("Still downloading — check Requests if needed");
       void load();
     } catch (err) {
-      setMsg(err instanceof Error ? err.message : "Download failed");
+      toastError(err instanceof Error ? err.message : "Download failed");
     } finally {
       setBusyKey(null);
     }
@@ -344,7 +340,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
       );
       const data = await res.json().catch(() => null);
       if (!res.ok) {
-        toast.error(
+        toastError(
           typeof data?.error === "string"
             ? data.error
             : "Couldn’t remove from library",
@@ -367,9 +363,9 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         ),
       );
       emitLibraryChanged({ trackId: removedId });
-      toast.success("Removed from library");
+      toastSuccess("Removed from library");
     } catch {
-      toast.error("Couldn’t remove from library");
+      toastError("Couldn’t remove from library");
     } finally {
       setBusyKey(null);
     }
@@ -469,7 +465,6 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                 </span>
               ) : null}
             </div>
-            {msg && <p className="text-sm text-foreground">{msg}</p>}
             {error && !tracks.length && (
               <p className="text-sm text-destructive">{error}</p>
             )}

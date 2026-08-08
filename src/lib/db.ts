@@ -638,6 +638,24 @@ function migrate(database: Database.Database) {
   ensureColumn(database, "notifications", "image_url", "image_url TEXT");
   ensureColumn(database, "notifications", "media_type", "media_type TEXT");
 
+  // Bans table for existing installs (also in main CREATE for new DBs)
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS user_bans (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      ban_stream INTEGER NOT NULL DEFAULT 0,
+      ban_download INTEGER NOT NULL DEFAULT 0,
+      ban_user INTEGER NOT NULL DEFAULT 0,
+      expires_at TEXT,
+      reason TEXT,
+      created_by TEXT,
+      created_by_username TEXT,
+      created_at TEXT NOT NULL,
+      lifted_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
+
   // v3: likes may reference streamed tracks (no library file / no track FK)
   migrateTrackLikesV3(database);
 
@@ -1028,6 +1046,26 @@ export function revokeUserAccess(userId: string): { ok: true } {
   return { ok: true };
 }
 
+/** Clear access block so the user can sign in again with existing credentials. */
+export function restoreUserAccess(userId: string): { ok: true } {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT id, access_revoked_at as accessRevokedAt FROM users WHERE id = ?`,
+    )
+    .get(userId) as
+    | { id: string; accessRevokedAt: string | null }
+    | undefined;
+  if (!row) throw new Error("User not found");
+  if (!row.accessRevokedAt) {
+    throw new Error("User access is not revoked");
+  }
+  db.prepare(
+    `UPDATE users SET access_revoked_at = NULL WHERE id = ?`,
+  ).run(userId);
+  return { ok: true };
+}
+
 export function recordUserClientInfo(
   userId: string,
   info: { ip?: string | null; hwid?: string | null },
@@ -1211,6 +1249,16 @@ export function updateUserPassword(
   return { ok: true };
 }
 
+/** Check password for the given user (e.g. before revealing secrets in admin UI). */
+export function verifyUserPassword(userId: string, password: string): boolean {
+  if (!userId || !password) return false;
+  const row = getDb()
+    .prepare(`SELECT password_hash as passwordHash FROM users WHERE id = ?`)
+    .get(userId) as { passwordHash: string } | undefined;
+  if (!row?.passwordHash) return false;
+  return verifyPassword(password, row.passwordHash);
+}
+
 export type DiscordLink = {
   discordId: string;
   discordUsername: string;
@@ -1291,9 +1339,67 @@ export function setDiscordPresenceEnabled(userId: string, enabled: boolean) {
     .run(enabled ? 1 : 0, userId);
 }
 
+export function getDiscordPresenceEnabled(userId: string): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT discord_presence_enabled as enabled FROM users WHERE id = ?`,
+    )
+    .get(userId) as { enabled: number } | undefined;
+  return Boolean(row?.enabled);
+}
+
+/** Client ID is enough for local Rich Presence (Discord desktop RPC). */
+export function discordPresenceAppConfigured(settings?: Settings): boolean {
+  const s = settings ?? getSettings();
+  return Boolean(s.discordClientId.trim());
+}
+
 export function discordOAuthConfigured(settings?: Settings): boolean {
   const s = settings ?? getSettings();
   return Boolean(s.discordClientId.trim() && s.discordClientSecret.trim());
+}
+
+/** Server Owner contact for admin ops (SMTP tests, etc.). */
+export function getServerOwnerContact(): {
+  id: string;
+  username: string;
+  email: string;
+} | null {
+  const row = getDb()
+    .prepare(
+      `SELECT id, username, email FROM users
+       WHERE role = 'owner'
+       ORDER BY created_at ASC, id ASC
+       LIMIT 1`,
+    )
+    .get() as
+    | { id: string; username: string; email: string | null }
+    | undefined;
+  if (row?.email?.trim()) {
+    return {
+      id: row.id,
+      username: row.username,
+      email: row.email.trim(),
+    };
+  }
+  // Fallback: earliest admin with email (pre-owner migrations)
+  const admin = getDb()
+    .prepare(
+      `SELECT id, username, email FROM users
+       WHERE (role IN ('admin', 'owner') OR is_admin = 1)
+         AND email IS NOT NULL AND trim(email) != ''
+       ORDER BY created_at ASC, id ASC
+       LIMIT 1`,
+    )
+    .get() as
+    | { id: string; username: string; email: string | null }
+    | undefined;
+  if (!admin?.email?.trim()) return null;
+  return {
+    id: admin.id,
+    username: admin.username,
+    email: admin.email.trim(),
+  };
 }
 
 // ─── Invites ────────────────────────────────────────────────────────────────
@@ -1487,6 +1593,23 @@ export function authenticate(
   if (!row || !verifyPassword(password, row.password_hash)) return null;
   if (row.accessRevokedAt) return null;
 
+  // Full account ban — credentials OK but no session.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const bans = require("./bans") as typeof import("./bans");
+    const ban = bans.getActiveBan(row.id);
+    if (ban?.user) {
+      return {
+        banned: true as const,
+        banMessage: bans.banToastMessage(ban),
+        expiresAt: ban.expiresAt,
+        permanent: ban.expiresAt == null,
+      };
+    }
+  } catch {
+    /* table may not exist yet during migrate */
+  }
+
   const role = resolveRole(row.role, row.isAdmin);
   const token = randomBytes(32).toString("hex");
   const now = new Date();
@@ -1533,6 +1656,15 @@ export function getUserByToken(token: string | null | undefined) {
   if (!row) return null;
   if (row.accessRevokedAt) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) return null;
+  // Full user bans kill the session immediately (lazy check)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getActiveBan } = require("./bans") as typeof import("./bans");
+    const ban = getActiveBan(row.id);
+    if (ban?.user) return null;
+  } catch {
+    /* ignore circular init */
+  }
   const role = resolveRole(row.role, row.isAdmin);
   return {
     id: row.id,
@@ -2597,11 +2729,24 @@ export function getRequest(id: string): RequestRow | null {
 }
 
 export function listRequests(limit = 100): RequestRow[] {
-  return (
+  // Fetch extras then collapse to one row per title key (latest first).
+  const fetchLimit = Math.min(Math.max(limit * 4, limit), 500);
+  const rows = (
     getDb()
       .prepare(`${REQUEST_SELECT} ORDER BY created_at DESC LIMIT ?`)
-      .all(limit) as Record<string, unknown>[]
+      .all(fetchLimit) as Record<string, unknown>[]
   ).map(mapRequest);
+
+  const seen = new Set<string>();
+  const out: RequestRow[] = [];
+  for (const r of rows) {
+    const key = r.normalizedKey?.trim() || r.id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 export function listRequestEvents(
@@ -3339,9 +3484,8 @@ export function listRecentPlays(
 }
 
 /**
- * Recent listens from everyone on this homeserver (unique tracks).
- * Includes the current user. Only counts plays with ≥15s listened
- * (NULL listened_seconds = legacy rows, treated as qualified).
+ * Recent listens from everyone on this homeserver (unique tracks by
+ * artist+title). Collects every listener for each track (≥15s), newest first.
  */
 export function listOthersListening(
   _viewerUserId: string,
@@ -3351,7 +3495,14 @@ export function listOthersListening(
   listenedBy: string;
   listenedByUserId: string;
   listenedByAvatarUrl: string | null;
+  listeners: {
+    username: string;
+    userId: string;
+    avatarUrl: string | null;
+  }[];
 })[] {
+  // Fetch room for multi-listener grouping, then collapse to `limit` tracks.
+  const fetchN = Math.min(Math.max(limit * 24, limit), 600);
   const rows = getDb()
     .prepare(
       `SELECT t.id, t.title, t.artist, t.album, t.duration, t.path,
@@ -3365,38 +3516,186 @@ export function listOthersListening(
        FROM play_history p
        INNER JOIN tracks t ON t.id = p.track_id
        INNER JOIN users u ON u.id = p.user_id
-       WHERE p.id IN (
-         SELECT id FROM (
-           SELECT id,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY track_id
-                    ORDER BY played_at DESC, id DESC
-                  ) AS rn
-           FROM play_history
-           WHERE listened_seconds IS NULL OR listened_seconds >= 15
-         )
-         WHERE rn = 1
-       )
+       WHERE (p.listened_seconds IS NULL OR p.listened_seconds >= 15)
        ORDER BY p.played_at DESC
        LIMIT ?`,
     )
-    .all(limit) as Record<string, unknown>[];
+    .all(fetchN) as Record<string, unknown>[];
 
-  return rows.map((row) => {
+  type Entry = TrackRow & {
+    playedAt: string;
+    listenedBy: string;
+    listenedByUserId: string;
+    listenedByAvatarUrl: string | null;
+    listeners: {
+      username: string;
+      userId: string;
+      avatarUrl: string | null;
+    }[];
+    userSeen: Set<string>;
+  };
+
+  const byKey = new Map<string, Entry>();
+  const order: string[] = [];
+
+  for (const row of rows) {
+    const track = mapTrack(row);
+    const key = `${track.artist.trim().toLowerCase()}|${track.title.trim().toLowerCase()}`;
     const userId = String(row.listenedByUserId || "");
-    const publicId = userId ? scrambleUserId(userId) : "";
+    const username = String(row.listenedBy || "").trim();
+    if (!userId || !username) continue;
+    const publicId = scrambleUserId(userId);
     const hasAvatar = Boolean(row.listenedByAvatarPath);
-    return {
-      ...mapTrack(row),
-      playedAt: String(row.playedAt),
-      listenedBy: String(row.listenedBy || ""),
-      listenedByUserId: userId,
-      listenedByAvatarUrl:
-        hasAvatar && publicId
-          ? `/api/profiles/avatar/${encodeURIComponent(publicId)}`
-          : null,
-    };
+    const avatarUrl =
+      hasAvatar && publicId
+        ? `/api/profiles/avatar/${encodeURIComponent(publicId)}`
+        : null;
+
+    let entry = byKey.get(key);
+    if (!entry) {
+      if (order.length >= limit) {
+        // Still attach listeners to already-listed tracks (same key later in list
+        // can't happen with DESC order by key first hit = newest).
+        continue;
+      }
+      entry = {
+        ...track,
+        playedAt: String(row.playedAt),
+        listenedBy: username,
+        listenedByUserId: userId,
+        listenedByAvatarUrl: avatarUrl,
+        listeners: [],
+        userSeen: new Set(),
+      };
+      byKey.set(key, entry);
+      order.push(key);
+    }
+
+    if (entry.userSeen.has(userId)) continue;
+    entry.userSeen.add(userId);
+    entry.listeners.push({ username, userId, avatarUrl });
+  }
+
+  return order.map((key) => {
+    const e = byKey.get(key)!;
+    const { userSeen: _s, ...rest } = e;
+    // Prefer most recent listener's display fields
+    const first = rest.listeners[0];
+    if (first) {
+      rest.listenedBy = first.username;
+      rest.listenedByUserId = first.userId;
+      rest.listenedByAvatarUrl = first.avatarUrl;
+    }
+    return rest;
   });
+}
+
+export type StreamActivityUser = {
+  username: string;
+  avatarUrl: string | null;
+};
+
+/** Stream-only plays for the admin Requests activity (avatars + title). */
+export type StreamedTrackActivity = {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  coverPath: string | null;
+  createdAt: string;
+  streamers: StreamActivityUser[];
+};
+
+function avatarUrlForUser(userId: string, hasAvatar: boolean): string | null {
+  if (!userId || !hasAvatar) return null;
+  const publicId = scrambleUserId(userId);
+  return `/api/profiles/avatar/${encodeURIComponent(publicId)}`;
+}
+
+/** Lookup username → avatar chip for request activity. */
+export function activityUserForUsername(
+  username: string | null | undefined,
+): StreamActivityUser | null {
+  if (!username?.trim()) return null;
+  const row = getDb()
+    .prepare(
+      `SELECT id, username, avatar_path as avatarPath FROM users
+       WHERE lower(username) = lower(?) LIMIT 1`,
+    )
+    .get(username.trim()) as
+    | { id: string; username: string; avatarPath: string | null }
+    | undefined;
+  if (!row) {
+    return { username: username.trim(), avatarUrl: null };
+  }
+  return {
+    username: row.username,
+    avatarUrl: avatarUrlForUser(row.id, Boolean(row.avatarPath)),
+  };
+}
+
+/**
+ * Unique stream/live tracks with every household member who listened (≥15s).
+ * Powers the “Streamed” filter on the Requests admin page.
+ */
+export function listStreamedTrackActivity(limit = 80): StreamedTrackActivity[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT t.id as trackId, t.title, t.artist, t.album,
+              t.cover_path as coverPath,
+              p.played_at as playedAt,
+              u.id as userId,
+              u.username as username,
+              u.avatar_path as avatarPath
+       FROM play_history p
+       INNER JOIN tracks t ON t.id = p.track_id
+       INNER JOIN users u ON u.id = p.user_id
+       WHERE (t.source = 'stream'
+              OR t.path LIKE 'stream:%'
+              OR t.path LIKE 'stream://%')
+         AND (p.listened_seconds IS NULL OR p.listened_seconds >= 15)
+       ORDER BY p.played_at DESC
+       LIMIT ?`,
+    )
+    // Fetch room for multi-streamers per track
+    .all(Math.min(Math.max(limit * 8, limit), 800)) as Record<string, unknown>[];
+
+  const byTrack = new Map<
+    string,
+    StreamedTrackActivity & { userSeen: Set<string> }
+  >();
+
+  for (const row of rows) {
+    const trackId = String(row.trackId || "");
+    if (!trackId) continue;
+    const username = String(row.username || "").trim();
+    if (!username) continue;
+    let entry = byTrack.get(trackId);
+    if (!entry) {
+      if (byTrack.size >= limit) continue;
+      entry = {
+        id: `stream:${trackId}`,
+        title: String(row.title || ""),
+        artist: String(row.artist || ""),
+        album: String(row.album || ""),
+        coverPath: (row.coverPath as string | null) ?? null,
+        createdAt: String(row.playedAt || nowIso()),
+        streamers: [],
+        userSeen: new Set(),
+      };
+      byTrack.set(trackId, entry);
+    }
+    if (entry.userSeen.has(username.toLowerCase())) continue;
+    entry.userSeen.add(username.toLowerCase());
+    const userId = String(row.userId || "");
+    entry.streamers.push({
+      username,
+      avatarUrl: avatarUrlForUser(userId, Boolean(row.avatarPath)),
+    });
+    // Keep createdAt as newest play (rows ordered DESC — first write wins)
+  }
+
+  return Array.from(byTrack.values()).map(({ userSeen: _s, ...rest }) => rest);
 }
 
 export function isTrackLiked(

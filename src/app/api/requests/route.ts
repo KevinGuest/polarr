@@ -6,6 +6,8 @@ import {
   getSettings,
   listRequestEvents,
   listRequests,
+  listStreamedTrackActivity,
+  activityUserForUsername,
   requestStats,
   updateRequestStatus,
 } from "@/lib/db";
@@ -18,9 +20,11 @@ import {
 } from "@/lib/lidarr";
 import {
   enqueueFallbackDownload,
+  failTimedOutDownloads,
   stopDownloadJob,
   stopRequest,
 } from "@/lib/fallback-download";
+import { downloadPolicy } from "@/lib/bans";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +38,8 @@ export async function GET(req: Request) {
   if (!admin) {
     return json({ error: "Admin only" }, { status: 403 });
   }
+  // Collapse hung downloads while the activity page is open.
+  failTimedOutDownloads();
   const id = searchParams.get("id");
   if (id) {
     return json({ events: listRequestEvents(id) });
@@ -42,11 +48,17 @@ export async function GET(req: Request) {
     getAlbumCoverMap(),
     getArtistCoverMap(),
   ]);
-  const requests = listRequests(200).map((r) => ({
-    ...r,
-    coverPath: coverFromRequestMaps(r, albumCovers, artistCovers),
-  }));
-  return json({ requests, stats: requestStats() });
+  const requests = listRequests(200).map((r) => {
+    const requester = activityUserForUsername(r.requestedBy);
+    return {
+      ...r,
+      coverPath: coverFromRequestMaps(r, albumCovers, artistCovers),
+      requester,
+      streamers: requester ? [requester] : [],
+    };
+  });
+  const streams = listStreamedTrackActivity(100);
+  return json({ requests, streams, stats: requestStats() });
 }
 
 const stopSchema = z.object({
@@ -103,6 +115,12 @@ export async function POST(req: Request) {
   const body = parsed.data;
   const settings = getSettings();
   const user = await getAuthUser();
+  if (user) {
+    const dl = downloadPolicy(user.id);
+    if (!dl.ok) {
+      return json({ error: dl.error || "Downloads banned" }, { status: 403 });
+    }
+  }
   const query =
     body.type === "track"
       ? `${body.artist} ${body.title}`.trim()
@@ -233,11 +251,11 @@ export async function POST(req: Request) {
       ...base,
       status: "failed",
       source: "lidarr",
-      error: "Could not queue via Lidarr, and acquire path is not available",
+      error: "Could not queue via Lidarr, and download path is not available",
     });
     return json(
       {
-        error: "Could not queue via Lidarr, and acquire path is not available",
+        error: "Could not queue via Lidarr, and download path is not available",
         request: failed,
       },
       { status: 400 },
@@ -284,7 +302,7 @@ export async function POST(req: Request) {
   request =
     updateRequestStatus(request.id, "downloading", {
       downloadJobId: job.id,
-      message: "Acquire started — will stream when ready",
+      message: "Download started — will stream when ready",
     }) || request;
 
   return json({

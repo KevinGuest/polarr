@@ -41,7 +41,7 @@ export async function POST(req: Request) {
   const settings = getSettings();
   if (!smtpConfigured(settings)) {
     return json(
-      { error: "Invites are disabled until Email is configured" },
+      { error: "Invites are disabled until SMTP is configured" },
       { status: 400 },
     );
   }

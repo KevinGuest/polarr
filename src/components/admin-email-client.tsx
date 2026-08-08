@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Info } from "lucide-react";
+import { Eye, EyeOff, Info } from "lucide-react";
+import { ConnectionStatusIcon } from "@/components/connection-status-icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +15,24 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { toastError, toastSaved } from "@/lib/toast";
+import { cn } from "@/lib/utils";
+
+/** Keeps 1Password / Bitwarden / browser autofill off non-login admin fields. */
+const NO_PASSKEEPER = {
+  autoComplete: "off" as const,
+  autoCorrect: "off" as const,
+  autoCapitalize: "off" as const,
+  spellCheck: false as const,
+  "data-1p-ignore": true,
+  "data-lpignore": "true",
+  "data-bwignore": "true",
+  "data-form-type": "other",
+};
+
+function formKey(parts: Record<string, string | number | boolean>) {
+  return JSON.stringify(parts);
+}
 
 export function AdminEmailClient() {
   const [host, setHost] = useState("");
@@ -23,10 +42,14 @@ export function AdminEmailClient() {
   const [from, setFrom] = useState("");
   const [secure, setSecure] = useState(false);
   const [configured, setConfigured] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  /** Fingerprint of the last values that passed a connection test (or loaded saved config). */
+  const [validatedKey, setValidatedKey] = useState<string | null>(null);
+  const [baselineKey, setBaselineKey] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,13 +62,31 @@ export function AdminEmailClient() {
         return;
       }
       const settings = await res.json();
-      setHost(settings.smtpHost || "");
-      setPort(String(settings.smtpPort || 587));
-      setUser(settings.smtpUser || "");
-      setPassword(settings.smtpPassword || "");
-      setFrom(settings.smtpFrom || "");
-      setSecure(Boolean(settings.smtpSecure));
-      setConfigured(Boolean(settings.smtpConfigured));
+      const nextHost = settings.smtpHost || "";
+      const nextPort = String(settings.smtpPort || 587);
+      const nextUser = settings.smtpUser || "";
+      const nextPassword = settings.smtpPassword || "";
+      const nextFrom = settings.smtpFrom || "";
+      const nextSecure = Boolean(settings.smtpSecure);
+      const isConfigured = Boolean(settings.smtpConfigured);
+      setHost(nextHost);
+      setPort(nextPort);
+      setUser(nextUser);
+      setPassword(nextPassword);
+      setFrom(nextFrom);
+      setSecure(nextSecure);
+      setConfigured(isConfigured);
+      const key = formKey({
+        host: nextHost.trim(),
+        port: nextPort,
+        user: nextUser.trim(),
+        password: nextPassword,
+        from: nextFrom.trim(),
+        secure: nextSecure,
+      });
+      setBaselineKey(key);
+      // Already set up and working when last saved — treat as tested until edits.
+      setValidatedKey(isConfigured ? key : null);
       setLoading(false);
     })();
     return () => {
@@ -53,48 +94,106 @@ export function AdminEmailClient() {
     };
   }, []);
 
-  async function save() {
-    setSaving(true);
-    setMessage(null);
-    const portNum = Number.parseInt(port, 10);
-    const res = await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        smtpHost: host.trim(),
-        smtpPort: Number.isFinite(portNum) ? portNum : 587,
-        smtpUser: user.trim(),
-        smtpPassword: password,
-        smtpFrom: from.trim(),
-        smtpSecure: secure,
+  const currentKey = useMemo(
+    () =>
+      formKey({
+        host: host.trim(),
+        port,
+        user: user.trim(),
+        password,
+        from: from.trim(),
+        secure,
       }),
-    });
-    if (res.status === 403 || res.status === 401) {
-      setForbidden(true);
+    [host, port, user, password, from, secure],
+  );
+
+  const testPassed = validatedKey !== null && validatedKey === currentKey;
+  const dirty = baselineKey !== null && currentKey !== baselineKey;
+  const canSave = testPassed && dirty;
+  const hasTestableFields = Boolean(host.trim() && from.trim());
+  const canTest = hasTestableFields && !testPassed;
+
+  function formBody() {
+    const portNum = Number.parseInt(port, 10);
+    return {
+      smtpHost: host.trim(),
+      smtpPort: Number.isFinite(portNum) ? portNum : 587,
+      smtpUser: user.trim(),
+      smtpPassword: password,
+      smtpFrom: from.trim(),
+      smtpSecure: secure,
+    };
+  }
+
+  async function save() {
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formBody()),
+      });
+      if (res.status === 403 || res.status === 401) {
+        setForbidden(true);
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        toastError(
+          typeof data.error === "string"
+            ? data.error
+            : "Save failed — check the form fields",
+        );
+        return;
+      }
+      setConfigured(Boolean(data.settings?.smtpConfigured));
+      if (data.settings?.smtpPassword) setPassword(data.settings.smtpPassword);
+      setBaselineKey(currentKey);
+      setValidatedKey(currentKey);
+      toastSaved();
+    } finally {
       setSaving(false);
-      return;
     }
-    const data = await res.json();
-    setSaving(false);
-    if (!res.ok) {
-      setMessage(
-        typeof data.error === "string"
-          ? data.error
-          : "Save failed — check the form fields",
+  }
+
+  async function testSmtp() {
+    setTesting(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...formBody(), testSmtp: true }),
+      });
+      if (res.status === 403 || res.status === 401) {
+        setForbidden(true);
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        setValidatedKey(null);
+        toastError(
+          typeof data.error === "string" ? data.error : "SMTP test failed",
+        );
+        return;
+      }
+      setValidatedKey(currentKey);
+      toastSaved(
+        typeof data.to === "string"
+          ? `Test email sent to ${data.to}`
+          : "Test email sent",
       );
-      return;
+    } finally {
+      setTesting(false);
     }
-    setConfigured(Boolean(data.settings?.smtpConfigured));
-    if (data.settings?.smtpPassword) setPassword(data.settings.smtpPassword);
-    setMessage("Saved");
   }
 
   if (forbidden) {
     return (
       <div className="space-y-3">
-        <h1 className="text-2xl font-semibold tracking-tight">Email</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">SMTP</h1>
         <p className="text-sm text-muted-foreground">
-          Admin only. Sign in with an admin account to configure SMTP.
+          Admin only. Sign in with an admin account to configure outgoing mail.
         </p>
         <Button asChild variant="outline" size="sm">
           <Link href="/login">Sign in</Link>
@@ -106,21 +205,10 @@ export function AdminEmailClient() {
   return (
     <div className="mx-auto max-w-2xl space-y-8">
       <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Email
-        </h1>
+        <h1 className="text-2xl font-semibold tracking-tight">SMTP</h1>
         <p className="text-sm text-muted-foreground">
-          SMTP for mailing invite links when people join this server.
+          Outgoing mail for invite links and admin notifications on this server.
         </p>
-      </div>
-
-      <div className="rounded-xl border border-border px-4 py-4">
-        <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
-          Status
-        </div>
-        <div className="mt-2 text-sm font-semibold">
-          {configured ? "Configured" : "Not configured"}
-        </div>
       </div>
 
       {loading ? (
@@ -128,32 +216,39 @@ export function AdminEmailClient() {
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle>SMTP</CardTitle>
+            <CardTitle>Connection</CardTitle>
             <CardDescription>
               Host, port, and from address are required. Use TLS/SSL when your
-              provider expects it (often port 465).
+              provider expects it (often port 465). Test sends a message to the
+              Server Owner&apos;s account email. Save unlocks after a successful
+              test.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="smtp-host">Host</Label>
+              <Label htmlFor="polarr-smtp-host">Host</Label>
               <Input
-                id="smtp-host"
+                id="polarr-smtp-host"
+                name="polarr-smtp-host"
+                type="text"
                 value={host}
                 onChange={(e) => setHost(e.target.value)}
                 placeholder="smtp.example.com"
-                autoComplete="off"
+                {...NO_PASSKEEPER}
               />
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="smtp-port">Port</Label>
+                <Label htmlFor="polarr-smtp-port">Port</Label>
                 <Input
-                  id="smtp-port"
+                  id="polarr-smtp-port"
+                  name="polarr-smtp-port"
+                  type="text"
                   inputMode="numeric"
                   value={port}
                   onChange={(e) => setPort(e.target.value)}
                   placeholder="587"
+                  {...NO_PASSKEEPER}
                 />
               </div>
               <div className="space-y-2">
@@ -194,44 +289,92 @@ export function AdminEmailClient() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="smtp-user">Username</Label>
+              <Label htmlFor="polarr-smtp-user">Username</Label>
               <Input
-                id="smtp-user"
+                id="polarr-smtp-user"
+                name="polarr-smtp-user"
+                type="text"
                 value={user}
                 onChange={(e) => setUser(e.target.value)}
-                autoComplete="off"
+                {...NO_PASSKEEPER}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="smtp-password">Password</Label>
-              <Input
-                id="smtp-password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="new-password"
-                placeholder="••••••••"
-              />
+              <Label htmlFor="polarr-smtp-pass">Password</Label>
+              <div className="relative">
+                {/* text + CSS discs — not type=password — so passkeepers skip this */}
+                <Input
+                  id="polarr-smtp-pass"
+                  name="polarr-smtp-pass"
+                  type="text"
+                  inputMode="text"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className={cn(
+                    "pr-10",
+                    !showPassword &&
+                      "[-webkit-text-security:disc] [text-security:disc]",
+                  )}
+                  {...NO_PASSKEEPER}
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={showPassword ? "Hide" : "Show"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+                </button>
+              </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="smtp-from">From address</Label>
+              <Label htmlFor="polarr-smtp-from">From address</Label>
               <Input
-                id="smtp-from"
-                type="email"
+                id="polarr-smtp-from"
+                name="polarr-smtp-from"
+                type="text"
+                inputMode="email"
                 value={from}
                 onChange={(e) => setFrom(e.target.value)}
                 placeholder="polarr@example.com"
+                {...NO_PASSKEEPER}
               />
             </div>
-            {message ? (
-              <p className="text-sm text-foreground">{message}</p>
-            ) : null}
-            <div className="flex flex-wrap items-center gap-2">
-              <Button disabled={saving} onClick={() => void save()}>
+            <div className="flex flex-wrap items-center gap-3">
+              <ConnectionStatusIcon
+                ok={testPassed || (configured && !dirty)}
+                okLabel={
+                  configured && !dirty
+                    ? "SMTP connected"
+                    : "Test passed — ready to save"
+                }
+                badLabel={
+                  dirty
+                    ? "Test connection after changes before saving"
+                    : "SMTP not set up"
+                }
+              />
+              {canTest || testing ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={saving || testing}
+                  onClick={() => void testSmtp()}
+                >
+                  {testing ? "Sending…" : "Test connection"}
+                </Button>
+              ) : null}
+              <Button
+                disabled={saving || testing || !canSave}
+                onClick={() => void save()}
+              >
                 {saving ? "Saving…" : "Save"}
-              </Button>
-              <Button asChild variant="outline">
-                <Link href="/admin/invites">Open invites</Link>
               </Button>
             </div>
           </CardContent>

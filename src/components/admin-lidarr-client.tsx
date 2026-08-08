@@ -12,13 +12,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { toastError, toastSaved } from "@/lib/toast";
 
 export function AdminLidarrClient() {
   const [lidarrUrl, setLidarrUrl] = useState("");
   const [lidarrApiKey, setLidarrApiKey] = useState("");
   const [musicRoot, setMusicRoot] = useState("");
   const [status, setStatus] = useState("…");
-  const [message, setMessage] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -49,7 +49,6 @@ export function AdminLidarrClient() {
   }, []);
 
   async function save(test = false) {
-    setMessage(null);
     const res = await fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -70,16 +69,23 @@ export function AdminLidarrClient() {
     }
     const data = await res.json();
     if (test) {
-      setMessage(data.ok ? "Lidarr connection OK" : data.error || "Failed");
       if (data.ok) {
         const v = data.status?.version;
         setStatus(v ? `Connected · v${v}` : "Connected");
+        toastSaved("Lidarr connection OK");
       } else {
         setStatus("Offline");
+        toastError(
+          typeof data.error === "string" ? data.error : "Connection failed",
+        );
       }
       return;
     }
-    setMessage(res.ok ? "Saved" : data.error || "Save failed");
+    if (!res.ok) {
+      toastError(typeof data.error === "string" ? data.error : "Save failed");
+      return;
+    }
+    toastSaved();
   }
 
   if (forbidden) {
@@ -152,9 +158,6 @@ export function AdminLidarrClient() {
                 placeholder="./music"
               />
             </div>
-            {message ? (
-              <p className="text-sm text-foreground">{message}</p>
-            ) : null}
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => void save(false)}>Save</Button>
               <Button variant="secondary" onClick={() => void save(true)}>

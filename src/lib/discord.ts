@@ -9,9 +9,8 @@ export function isDiscordWebhookUrl(url: string) {
 
 export function discordConfigured(settings?: Settings) {
   const s = settings ?? getSettings();
-  return Boolean(
-    s.notifyDiscordEnabled && isDiscordWebhookUrl(s.discordWebhookUrl),
-  );
+  // Webhook URL alone is enough — enable flag auto-follows a successful save.
+  return Boolean(isDiscordWebhookUrl(s.discordWebhookUrl));
 }
 
 /** Public fallback so Discord can fetch the icon without a configured Public URL. */

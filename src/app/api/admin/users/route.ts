@@ -4,6 +4,7 @@ import {
   listPublicProfiles,
   setUserRole,
   revokeUserAccess,
+  restoreUserAccess,
   getAdminUserDetail,
   transferServerOwnership,
 } from "@/lib/db";
@@ -166,6 +167,40 @@ export async function DELETE(req: Request) {
   } catch (err) {
     return json(
       { error: err instanceof Error ? err.message : "Revoke failed" },
+      { status: 400 },
+    );
+  }
+}
+
+const restoreSchema = z.object({
+  userId: z.string().min(1),
+});
+
+/** Restore a revoked user's login (clears access_revoked_at). */
+export async function PATCH(req: Request) {
+  const admin = await getAdminUser();
+  if (!admin) return json({ error: "Admin only" }, { status: 403 });
+
+  const parsed = restoreSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return json({ error: "Invalid payload" }, { status: 400 });
+  }
+
+  const targetId = unscrambleUserId(parsed.data.userId);
+  if (!targetId) {
+    return json({ error: "User not found" }, { status: 404 });
+  }
+
+  try {
+    restoreUserAccess(targetId);
+    const profile = listPublicProfiles().find((u) => u.id === targetId);
+    return json({
+      ok: true,
+      user: profile ? publicUser(profile) : null,
+    });
+  } catch (err) {
+    return json(
+      { error: err instanceof Error ? err.message : "Restore failed" },
       { status: 400 },
     );
   }

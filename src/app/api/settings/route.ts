@@ -1,14 +1,17 @@
 import { z } from "zod";
 import { getAdminUser, getAuthUser, json } from "@/lib/api";
 import {
+  getServerOwnerContact,
   getSettings,
   hasUsers,
   smtpConfigured,
   updateSettings,
+  verifyUserPassword,
   type NotifyEventFlags,
 } from "@/lib/db";
 import { NOTIFY_EVENT_IDS } from "@/lib/notify-events";
 import { isDiscordWebhookUrl, sendDiscordTest } from "@/lib/discord";
+import { sendSmtpTestEmail } from "@/lib/mail";
 import { probeLidarr } from "@/lib/lidarr";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +22,8 @@ function maskSecrets(settings: ReturnType<typeof getSettings>) {
     lidarrApiKey: settings.lidarrApiKey ? "••••••••" : "",
     smtpPassword: settings.smtpPassword ? "••••••••" : "",
     spotifyClientSecret: settings.spotifyClientSecret ? "••••••••" : "",
+    // Never send live Discord credentials in GET — reveal after password.
+    discordClientId: settings.discordClientId ? "••••••••" : "",
     discordClientSecret: settings.discordClientSecret ? "••••••••" : "",
     smtpConfigured: smtpConfigured(settings),
     discordWebhookUrl: "",
@@ -29,6 +34,7 @@ function maskSecrets(settings: ReturnType<typeof getSettings>) {
     discordOAuthConfigured: Boolean(
       settings.discordClientId.trim() && settings.discordClientSecret.trim(),
     ),
+    discordPresenceConfigured: Boolean(settings.discordClientId.trim()),
   };
 }
 
@@ -79,6 +85,7 @@ const bodySchema = z.object({
   publicUrl: z.string().optional(),
   testLidarr: z.boolean().optional(),
   testDiscord: z.boolean().optional(),
+  testSmtp: z.boolean().optional(),
   smtpHost: z.string().max(255).optional(),
   smtpPort: z.number().int().min(1).max(65535).optional(),
   smtpUser: z.string().max(255).optional(),
@@ -94,6 +101,9 @@ const bodySchema = z.object({
   spotifyClientSecret: z.string().max(120).optional(),
   discordClientId: z.string().max(120).optional(),
   discordClientSecret: z.string().max(120).optional(),
+  /** Confirm account password and return live Discord secrets for admin UI. */
+  revealDiscordSecrets: z.boolean().optional(),
+  password: z.string().max(128).optional(),
 });
 
 export async function POST(req: Request) {
@@ -126,6 +136,8 @@ export async function POST(req: Request) {
     body.smtpSecure !== undefined;
   const touchesNotify =
     body.testDiscord ||
+    body.testSmtp ||
+    body.revealDiscordSecrets ||
     body.notifyEmailEnabled !== undefined ||
     body.notifyDiscordEnabled !== undefined ||
     body.discordWebhookUrl !== undefined ||
@@ -135,6 +147,27 @@ export async function POST(req: Request) {
   if (touchesLidarr || touchesSmtp || touchesNotify || touchesServer) {
     const admin = await getAdminUser();
     if (!admin) return json({ error: "Admin only" }, { status: 403 });
+  }
+
+  if (body.revealDiscordSecrets) {
+    const password = (body.password || "").trim();
+    if (!password) {
+      return json({ error: "Password is required" }, { status: 400 });
+    }
+    const admin = await getAdminUser();
+    if (!admin) return json({ error: "Admin only" }, { status: 403 });
+    if (!verifyUserPassword(admin.id, password)) {
+      return json({ error: "Incorrect password" }, { status: 403 });
+    }
+    const s = getSettings();
+    return json({
+      ok: true,
+      secrets: {
+        discordClientId: s.discordClientId,
+        discordClientSecret: s.discordClientSecret,
+        discordWebhookUrl: s.discordWebhookUrl,
+      },
+    });
   }
 
   if (body.testLidarr) {
@@ -170,6 +203,59 @@ export async function POST(req: Request) {
         {
           ok: false,
           error: err instanceof Error ? err.message : "Discord test failed",
+        },
+        { status: 400 },
+      );
+    }
+  }
+
+  if (body.testSmtp) {
+    const host = (body.smtpHost ?? current.smtpHost).trim();
+    const from = (body.smtpFrom ?? current.smtpFrom).trim();
+    const port = body.smtpPort ?? current.smtpPort;
+    if (!host || !from || !(port > 0)) {
+      return json(
+        { error: "Enter host, port, and from address before testing SMTP" },
+        { status: 400 },
+      );
+    }
+    const owner = getServerOwnerContact();
+    if (!owner) {
+      return json(
+        {
+          error:
+            "Server Owner has no email on file. Set an email on the owner account first.",
+        },
+        { status: 400 },
+      );
+    }
+    const probeSettings = {
+      ...current,
+      smtpHost: body.smtpHost ?? current.smtpHost,
+      smtpPort: body.smtpPort ?? current.smtpPort,
+      smtpUser: body.smtpUser ?? current.smtpUser,
+      smtpPassword:
+        body.smtpPassword && body.smtpPassword !== "••••••••"
+          ? body.smtpPassword
+          : current.smtpPassword,
+      smtpFrom: body.smtpFrom ?? current.smtpFrom,
+      smtpSecure: body.smtpSecure ?? current.smtpSecure,
+    };
+    if (!smtpConfigured(probeSettings)) {
+      return json({ error: "SMTP is not fully configured" }, { status: 400 });
+    }
+    try {
+      const result = await sendSmtpTestEmail({
+        to: owner.email,
+        recipientName: owner.username,
+        settings: probeSettings,
+      });
+      return json({ ok: true, to: result.to });
+    } catch (err) {
+      return json(
+        {
+          ok: false,
+          error: err instanceof Error ? err.message : "SMTP test failed",
         },
         { status: 400 },
       );
@@ -223,7 +309,12 @@ export async function POST(req: Request) {
       body.spotifyClientSecret && body.spotifyClientSecret !== "••••••••"
         ? body.spotifyClientSecret
         : current.spotifyClientSecret,
-    discordClientId: body.discordClientId ?? current.discordClientId,
+    discordClientId:
+      body.discordClientId !== undefined
+        ? body.discordClientId && body.discordClientId !== "••••••••"
+          ? body.discordClientId
+          : current.discordClientId
+        : current.discordClientId,
     discordClientSecret:
       body.discordClientSecret && body.discordClientSecret !== "••••••••"
         ? body.discordClientSecret

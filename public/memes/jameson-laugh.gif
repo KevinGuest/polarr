@@ -1,0 +1,2356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Page Not Found - GIFDB.com</title>
+    <meta name="description" content="Download & Share GIF Images. Thousands of free animated GIFs, search images, cat GIFs, and more.">
+    <meta name="robots" content="noindex">
+
+    <link rel="icon" type="image/png" href="/static/src/fav_icon.png">
+    <link rel="canonical" href="https://gifdb.com/images/high/j-jonah-jameson-laughing-you-serious-zztbaqj3ba3sqa2s.gif">
+    
+    
+
+    
+    <meta property="og:site_name" content="GIFDB.com">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Page Not Found - GIFDB.com">
+    <meta property="og:description" content="Download & Share GIF Images. Thousands of free animated GIFs, search images, cat GIFs, and more.">
+    <meta property="og:url" content="https://gifdb.com/images/high/j-jonah-jameson-laughing-you-serious-zztbaqj3ba3sqa2s.gif">
+    <meta property="og:image" content="https://gifdb.com/static/img/pages/gifdb-logo.png">
+    
+    
+    <meta property="og:locale" content="en_US">
+
+    
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:site" content="@gifdb">
+    <meta name="twitter:title" content="Page Not Found - GIFDB.com">
+    <meta name="twitter:description" content="Download & Share GIF Images. Thousands of free animated GIFs, search images, cat GIFs, and more.">
+    <meta name="twitter:image" content="https://gifdb.com/static/img/pages/gifdb-logo.png">
+
+    
+
+    
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+    <link rel="preconnect" href="https://s3.us-east-1.wasabisys.com" crossorigin>
+    <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
+
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preload" href="/static/css/style.css?v=" as="style">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
+
+    
+    
+
+    
+    <link rel="stylesheet" href="/static/css/bootstrap.min.css?v=">
+    <link rel="stylesheet" href="/static/css/style.css?v=">
+
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Swiper/11.0.5/swiper-bundle.min.css">
+    
+    <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css"></noscript>
+
+    
+    
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "GIFDB.com",
+      "url": "https://gifdb.com/",
+      "logo": "https://gifdb.com/static/img/pages/gifdb-logo.png",
+      "description": "GIFDB.com is a free animated GIF and sticker database with tools to create, edit, convert, and share GIFs.",
+      "sameAs": ["https://twitter.com/gifdb", "https://x.com/gifdb"]
+    }
+    </script>
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    <style>
+    /* ── Sticker checker pattern ────────────────────────────────────
+       Used by .gdb-card-pic.gdb-checker (sticker grid card) and the
+       sticker detail-page hero. Reveals transparency in the WebP. */
+    .gdb-checker {
+        background-color: #f8fafc;
+        background-image:
+            linear-gradient(45deg, #e2e8f0 25%, transparent 25%),
+            linear-gradient(-45deg, #e2e8f0 25%, transparent 25%),
+            linear-gradient(45deg, transparent 75%, #e2e8f0 75%),
+            linear-gradient(-45deg, transparent 75%, #e2e8f0 75%);
+        background-size: 18px 18px;
+        background-position: 0 0, 0 9px, 9px -9px, 9px 0;
+    }
+
+    /* ── Ascendeum named slots ──────────────────────────────────────
+       :empty collapses any slot the bundle hasn't filled, so users
+       never see a blank reserved box. As soon as Ascendeum injects
+       child markup the slot expands to fit the creative. */
+    [ot-name] { display: block; }
+    [ot-name]:empty { display: none !important; height: 0; margin: 0; padding: 0; }
+    [ot-name="Horizontal"], [ot-name="Dynamic_InContent"], [ot-name="Video"] {
+        margin: 12px auto;
+        text-align: center;
+        max-width: 100%;
+        overflow: hidden;
+    }
+    [ot-name="RightSidebar"], [ot-name="LeftSidebar"] {
+        position: fixed;
+        top: 120px;
+        width: 160px;
+        max-height: 70vh;
+        overflow: hidden;
+        z-index: 10;
+    }
+    [ot-name="RightSidebar"] { right: 16px; }
+    [ot-name="LeftSidebar"]  { left: 16px; }
+    @media (max-width: 1279.98px) {
+        [ot-name="RightSidebar"], [ot-name="LeftSidebar"] { display: none !important; }
+    }
+    @media (min-width: 769px) {
+        [ot-name="Sticky_Footer"] { display: none !important; }
+    }
+
+    /* ── Shared mobile typography ──────────────────────────────────
+       Smaller H1 + tighter line-height on phones. Applies to every
+       page so /gif/<slug> + /<keyword> + /stickers/<slug> all match. */
+    @media (max-width: 767.98px) {
+        h1 { font-size: 1.25rem !important; line-height: 1.25 !important; }
+        /* Hide the trailing (active) breadcrumb crumb on mobile to save
+           1-2 lines of vertical space. The H1 right below it already
+           tells the user where they are. */
+        .nav-breadcrumbs .breadcrumb-item.active,
+        .nav-breadcrumbs .breadcrumb .active { display: none !important; }
+    }
+
+    /* ── Mobile sticky share bar (used on detail + keyword pages) ──
+       Edge-to-edge at bottom of mobile viewport. Each tile has its
+       own brand color. Pages that include the partial also need
+       padding-bottom on the body so content isn't hidden behind it. */
+    .gdb-mshare {
+        display: none;
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        z-index: 200;
+        background: #0f172a;
+        box-shadow: 0 -2px 10px rgba(0,0,0,0.18);
+    }
+    .gdb-mshare-row {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 0;
+    }
+    .gdb-mshare a, .gdb-mshare button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 52px;
+        color: #fff;
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        text-decoration: none;
+    }
+    .gdb-mshare a svg, .gdb-mshare button svg { display: block; }
+    .gdb-mshare .m-wa    { background: #25D366; }
+    .gdb-mshare .m-fb    { background: #1877F2; }
+    .gdb-mshare .m-ig    { background: linear-gradient(135deg, #f09433, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888); }
+    .gdb-mshare .m-x     { background: #000000; }
+    .gdb-mshare .m-email { background: #64748b; }
+    .gdb-mshare .m-copy  { background: #1796E6; }
+    @media (max-width: 767.98px) {
+        .gdb-mshare { display: block; }
+        body.single, body.taxonomy { padding-bottom: 60px; }
+        /* Give the back-to-top button room above the sticky bar. */
+        #scrollBtn { bottom: 68px !important; }
+    }
+
+    @media (max-width: 768px) {
+        body ins.adsbygoogle[data-anchor-status],
+        body [id^="aswift_anchor"],
+        body iframe[id*="anchor"],
+        body iframe[src*="googleads.g.doubleclick.net"],
+        body iframe[src*="googlesyndication.com"],
+        body iframe[src*="stay22"],
+        body iframe[src*="letmeallez"],
+        body div[id*="stay22"],
+        body div[id*="letmeallez"],
+        body div[class*="stay22"],
+        body div[class*="letmeallez"],
+        body [data-s22] {
+            bottom: 60px !important;
+        }
+    }
+    </style>
+    
+    <script>
+    /* Share bar stays GLUED to viewport bottom on mobile. When any
+       fixed/sticky ad element shows up at the bottom, we shove THE AD up
+       by (shareHeight + 8px gap) instead of moving our share bar. Yes —
+       we can override JS-injected ad styles by setting !important inline
+       (cssText with priority) which beats AdSense's own inline styles. */
+    (function(){
+      // gdb-mega = mega-menu container (open hamburger / nav-dropdown panel).
+      // Without exclusion the lift logic would set its `top:auto` override,
+      // pushing the close button off-screen so users can't dismiss it on mobile.
+      var EXCLUDE_RE = /(gdb-mshare|gdb-toast|gdb-mega|skiptranslate|goog-te-banner|cf-banner|cf-anchor)/i;
+      // Share bar is .gdb-mshare height:52px (see _base mobile-share CSS).
+      // GAP=0 → the ad sits FLUSH right above it (user-requested visual:
+      // ad bottom touches share bar top, no white sliver between).
+      var GAP = 0;
+      var pending = false;
+      function adjust() {
+        pending = false;
+        var share = document.querySelector('.gdb-mshare');
+        if (!share) return;
+        if (getComputedStyle(share).display === 'none') return; // desktop
+        var shareH = share.offsetHeight || 52;
+        var liftBy = shareH + GAP;
+        var vh = window.innerHeight;
+        var nodes = document.body.getElementsByTagName('*');
+        for (var i = 0; i < nodes.length; i++) {
+          var el = nodes[i];
+          if (el === share || share.contains(el) || el.contains(share)) continue;
+          if (EXCLUDE_RE.test(el.id || '') || EXCLUDE_RE.test(el.className || '')) continue;
+          var cs = getComputedStyle(el);
+          if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+          if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.1) continue;
+          var r = el.getBoundingClientRect();
+          if (r.height < 20 || r.width < 100) continue;
+          // Skip full-screen overlays (mega-menu, modals, lightboxes).
+          // If the fixed element covers ≥80% of viewport height, it's a
+          // dialog, not a sticky widget — moving it would knock its close
+          // button off-screen. (Hamburger menu close-button bug, mobile.)
+          if (r.height >= vh * 0.8) continue;
+          // Only target elements that visually overlap the share bar's
+          // y-range (vh - shareH .. vh). If they're already above by more
+          // than our liftBy, leave them alone.
+          if (r.bottom < vh - shareH - 2) continue;
+          // Skip if we already lifted this one — measured by data attr
+          // we stamp below. Ad providers may rewrite `style` attr later
+          // so we re-apply on every adjust() to win the race.
+          // setProperty with priority = 'important' overrides AdSense's
+          // own inline `bottom: 0px` / `top:`-based positioning.
+          el.style.setProperty('bottom', liftBy + 'px', 'important');
+          el.style.setProperty('top', 'auto', 'important');
+          el.setAttribute('data-gdb-lifted', '1');
+        }
+        // Share bar stays put.
+        share.style.bottom = '0px';
+        document.body.style.paddingBottom = shareH + 'px';
+      }
+      function schedule() {
+        if (pending) return;
+        pending = true;
+        requestAnimationFrame(function(){ setTimeout(adjust, 50); });
+      }
+      if (document.readyState === 'complete') setTimeout(schedule, 800);
+      else window.addEventListener('load', function(){ setTimeout(schedule, 800); });
+      // Re-check often — ad providers periodically reset their inline
+      // `bottom` style after we override it. 800ms keeps us in sync.
+      setInterval(schedule, 800);
+      if (window.MutationObserver) {
+        var mo = new MutationObserver(function(){ schedule(); });
+        mo.observe(document.body, { childList: true, subtree: true, attributes: true,
+                                    attributeFilter: ['style', 'class', 'id'] });
+      }
+      window.addEventListener('resize', schedule);
+      window.addEventListener('orientationchange', schedule);
+    })();
+    </script>
+    
+    <script>
+      (function (s, t, a, y, twenty, two) {
+        s.Stay22 = s.Stay22 || {};
+        s.Stay22.params = { lmaID: '686688ab1419ac5c5acc4c05' };
+        twenty = t.createElement(a);
+        two = t.getElementsByTagName(a)[0];
+        twenty.async = 1;
+        twenty.src = y;
+        two.parentNode.insertBefore(twenty, two);
+      })(window, document, 'script', 'https://scripts.stay22.com/letmeallez.js');
+    </script>
+
+    
+    <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+    new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+    j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+    'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+    })(window,document,'script','dataLayer','GTM-5FCLXM2');</script>
+
+    
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5734292711266667" crossorigin="anonymous"></script>
+
+    
+    
+    
+    <script async type="text/javascript" src="https://hb-targa.s3.us-east-2.amazonaws.com/gifdb.com/opentrade/asc_prebid.js"></script>
+    
+
+    
+    <script async data-id="101450725" src="//static.getclicky.com/js"></script>
+
+    
+    <script type="text/javascript" async=true>
+    (function() {
+      var host = 'gifdb.com';
+      var element = document.createElement('script');
+      var firstScript = document.getElementsByTagName('script')[0];
+      var url = 'https://cmp.inmobi.com'
+        .concat('/choice/', '2MMzmDKaU6zew', '/', host, '/choice.js?tag_version=V3');
+      var uspTries = 0;
+      var uspTriesLimit = 3;
+      element.async = true;
+      element.type = 'text/javascript';
+      element.src = url;
+      firstScript.parentNode.insertBefore(element, firstScript);
+
+      function makeStub() {
+        var TCF_LOCATOR_NAME = '__tcfapiLocator';
+        var queue = [];
+        var win = window;
+        var cmpFrame;
+        function addFrame() {
+          var doc = win.document;
+          var otherCMP = !!(win.frames[TCF_LOCATOR_NAME]);
+          if (!otherCMP) {
+            if (doc.body) {
+              var iframe = doc.createElement('iframe');
+              iframe.style.cssText = 'display:none';
+              iframe.name = TCF_LOCATOR_NAME;
+              doc.body.appendChild(iframe);
+            } else { setTimeout(addFrame, 5); }
+          }
+          return !otherCMP;
+        }
+        function tcfAPIHandler() {
+          var gdprApplies;
+          var args = arguments;
+          if (!args.length) { return queue; }
+          else if (args[0] === 'setGdprApplies') {
+            if (args.length > 3 && args[2] === 2 && typeof args[3] === 'boolean') {
+              gdprApplies = args[3];
+              if (typeof args[2] === 'function') { args[2]('set', true); }
+            }
+          } else if (args[0] === 'ping') {
+            var retr = { gdprApplies: gdprApplies, cmpLoaded: false, cmpStatus: 'stub' };
+            if (typeof args[2] === 'function') { args[2](retr); }
+          } else {
+            if (args[0] === 'init' && typeof args[3] === 'object') {
+              args[3] = Object.assign(args[3], { tag_version: 'V3' });
+            }
+            queue.push(args);
+          }
+        }
+        function postMessageEventHandler(event) {
+          var msgIsString = typeof event.data === 'string';
+          var json = {};
+          try { json = msgIsString ? JSON.parse(event.data) : event.data; } catch (ignore) {}
+          var payload = json.__tcfapiCall;
+          if (payload) {
+            window.__tcfapi(payload.command, payload.version, function(retValue, success) {
+              var returnMsg = { __tcfapiReturn: { returnValue: retValue, success: success, callId: payload.callId } };
+              if (msgIsString) returnMsg = JSON.stringify(returnMsg);
+              if (event && event.source && event.source.postMessage) event.source.postMessage(returnMsg, '*');
+            }, payload.parameter);
+          }
+        }
+        while (win) {
+          try { if (win.frames[TCF_LOCATOR_NAME]) { cmpFrame = win; break; } } catch (ignore) {}
+          if (win === window.top) break;
+          win = win.parent;
+        }
+        if (!cmpFrame) { addFrame(); win.__tcfapi = tcfAPIHandler; win.addEventListener('message', postMessageEventHandler, false); }
+      }
+      makeStub();
+
+      function makeGppStub() {
+        var CMP_ID = 10;
+        var SUPPORTED_APIS = ['2:tcfeuv2','6:uspv1','7:usnatv1','8:usca','9:usvav1','10:uscov1','11:usutv1','12:usctv1'];
+        window.__gpp_addFrame = function (n) {
+          if (!window.frames[n]) {
+            if (document.body) {
+              var i = document.createElement("iframe");
+              i.style.cssText = "display:none"; i.name = n;
+              document.body.appendChild(i);
+            } else { window.setTimeout(window.__gpp_addFrame, 10, n); }
+          }
+        };
+        window.__gpp_stub = function () {
+          var b = arguments;
+          __gpp.queue = __gpp.queue || [];
+          __gpp.events = __gpp.events || [];
+          if (!b.length || (b.length == 1 && b[0] == "queue")) return __gpp.queue;
+          if (b.length == 1 && b[0] == "events") return __gpp.events;
+          var cmd = b[0]; var clb = b.length > 1 ? b[1] : null; var par = b.length > 2 ? b[2] : null;
+          var baseData = { gppVersion: "1.1", cmpStatus: "stub", cmpDisplayStatus: "hidden", signalStatus: "not ready", supportedAPIs: SUPPORTED_APIS, cmpId: CMP_ID, sectionList: [], applicableSections: [-1], gppString: "", parsedSections: {} };
+          if (cmd === "ping") { clb(baseData, true); }
+          else if (cmd === "addEventListener") {
+            if (!("lastId" in __gpp)) __gpp.lastId = 0;
+            __gpp.lastId++;
+            var lnr = __gpp.lastId;
+            __gpp.events.push({ id: lnr, callback: clb, parameter: par });
+            clb({ eventName: "listenerRegistered", listenerId: lnr, data: true, pingData: baseData }, true);
+          } else if (cmd === "removeEventListener") {
+            var success = false;
+            for (var i = 0; i < __gpp.events.length; i++) {
+              if (__gpp.events[i].id == par) { __gpp.events.splice(i, 1); success = true; break; }
+            }
+            clb({ eventName: "listenerRemoved", listenerId: par, data: success, pingData: baseData }, true);
+          } else if (cmd === "hasSection") { clb(false, true); }
+          else if (cmd === "getSection" || cmd === "getField") { clb(null, true); }
+          else { __gpp.queue.push([].slice.apply(b)); }
+        };
+        window.__gpp_msghandler = function (event) {
+          var msgIsString = typeof event.data === "string";
+          var json = null;
+          try { json = msgIsString ? JSON.parse(event.data) : event.data; } catch (e) {}
+          if (typeof json === "object" && json !== null && "__gppCall" in json) {
+            var i = json.__gppCall;
+            window.__gpp(i.command, function (retValue, success) {
+              var returnMsg = { __gppReturn: { returnValue: retValue, success: success, callId: i.callId } };
+              event.source.postMessage(msgIsString ? JSON.stringify(returnMsg) : returnMsg, "*");
+            }, "parameter" in i ? i.parameter : null, "version" in i ? i.version : "1.1");
+          }
+        };
+        if (!("__gpp" in window) || typeof window.__gpp !== "function") {
+          window.__gpp = window.__gpp_stub;
+          window.addEventListener("message", window.__gpp_msghandler, false);
+          window.__gpp_addFrame("__gppLocator");
+        }
+      }
+      makeGppStub();
+
+      var uspStubFunction = function() {
+        var arg = arguments;
+        if (typeof window.__uspapi !== uspStubFunction) {
+          setTimeout(function() {
+            if (typeof window.__uspapi !== 'undefined') { window.__uspapi.apply(window.__uspapi, arg); }
+          }, 500);
+        }
+      };
+      var checkIfUspIsReady = function() {
+        uspTries++;
+        if (window.__uspapi === uspStubFunction && uspTries < uspTriesLimit) { console.warn('USP is not accessible'); }
+        else { clearInterval(uspInterval); }
+      };
+      if (typeof window.__uspapi === 'undefined') {
+        window.__uspapi = uspStubFunction;
+        var uspInterval = setInterval(checkIfUspIsReady, 6000);
+      }
+    })();
+    </script>
+    
+
+    
+    
+</head>
+<body class="">
+    
+    
+    <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5FCLXM2" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+    
+
+<div id="page" class="site">
+
+
+<header>
+    <div class="container">
+        <div class="header-wrap d-flex align-items-center justify-content-between">
+            
+            <a class="navbar-brand ps-md-0 home-url" href="/">
+                <div class="d-block default-logo">
+                    <img src="/static/src/gifdb.svg" width="auto" height="36" alt="GIFDB">
+                </div>
+                <div class="d-block sticky-logo">
+                    <img src="/static/src/gifdb-sticky-mobile.png" width="auto" height="36" alt="GIFDB">
+                </div>
+            </a>
+
+            
+            <nav class="gdb-nav d-none d-lg-flex align-items-center" style="gap:6px;">
+                <a href="/popular-gif-images/" class="gdb-nav-btn" data-panel="panel-categories">Categories <svg width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+                <a href="/sticker/" class="gdb-nav-btn" data-panel="panel-stickers">Stickers <svg width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+                <a href="/popular-gif-images/" class="gdb-nav-btn" data-panel="panel-reactions">Reactions <svg width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+                <a href="/popular-gif-images/" class="gdb-nav-btn" data-panel="panel-trending">Trending <svg width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+                <a href="/tools/" class="gdb-nav-btn" data-panel="panel-tools">Tools <svg width="10" height="6" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+            </nav>
+
+            
+            <div class="d-flex align-items-center" style="gap:10px;">
+                <a href="/gif-maker/" class="gdb-cta-btn d-none d-md-flex align-items-center" style="gap:5px; text-decoration:none; color:#000; font-size:15px; font-weight:500;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                    Create GIF
+                </a>
+                <a href="/dashboard/upload" class="gdb-cta-btn d-none d-md-flex align-items-center" style="gap:5px; text-decoration:none; color:#000; font-size:15px; font-weight:500;">
+                    <svg width="20" height="20" viewBox="0 0 26 25" fill="none"><path d="M13.1572 24.5C6.29014 24.5 0.770142 19.1525 0.770142 12.5C0.770142 5.8475 6.29014 0.5 13.1572 0.5C20.0243 0.5 25.5443 5.8475 25.5443 12.5C25.5443 19.1525 20.0243 24.5 13.1572 24.5ZM13.1572 2.6825C7.52885 2.6825 3.02304 7.0475 3.02304 12.5C3.02304 17.9525 7.52885 22.3175 13.1572 22.3175C18.7856 22.3175 23.2914 17.9525 23.2914 12.5C23.2914 7.0475 18.7856 2.6825 13.1572 2.6825ZM13.1572 17.9525C12.4837 17.9525 12.0347 17.5175 12.0347 16.865V10.7525L9.44111 13.265C8.99208 13.7 8.31853 13.7 7.86175 13.265C7.40498 12.83 7.41272 12.1775 7.86175 11.735L12.3676 7.37C12.4837 7.2575 12.5921 7.1525 12.7082 7.1525C12.8243 7.04 13.0489 7.04 13.1572 7.04C13.2656 7.04 13.4979 7.04 13.6063 7.1525C13.7224 7.1525 13.8308 7.265 13.9469 7.37L18.4527 11.735C18.9018 12.17 18.9018 12.8225 18.4527 13.265C18.0037 13.7075 17.3301 13.7 16.8734 13.265L14.2798 10.7525V16.865C14.2798 17.5175 13.8308 17.9525 13.1572 17.9525Z" fill="black"/></svg>
+                    Upload
+                </a>
+                
+                <a href="/auth/login" class="gdb-cta-btn d-none d-md-flex align-items-center" style="gap:5px; text-decoration:none; color:#000; font-size:15px; font-weight:500;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    Login
+                </a>
+                
+                
+                
+                
+                <button id="gdb-nsfw-indicator" type="button" aria-label="Safe mode: NSFW filter ON"
+                        title="Safe mode on — click to change"
+                        style="display:none; align-items:center; gap:4px; background:none; border:1px solid #e5e7eb; border-radius:6px; padding:5px 9px; cursor:pointer; color:#dc2626; font-size:11px; font-weight:700; letter-spacing:0.5px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" style="flex-shrink:0;">
+                        <line x1="4" y1="20" x2="20" y2="4"/>
+                    </svg>
+                    NSFW
+                </button>
+                
+                <a href="/sticker/" class="gdb-mobile-cta d-md-none" aria-label="Stickers" title="Stickers">
+                    
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" stroke-linejoin="round">
+                        <path d="M3 5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                        <path d="M16 3v5h5"/>
+                    </svg>
+                </a>
+                <a href="/gif-maker/" class="gdb-mobile-cta" aria-label="Create GIF" title="Create GIF">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                </a>
+                
+                <a href="/auth/login" class="gdb-mobile-cta" aria-label="Log in" title="Log in">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                </a>
+                
+                
+                <button class="gdb-hamburger" id="gdb-hamburger-btn" aria-label="Menu" aria-expanded="false" style="background:none; border:none; cursor:pointer; padding:8px;">
+                    <svg class="gdb-hamburger-bars" width="28" height="20" viewBox="0 0 31 23" fill="none"><path d="M3.69 23C2.11 23 .83 22.36.83 21.56c0-.8 1.28-1.44 2.86-1.44H28.14c1.58 0 2.86.64 2.86 1.44 0 .8-1.28 1.44-2.86 1.44H3.69zM3.66 12.94C2.08 12.94.8 12.29.8 11.5c0-.8 1.28-1.44 2.86-1.44h24.46c1.58 0 2.86.64 2.86 1.44s-1.28 1.44-2.86 1.44H3.66zM3.77 2.86C2.15 2.86.83 2.22.83 1.43.83.64 2.15 0 3.77 0h24.29C29.68 0 30.99.64 30.99 1.43c0 .79-1.31 1.43-2.93 1.43H3.77z" fill="#060606"/></svg>
+                    <svg class="gdb-hamburger-x" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#060606" stroke-width="2.4" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+</header>
+
+
+<div id="gdb-mega-panels" style="display:none;">
+    <div class="container" style="position:relative;">
+        <div style="border-radius:0 0 12px 12px; padding:24px; color:#fff;" id="gdb-mega-inner">
+        
+        <button id="gdb-mega-close" style="position:absolute; top:12px; right:20px; background:none; border:none; color:#fff; font-size:24px; cursor:pointer;">&times;</button>
+
+        
+        <div class="gdb-panel" id="panel-categories" style="display:none;">
+            <h3 style="font-size:18px; margin-bottom:16px; font-weight:700;">Categories</h3>
+            <div class="row">
+                
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/animal" style="color:#ccc; text-decoration:none; font-size:14px;">Animal</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/anime" style="color:#ccc; text-decoration:none; font-size:14px;">Anime</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/background" style="color:#ccc; text-decoration:none; font-size:14px;">Background</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/birthday" style="color:#ccc; text-decoration:none; font-size:14px;">Birthday</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/car" style="color:#ccc; text-decoration:none; font-size:14px;">Car</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/cartoon" style="color:#ccc; text-decoration:none; font-size:14px;">Cartoon</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/cat" style="color:#ccc; text-decoration:none; font-size:14px;">Cat</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/celebration" style="color:#ccc; text-decoration:none; font-size:14px;">Celebration</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/celebrities" style="color:#ccc; text-decoration:none; font-size:14px;">Celebrities</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/color" style="color:#ccc; text-decoration:none; font-size:14px;">Color</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/cute" style="color:#ccc; text-decoration:none; font-size:14px;">Cute</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/dance" style="color:#ccc; text-decoration:none; font-size:14px;">Dance</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/device" style="color:#ccc; text-decoration:none; font-size:14px;">Device</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/disney" style="color:#ccc; text-decoration:none; font-size:14px;">Disney</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/dog" style="color:#ccc; text-decoration:none; font-size:14px;">Dog</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/excited" style="color:#ccc; text-decoration:none; font-size:14px;">Excited</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/fantasy" style="color:#ccc; text-decoration:none; font-size:14px;">Fantasy</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/flower" style="color:#ccc; text-decoration:none; font-size:14px;">Flower</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/funny" style="color:#ccc; text-decoration:none; font-size:14px;">Funny</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/gaming" style="color:#ccc; text-decoration:none; font-size:14px;">Gaming</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/good-morning" style="color:#ccc; text-decoration:none; font-size:14px;">Good Morning</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/happy" style="color:#ccc; text-decoration:none; font-size:14px;">Happy</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/happy-birthday" style="color:#ccc; text-decoration:none; font-size:14px;">Happy Birthday</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/holiday" style="color:#ccc; text-decoration:none; font-size:14px;">Holiday</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/horror" style="color:#ccc; text-decoration:none; font-size:14px;">Horror</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/love" style="color:#ccc; text-decoration:none; font-size:14px;">Love</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/movie" style="color:#ccc; text-decoration:none; font-size:14px;">Movie</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/music" style="color:#ccc; text-decoration:none; font-size:14px;">Music</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/nature" style="color:#ccc; text-decoration:none; font-size:14px;">Nature</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/pusheen" style="color:#ccc; text-decoration:none; font-size:14px;">Pusheen</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/religious" style="color:#ccc; text-decoration:none; font-size:14px;">Religious</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/space" style="color:#ccc; text-decoration:none; font-size:14px;">Space</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sports" style="color:#ccc; text-decoration:none; font-size:14px;">Sports</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/superhero" style="color:#ccc; text-decoration:none; font-size:14px;">Superhero</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/travel" style="color:#ccc; text-decoration:none; font-size:14px;">Travel</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/tv-shows" style="color:#ccc; text-decoration:none; font-size:14px;">Tv Shows</a>
+                </div>
+                
+            </div>
+        </div>
+
+        
+        <div class="gdb-panel" id="panel-stickers" style="display:none;">
+            <h3 style="font-size:18px; margin-bottom:16px; font-weight:700;">Stickers</h3>
+            <div class="row">
+                
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/cartoon" style="color:#ccc; text-decoration:none; font-size:14px;">Cartoon</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/cupid" style="color:#ccc; text-decoration:none; font-size:14px;">Cupid</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/cuphead" style="color:#ccc; text-decoration:none; font-size:14px;">Cuphead</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/christmas" style="color:#ccc; text-decoration:none; font-size:14px;">Christmas</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/football" style="color:#ccc; text-decoration:none; font-size:14px;">Football</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/confetti" style="color:#ccc; text-decoration:none; font-size:14px;">Confetti</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/heart" style="color:#ccc; text-decoration:none; font-size:14px;">Heart</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/love" style="color:#ccc; text-decoration:none; font-size:14px;">Love</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/awesome" style="color:#ccc; text-decoration:none; font-size:14px;">Awesome</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/brain" style="color:#ccc; text-decoration:none; font-size:14px;">Brain</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/bye" style="color:#ccc; text-decoration:none; font-size:14px;">Bye</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/baby-girl" style="color:#ccc; text-decoration:none; font-size:14px;">Baby Girl</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/coming-soon" style="color:#ccc; text-decoration:none; font-size:14px;">Coming Soon</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/date-night" style="color:#ccc; text-decoration:none; font-size:14px;">Date Night</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/blessing" style="color:#ccc; text-decoration:none; font-size:14px;">Blessing</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/boy-mom" style="color:#ccc; text-decoration:none; font-size:14px;">Boy Mom</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/buy-now" style="color:#ccc; text-decoration:none; font-size:14px;">Buy Now</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/50-cent" style="color:#ccc; text-decoration:none; font-size:14px;">50 Cent</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/bayram" style="color:#ccc; text-decoration:none; font-size:14px;">Bayram</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/celtics" style="color:#ccc; text-decoration:none; font-size:14px;">Celtics</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/agriculture" style="color:#ccc; text-decoration:none; font-size:14px;">Agriculture</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/aidiladha" style="color:#ccc; text-decoration:none; font-size:14px;">Aidiladha</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/air-pollution" style="color:#ccc; text-decoration:none; font-size:14px;">Air Pollution</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/49er" style="color:#ccc; text-decoration:none; font-size:14px;">49er</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/bbc" style="color:#ccc; text-decoration:none; font-size:14px;">BBC</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/bvb" style="color:#ccc; text-decoration:none; font-size:14px;">BVB</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/bud" style="color:#ccc; text-decoration:none; font-size:14px;">Bud</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/buenos-dias" style="color:#ccc; text-decoration:none; font-size:14px;">Buenos Dias</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/buenas-noches" style="color:#ccc; text-decoration:none; font-size:14px;">Buenas Noches</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/con-mucho-gusto" style="color:#ccc; text-decoration:none; font-size:14px;">Con Mucho Gusto</a>
+                </div>
+                
+            </div>
+            <div style="margin-top:16px;">
+                <a href="/sticker/" style="color:#1796E6; text-decoration:none; font-size:14px; font-weight:600;">Browse all stickers →</a>
+            </div>
+        </div>
+
+        
+        <div class="gdb-panel" id="panel-reactions" style="display:none;">
+            <h3 style="font-size:18px; margin-bottom:16px; font-weight:700;">Reaction GIFs</h3>
+            <div class="row">
+                
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/happy" style="color:#ccc; text-decoration:none; font-size:14px;">Happy</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sad" style="color:#ccc; text-decoration:none; font-size:14px;">Sad</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/angry" style="color:#ccc; text-decoration:none; font-size:14px;">Angry</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/excited" style="color:#ccc; text-decoration:none; font-size:14px;">Excited</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/crying" style="color:#ccc; text-decoration:none; font-size:14px;">Crying</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/laughing" style="color:#ccc; text-decoration:none; font-size:14px;">Laughing</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/shocked" style="color:#ccc; text-decoration:none; font-size:14px;">Shocked</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/confused" style="color:#ccc; text-decoration:none; font-size:14px;">Confused</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/love" style="color:#ccc; text-decoration:none; font-size:14px;">Love</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/funny" style="color:#ccc; text-decoration:none; font-size:14px;">Funny</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/bye" style="color:#ccc; text-decoration:none; font-size:14px;">Bye</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/thank-you" style="color:#ccc; text-decoration:none; font-size:14px;">Thank You</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/good-morning" style="color:#ccc; text-decoration:none; font-size:14px;">Good Morning</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/good-night" style="color:#ccc; text-decoration:none; font-size:14px;">Good Night</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/yes" style="color:#ccc; text-decoration:none; font-size:14px;">Yes</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/no" style="color:#ccc; text-decoration:none; font-size:14px;">No</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/eye-roll" style="color:#ccc; text-decoration:none; font-size:14px;">Eye Roll</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/omg" style="color:#ccc; text-decoration:none; font-size:14px;">OMG</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/thumbs-up" style="color:#ccc; text-decoration:none; font-size:14px;">Thumbs Up</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/hug" style="color:#ccc; text-decoration:none; font-size:14px;">Hug</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/applause" style="color:#ccc; text-decoration:none; font-size:14px;">Applause</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/welcome" style="color:#ccc; text-decoration:none; font-size:14px;">Welcome</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/congratulations" style="color:#ccc; text-decoration:none; font-size:14px;">Congratulations</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sorry" style="color:#ccc; text-decoration:none; font-size:14px;">Sorry</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/please" style="color:#ccc; text-decoration:none; font-size:14px;">Please</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/miss-you" style="color:#ccc; text-decoration:none; font-size:14px;">Miss You</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/scared" style="color:#ccc; text-decoration:none; font-size:14px;">Scared</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/nervous" style="color:#ccc; text-decoration:none; font-size:14px;">Nervous</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/embarrassed" style="color:#ccc; text-decoration:none; font-size:14px;">Embarrassed</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/disgusted" style="color:#ccc; text-decoration:none; font-size:14px;">Disgusted</a>
+                </div>
+                
+            </div>
+        </div>
+
+        
+        <div class="gdb-panel" id="panel-trending" style="display:none;">
+            <h3 style="font-size:18px; margin-bottom:16px; font-weight:700;">Trending GIFs</h3>
+            <div class="d-flex flex-wrap" style="gap:8px; margin-bottom:14px;">
+                <a href="/trending-today/" style="color:#fff; background:#dc2626; padding:4px 14px; border-radius:20px; text-decoration:none; font-size:13px; font-weight:600;">🔥 Today</a>
+                <a href="/discover/" style="color:#fff; background:#7c3aed; padding:4px 14px; border-radius:20px; text-decoration:none; font-size:13px; font-weight:600;">✨ Discover</a>
+                <a href="/popular-gif-images/" style="color:#fff; background:#2a9fe8; padding:4px 14px; border-radius:20px; text-decoration:none; font-size:13px; font-weight:600;">Top</a>
+                
+                <a href="/popular-gif-images/a" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">A</a>
+                
+                <a href="/popular-gif-images/b" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">B</a>
+                
+                <a href="/popular-gif-images/c" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">C</a>
+                
+                <a href="/popular-gif-images/d" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">D</a>
+                
+                <a href="/popular-gif-images/e" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">E</a>
+                
+                <a href="/popular-gif-images/f" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">F</a>
+                
+                <a href="/popular-gif-images/g" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">G</a>
+                
+                <a href="/popular-gif-images/h" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">H</a>
+                
+                <a href="/popular-gif-images/i" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">I</a>
+                
+                <a href="/popular-gif-images/j" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">J</a>
+                
+                <a href="/popular-gif-images/k" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">K</a>
+                
+                <a href="/popular-gif-images/l" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">L</a>
+                
+                <a href="/popular-gif-images/m" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">M</a>
+                
+                <a href="/popular-gif-images/n" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">N</a>
+                
+                <a href="/popular-gif-images/o" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">O</a>
+                
+                <a href="/popular-gif-images/p" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">P</a>
+                
+                <a href="/popular-gif-images/q" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">Q</a>
+                
+                <a href="/popular-gif-images/r" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">R</a>
+                
+                <a href="/popular-gif-images/s" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">S</a>
+                
+                <a href="/popular-gif-images/t" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">T</a>
+                
+                <a href="/popular-gif-images/u" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">U</a>
+                
+                <a href="/popular-gif-images/v" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">V</a>
+                
+                <a href="/popular-gif-images/w" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">W</a>
+                
+                <a href="/popular-gif-images/x" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">X</a>
+                
+                <a href="/popular-gif-images/y" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">Y</a>
+                
+                <a href="/popular-gif-images/z" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">Z</a>
+                
+                <a href="/popular-gif-images/numbers" style="color:#ccc; background:rgba(255,255,255,0.1); padding:4px 10px; border-radius:20px; text-decoration:none; font-size:13px;">#</a>
+            </div>
+            
+        </div>
+
+        
+        <div class="gdb-panel" id="panel-tools" style="display:none;">
+            <div class="row g-4">
+                
+                <div class="col-md-6 col-lg-3">
+                    <h4 style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa6b3; margin-bottom:10px; font-weight:700;">AI tools</h4>
+                    <ul style="list-style:none; padding:0; margin:0;">
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/face-swap/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">GIF Face Swap</span>
+                                <span style="font-size:11px; color:#94a3b8;">Any face onto a GIF</span>
+                            </a>
+                        </li>
+                        
+                    </ul>
+                </div>
+                
+                <div class="col-md-6 col-lg-3">
+                    <h4 style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa6b3; margin-bottom:10px; font-weight:700;">GIF makers</h4>
+                    <ul style="list-style:none; padding:0; margin:0;">
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/gif-maker/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">GIF Maker</span>
+                                <span style="font-size:11px; color:#94a3b8;">From any video</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/mp4-to-gif/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">MP4 to GIF</span>
+                                <span style="font-size:11px; color:#94a3b8;">Drop a video file</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/images-to-gif/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">Images to GIF</span>
+                                <span style="font-size:11px; color:#94a3b8;">Slideshow from images</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/gif-caption/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">Meme Maker</span>
+                                <span style="font-size:11px; color:#94a3b8;">Top + bottom text</span>
+                            </a>
+                        </li>
+                        
+                    </ul>
+                </div>
+                
+                <div class="col-md-6 col-lg-3">
+                    <h4 style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa6b3; margin-bottom:10px; font-weight:700;">GIF utilities</h4>
+                    <ul style="list-style:none; padding:0; margin:0;">
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/gif-compressor/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">GIF Compressor</span>
+                                <span style="font-size:11px; color:#94a3b8;">Up to 80% smaller</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/gif-resizer/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">GIF Resizer</span>
+                                <span style="font-size:11px; color:#94a3b8;">Scale width or height</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/gif-to-mp4/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">GIF to MP4</span>
+                                <span style="font-size:11px; color:#94a3b8;">10x smaller, plays everywhere</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/gif-reverse/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">GIF Reverser</span>
+                                <span style="font-size:11px; color:#94a3b8;">Play backwards</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/gif-speed/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">GIF Speed</span>
+                                <span style="font-size:11px; color:#94a3b8;">0.25x to 4x</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/gif-frame-splitter/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">Frame Splitter</span>
+                                <span style="font-size:11px; color:#94a3b8;">Extract PNG frames</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/gif-combiner/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">GIF Combiner</span>
+                                <span style="font-size:11px; color:#94a3b8;">Merge 2-10 GIFs</span>
+                            </a>
+                        </li>
+                        
+                    </ul>
+                </div>
+                
+                <div class="col-md-6 col-lg-3">
+                    <h4 style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa6b3; margin-bottom:10px; font-weight:700;">Sticker tools</h4>
+                    <ul style="list-style:none; padding:0; margin:0;">
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/gif-to-sticker/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">GIF to Sticker</span>
+                                <span style="font-size:11px; color:#94a3b8;">512×512 WebP</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/image-to-sticker/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">Image to Sticker</span>
+                                <span style="font-size:11px; color:#94a3b8;">PNG/JPG → sticker</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/whatsapp-sticker-pack/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">WhatsApp Pack</span>
+                                <span style="font-size:11px; color:#94a3b8;">.wastickers builder</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/telegram-sticker-pack/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">Telegram Pack</span>
+                                <span style="font-size:11px; color:#94a3b8;">Via @stickers</span>
+                            </a>
+                        </li>
+                        
+                    </ul>
+                </div>
+                
+                <div class="col-md-6 col-lg-3">
+                    <h4 style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:#9aa6b3; margin-bottom:10px; font-weight:700;">Video downloaders</h4>
+                    <ul style="list-style:none; padding:0; margin:0;">
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/youtube-to-gif/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">YouTube</span>
+                                <span style="font-size:11px; color:#94a3b8;">Long-form + Shorts</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/vimeo-to-gif/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">Vimeo</span>
+                                <span style="font-size:11px; color:#94a3b8;">Public videos</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/tiktok-downloader/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">TikTok</span>
+                                <span style="font-size:11px; color:#94a3b8;">No watermark</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/twitter-downloader/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">Twitter / X</span>
+                                <span style="font-size:11px; color:#94a3b8;">HD, SD, GIF tweets</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/instagram-downloader/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">Instagram</span>
+                                <span style="font-size:11px; color:#94a3b8;">Reels + posts</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/reddit-downloader/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">Reddit</span>
+                                <span style="font-size:11px; color:#94a3b8;">With sound</span>
+                            </a>
+                        </li>
+                        
+                        <li style="margin-bottom:4px;">
+                            <a href="/tools/facebook-downloader/" class="gdb-tools-mega-link" style="color:#e2e8f0; text-decoration:none; font-size:14px; display:flex; flex-direction:column; padding:6px 10px; border-radius:6px; transition:background .12s;">
+                                <span style="font-weight:600;">Facebook</span>
+                                <span style="font-size:11px; color:#94a3b8;">Watch + Reels</span>
+                            </a>
+                        </li>
+                        
+                    </ul>
+                </div>
+                
+            </div>
+            <div class="text-end mt-3">
+                <a href="/tools/" style="color:#1796E6; text-decoration:none; font-size:14px; font-weight:600;">View all tools →</a>
+            </div>
+        </div>
+        <style>
+            .gdb-tools-mega-link:hover{ background:rgba(255,255,255,0.08); color:#fff !important; }
+            .gdb-tools-mega-link:hover span:last-child{ color:#cbd5e1 !important; }
+        </style>
+
+        
+        <div class="gdb-panel" id="panel-all" style="display:none;">
+            <div class="row mb-4">
+                <div class="col-12 mb-3"><h3 style="font-size:18px; font-weight:700;">Categories</h3></div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/animal" style="color:#ccc; text-decoration:none; font-size:14px;">Animal</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/anime" style="color:#ccc; text-decoration:none; font-size:14px;">Anime</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/background" style="color:#ccc; text-decoration:none; font-size:14px;">Background</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/birthday" style="color:#ccc; text-decoration:none; font-size:14px;">Birthday</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/car" style="color:#ccc; text-decoration:none; font-size:14px;">Car</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/cartoon" style="color:#ccc; text-decoration:none; font-size:14px;">Cartoon</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/cat" style="color:#ccc; text-decoration:none; font-size:14px;">Cat</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/celebration" style="color:#ccc; text-decoration:none; font-size:14px;">Celebration</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/celebrities" style="color:#ccc; text-decoration:none; font-size:14px;">Celebrities</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/color" style="color:#ccc; text-decoration:none; font-size:14px;">Color</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/cute" style="color:#ccc; text-decoration:none; font-size:14px;">Cute</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/dance" style="color:#ccc; text-decoration:none; font-size:14px;">Dance</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/device" style="color:#ccc; text-decoration:none; font-size:14px;">Device</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/disney" style="color:#ccc; text-decoration:none; font-size:14px;">Disney</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/dog" style="color:#ccc; text-decoration:none; font-size:14px;">Dog</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/excited" style="color:#ccc; text-decoration:none; font-size:14px;">Excited</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/fantasy" style="color:#ccc; text-decoration:none; font-size:14px;">Fantasy</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/flower" style="color:#ccc; text-decoration:none; font-size:14px;">Flower</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/funny" style="color:#ccc; text-decoration:none; font-size:14px;">Funny</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/gaming" style="color:#ccc; text-decoration:none; font-size:14px;">Gaming</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/good-morning" style="color:#ccc; text-decoration:none; font-size:14px;">Good Morning</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/happy" style="color:#ccc; text-decoration:none; font-size:14px;">Happy</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/happy-birthday" style="color:#ccc; text-decoration:none; font-size:14px;">Happy Birthday</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/holiday" style="color:#ccc; text-decoration:none; font-size:14px;">Holiday</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/horror" style="color:#ccc; text-decoration:none; font-size:14px;">Horror</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/love" style="color:#ccc; text-decoration:none; font-size:14px;">Love</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/movie" style="color:#ccc; text-decoration:none; font-size:14px;">Movie</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/music" style="color:#ccc; text-decoration:none; font-size:14px;">Music</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/nature" style="color:#ccc; text-decoration:none; font-size:14px;">Nature</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/pusheen" style="color:#ccc; text-decoration:none; font-size:14px;">Pusheen</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/religious" style="color:#ccc; text-decoration:none; font-size:14px;">Religious</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/space" style="color:#ccc; text-decoration:none; font-size:14px;">Space</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sports" style="color:#ccc; text-decoration:none; font-size:14px;">Sports</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/superhero" style="color:#ccc; text-decoration:none; font-size:14px;">Superhero</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/travel" style="color:#ccc; text-decoration:none; font-size:14px;">Travel</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/tv-shows" style="color:#ccc; text-decoration:none; font-size:14px;">Tv Shows</a>
+                </div>
+                
+            </div>
+            <hr style="border-color:rgba(255,255,255,0.1);">
+            
+            <div class="row mb-4">
+                <div class="col-12 mb-3"><h3 style="font-size:18px; font-weight:700;">Stickers</h3></div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/cartoon" style="color:#ccc; text-decoration:none; font-size:14px;">Cartoon</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/cupid" style="color:#ccc; text-decoration:none; font-size:14px;">Cupid</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/cuphead" style="color:#ccc; text-decoration:none; font-size:14px;">Cuphead</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/christmas" style="color:#ccc; text-decoration:none; font-size:14px;">Christmas</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/football" style="color:#ccc; text-decoration:none; font-size:14px;">Football</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/confetti" style="color:#ccc; text-decoration:none; font-size:14px;">Confetti</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/heart" style="color:#ccc; text-decoration:none; font-size:14px;">Heart</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/love" style="color:#ccc; text-decoration:none; font-size:14px;">Love</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/awesome" style="color:#ccc; text-decoration:none; font-size:14px;">Awesome</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/brain" style="color:#ccc; text-decoration:none; font-size:14px;">Brain</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/bye" style="color:#ccc; text-decoration:none; font-size:14px;">Bye</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/baby-girl" style="color:#ccc; text-decoration:none; font-size:14px;">Baby Girl</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/coming-soon" style="color:#ccc; text-decoration:none; font-size:14px;">Coming Soon</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/date-night" style="color:#ccc; text-decoration:none; font-size:14px;">Date Night</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/blessing" style="color:#ccc; text-decoration:none; font-size:14px;">Blessing</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/boy-mom" style="color:#ccc; text-decoration:none; font-size:14px;">Boy Mom</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/buy-now" style="color:#ccc; text-decoration:none; font-size:14px;">Buy Now</a>
+                </div>
+                
+                <div class="col-6 col-md-3 col-lg-2 mb-2">
+                    <a href="/sticker/50-cent" style="color:#ccc; text-decoration:none; font-size:14px;">50 Cent</a>
+                </div>
+                
+                <div class="col-12 mt-2">
+                    <a href="/sticker/" style="color:#1796E6; text-decoration:none; font-size:14px; font-weight:600;">Browse all stickers →</a>
+                </div>
+            </div>
+            <hr style="border-color:rgba(255,255,255,0.1);">
+            
+            <div class="row mb-4">
+                <div class="col-12 mb-3"><h3 style="font-size:18px; font-weight:700;">Tools</h3></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/face-swap/" style="color:#ccc; text-decoration:none; font-size:14px;">GIF Face Swap</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/gif-maker/" style="color:#ccc; text-decoration:none; font-size:14px;">GIF Maker</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/mp4-to-gif/" style="color:#ccc; text-decoration:none; font-size:14px;">MP4 to GIF</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/gif-compressor/" style="color:#ccc; text-decoration:none; font-size:14px;">GIF Compressor</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/gif-resizer/" style="color:#ccc; text-decoration:none; font-size:14px;">GIF Resizer</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/gif-to-mp4/" style="color:#ccc; text-decoration:none; font-size:14px;">GIF to MP4</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/gif-reverse/" style="color:#ccc; text-decoration:none; font-size:14px;">GIF Reverser</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/gif-speed/" style="color:#ccc; text-decoration:none; font-size:14px;">GIF Speed</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/gif-frame-splitter/" style="color:#ccc; text-decoration:none; font-size:14px;">Frame Splitter</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/gif-combiner/" style="color:#ccc; text-decoration:none; font-size:14px;">GIF Combiner</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/gif-caption/" style="color:#ccc; text-decoration:none; font-size:14px;">Meme Maker</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/images-to-gif/" style="color:#ccc; text-decoration:none; font-size:14px;">Image to GIF</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/gif-to-sticker/" style="color:#ccc; text-decoration:none; font-size:14px;">GIF to Sticker</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/image-to-sticker/" style="color:#ccc; text-decoration:none; font-size:14px;">Image to Sticker</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/whatsapp-sticker-pack/" style="color:#ccc; text-decoration:none; font-size:14px;">WhatsApp Pack</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/telegram-sticker-pack/" style="color:#ccc; text-decoration:none; font-size:14px;">Telegram Pack</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/youtube-to-gif/" style="color:#ccc; text-decoration:none; font-size:14px;">YouTube to GIF</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/vimeo-to-gif/" style="color:#ccc; text-decoration:none; font-size:14px;">Vimeo to GIF</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/tiktok-downloader/" style="color:#ccc; text-decoration:none; font-size:14px;">TikTok Downloader</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/twitter-downloader/" style="color:#ccc; text-decoration:none; font-size:14px;">Twitter / X Downloader</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/instagram-downloader/" style="color:#ccc; text-decoration:none; font-size:14px;">Instagram Downloader</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/reddit-downloader/" style="color:#ccc; text-decoration:none; font-size:14px;">Reddit Downloader</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/tools/facebook-downloader/" style="color:#ccc; text-decoration:none; font-size:14px;">Facebook Downloader</a></div>
+                <div class="col-12 mt-2">
+                    <a href="/tools/" style="color:#1796E6; text-decoration:none; font-size:14px; font-weight:600;">All tools →</a>
+                </div>
+            </div>
+            <hr style="border-color:rgba(255,255,255,0.1);">
+            <div class="row mb-4">
+                <div class="col-12 mb-3"><h3 style="font-size:18px; font-weight:700;">Browse</h3></div>
+                
+                
+                <div class="col-6 col-md-3 mb-2"><a href="/browse/reactions/" style="color:#ccc; text-decoration:none; font-size:14px;">Reactions</a></div>
+                
+                <div class="col-6 col-md-3 mb-2"><a href="/browse/celebrity-gifs/" style="color:#ccc; text-decoration:none; font-size:14px;">Celebrities</a></div>
+                
+                <div class="col-6 col-md-3 mb-2"><a href="/browse/characters/" style="color:#ccc; text-decoration:none; font-size:14px;">Characters</a></div>
+                
+                <div class="col-6 col-md-3 mb-2"><a href="/browse/animals/" style="color:#ccc; text-decoration:none; font-size:14px;">Animals</a></div>
+                
+                <div class="col-6 col-md-3 mb-2"><a href="/browse/places/" style="color:#ccc; text-decoration:none; font-size:14px;">Places</a></div>
+                
+                <div class="col-6 col-md-3 mb-2"><a href="/browse/food-gifs/" style="color:#ccc; text-decoration:none; font-size:14px;">Food</a></div>
+                
+                <div class="col-6 col-md-3 mb-2"><a href="/browse/brands/" style="color:#ccc; text-decoration:none; font-size:14px;">Brands</a></div>
+                
+                <div class="col-6 col-md-3 mb-2"><a href="/browse/activities/" style="color:#ccc; text-decoration:none; font-size:14px;">Activities</a></div>
+                
+                <div class="col-6 col-md-3 mb-2"><a href="/browse/concepts/" style="color:#ccc; text-decoration:none; font-size:14px;">Feelings</a></div>
+                
+                <div class="col-6 col-md-3 mb-2"><a href="/browse/objects/" style="color:#ccc; text-decoration:none; font-size:14px;">Objects</a></div>
+                
+                <div class="col-6 col-md-3 mb-2"><a href="/browse/" style="color:#1796E6; text-decoration:none; font-size:14px; font-weight:600;">Browse All →</a></div>
+                
+                <div class="col-12" style="height:12px;"></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/latest/" style="color:#ccc; text-decoration:none; font-size:14px;">Latest GIFs</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/latest-categories/" style="color:#ccc; text-decoration:none; font-size:14px;">Latest Categories</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/top/" style="color:#ccc; text-decoration:none; font-size:14px;">Top GIFs</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/popular-gif-images/" style="color:#ccc; text-decoration:none; font-size:14px;">Popular Searches</a></div>
+            </div>
+            <hr style="border-color:rgba(255,255,255,0.1);">
+            <div class="row mb-4">
+                <div class="col-12 mb-3"><h3 style="font-size:18px; font-weight:700;">Guides</h3></div>
+                <div class="col-6 col-md-4 mb-2"><a href="/how-to-make-gifs/" style="color:#ccc; text-decoration:none; font-size:14px;">How to Make GIFs</a></div>
+                <div class="col-6 col-md-4 mb-2"><a href="/how-to-share-gifs/" style="color:#ccc; text-decoration:none; font-size:14px;">How to Share GIFs</a></div>
+                <div class="col-6 col-md-4 mb-2"><a href="/gif-format-guide/" style="color:#ccc; text-decoration:none; font-size:14px;">GIF Format Guide</a></div>
+                <div class="col-6 col-md-4 mb-2"><a href="/download-videos-for-gifs/" style="color:#ccc; text-decoration:none; font-size:14px;">Download Videos for GIFs</a></div>
+                <div class="col-6 col-md-4 mb-2"><a href="/best-gifs-by-category/" style="color:#ccc; text-decoration:none; font-size:14px;">Best GIFs by Category</a></div>
+            </div>
+            <hr style="border-color:rgba(255,255,255,0.1);">
+            <div class="row mb-4">
+                <div class="col-12 mb-3"><h3 style="font-size:18px; font-weight:700;">Account</h3></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/auth/login" style="color:#ccc; text-decoration:none; font-size:14px;">Log In</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/auth/login?signup=1" style="color:#ccc; text-decoration:none; font-size:14px;">Sign Up</a></div>
+            </div>
+            <hr style="border-color:rgba(255,255,255,0.1);">
+            <div class="row mb-3">
+                <div class="col-12 mb-3"><h3 style="font-size:18px; font-weight:700;">More</h3></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/about-us/" style="color:#ccc; text-decoration:none; font-size:14px;">About GIFDB</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/contact-us/" style="color:#ccc; text-decoration:none; font-size:14px;">Contact Us</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/dmca/" style="color:#ccc; text-decoration:none; font-size:14px;">DMCA</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/faq/" style="color:#ccc; text-decoration:none; font-size:14px;">FAQ</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/privacy-policy/" style="color:#ccc; text-decoration:none; font-size:14px;">Privacy Policy</a></div>
+                <div class="col-6 col-md-3 mb-2"><a href="/terms/" style="color:#ccc; text-decoration:none; font-size:14px;">Terms</a></div>
+            </div>
+        </div>
+        </div>
+    </div>
+</div>
+
+
+<div class="container search-container">
+    <div class="search-form d-flex" style="justify-content:center; align-items:center; flex-direction:column;">
+        <div class="col input-group input-group-lg" style="justify-content: center; align-items:center;">
+            <input type="text" class="form-control search-field search-autocomplete ms-0" id="big-search" placeholder="Search all GIFs" aria-label="Search all GIFs" style="height:50px;border:none">
+            <div class="input-group-append">
+                <div class="search-div input-group-text py-lg-0 py-md-2 px-4 d-flex" id="inputGroup-sizing-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="search-results-button" width="24" height="24" viewBox="0 -2 20 24">
+                        <path d="M16.55,19.61c-3.11-3.28-2.72-3.52-2.72-3.52a.86.86,0,0,1-.06-.23,7.33,7.33,0,0,1-3.3,1.45C2,18.26.33,11.24.32,11.17h0A9.39,9.39,0,0,1,1.55,3.59,8.7,8.7,0,0,1,7.65.07c6.13-.68,9,3.48,9.64,7.6a8,8,0,0,1-1.52,6.23c-.17.22-.35.43-.53.63l1.89,1.27S18.93,16.89,19,18a1.54,1.54,0,0,1-2.47,1.62ZM15.23,8c-.31-2-1.68-6.5-7.37-5.87A6.67,6.67,0,0,0,3.19,4.8a7.32,7.32,0,0,0-.88,5.94c0,.24,1.29,5.25,7.91,4.52a6.68,6.68,0,0,0,3.87-2.61A5.92,5.92,0,0,0,15.23,8ZM8,5.09C4.36,6.55,5.46,9.67,5.55,9.8A1,1,0,0,1,5,11.1H5l-.24.06a1,1,0,0,1-1.16-.68C2.92,8.71,2.85,4.9,7.21,3.15a1,1,0,0,1,1.33.49h0v.09a1,1,0,0,1-.49,1.33H8Z" fill-rule="evenodd" fill="#ffffff"></path>
+                    </svg>
+                </div>
+            </div>
+        </div>
+        
+        
+        
+        
+        
+        
+    </div>
+</div>
+
+
+
+<div class="container" style="min-height: 60vh; display: flex; align-items: center; justify-content: center;">
+    <div class="text-center">
+        <h1 style="font-size: 6rem; color: #1796E6;">404</h1>
+        <h2>Page Not Found</h2>
+        <p class="mt-3">The GIF you're looking for doesn't exist or has been moved.</p>
+        <a href="/" class="btn btn-primary mt-3">Back to Homepage</a>
+    </div>
+</div>
+
+
+
+
+
+
+
+
+
+</div>
+
+
+
+<footer class="footer" style="background:#1a1a2e; color:#ccc; padding:40px 0 20px;">
+    <div class="container">
+        <div class="row no-gutters ps-0">
+            
+            <div class="col-lg-2 col-md-6 col-sm-12" style="padding-bottom:20px;">
+                <div class="mb-2">
+                    <a href="/">
+                        <img src="/static/src/gifdb.svg" alt="GIFDB.com" height="30" style="filter:brightness(0) invert(1); opacity:0.8;">
+                    </a>
+                </div>
+                <div style="color:#666; font-size:12px; margin-bottom:14px;">&copy; 2026 GIFDB.com</div>
+
+                
+                <div class="d-none d-md-block">
+                    <div class="menu-title"><h3 style="color:#fff; font-size:14px; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Company</h3></div>
+                    <ul class="nav mr-auto flex-row flex-sm-wrap" style="font-size:13px; margin-bottom:14px;">
+                        <li class="nav-item"><a class="nav-link py-1" href="/about-us/">About GIFDB</a></li>
+                        <li class="nav-item"><a class="nav-link py-1" href="/blog/">Blog</a></li>
+                        <li class="nav-item"><a class="nav-link py-1" href="/contact-us/">Contact Us</a></li>
+                        <li class="nav-item"><a class="nav-link py-1" href="/dmca/">DMCA</a></li>
+                        <li class="nav-item"><a class="nav-link py-1" href="/privacy-policy/">Privacy Policy</a></li>
+                        <li class="nav-item"><a class="nav-link py-1" href="/terms/">Terms of Use</a></li>
+                    </ul>
+
+                    <div class="menu-title"><h3 style="color:#fff; font-size:14px; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Help</h3></div>
+                    <ul class="nav mr-auto flex-row flex-sm-wrap" style="font-size:13px;">
+                        <li class="nav-item"><a class="nav-link py-1" href="/faq/">FAQ</a></li>
+                        <li class="nav-item"><a class="nav-link py-1" href="/faq/how-to-download-gif/">How to Download GIFs</a></li>
+                        <li class="nav-item"><a class="nav-link py-1" href="/faq/how-to-share-gif/">How to Share GIFs</a></li>
+                        <li class="nav-item"><a class="nav-link py-1" href="/faq/how-to-make-gif/">How to Make a GIF</a></li>
+                        <li class="nav-item"><a class="nav-link py-1" href="/faq/what-are-stickers/">What are Stickers</a></li>
+                        <li class="nav-item"><a class="nav-link py-1" href="/popular-gif-images/">Popular GIFs</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            
+            <div class="col-lg col-md-6 col-sm-12 flex-column">
+                <div class="menu-title"><h3 style="color:#fff; font-size:14px; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Browse</h3></div>
+                <ul class="nav mr-auto flex-row flex-sm-wrap" style="font-size:13px;">
+                    <li class="nav-item"><a class="nav-link py-1" href="/latest/">Latest GIFs</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/latest-categories/">Latest Categories</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/top/">Top GIFs</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/trending-today/">🔥 Trending Today</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/discover/">✨ Discover</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/popular-gif-images/">Popular Searches</a></li>
+                </ul>
+
+                <div class="menu-title mt-3"><h3 style="color:#fff; font-size:14px; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Account</h3></div>
+                <ul class="nav mr-auto flex-row flex-sm-wrap" style="font-size:13px;">
+                    <li class="nav-item"><a class="nav-link py-1" href="/auth/login">Login / Sign Up</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/pricing/" style="color:#1796E6; font-weight:600;">⭐ GIFDB Pro</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/dashboard/upload">Upload GIF</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/dashboard/">Dashboard</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/dashboard/billing/">Billing</a></li>
+                </ul>
+            </div>
+
+            
+            <div class="col-lg col-md-6 col-sm-12 flex-column">
+                <div class="menu-title"><h3 style="color:#fff; font-size:14px; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Top Categories</h3></div>
+                <ul class="nav mr-auto flex-row flex-sm-wrap" style="font-size:13px;">
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/animal" title="Animal GIFs">Animal</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/anime" title="Anime GIFs">Anime</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/birthday" title="Birthday GIFs">Birthday</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/cartoon" title="Cartoon GIFs">Cartoon</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/cat" title="Cat GIFs">Cat</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/cute" title="Cute GIFs">Cute</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/dance" title="Dance GIFs">Dance</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/disney" title="Disney GIFs">Disney</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/dog" title="Dog GIFs">Dog</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/funny" title="Funny GIFs">Funny</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/gaming" title="Gaming GIFs">Gaming</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/happy-birthday" title="Happy Birthday GIFs">Happy Birthday</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/holiday" title="Holiday GIFs">Holiday</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/love" title="Love GIFs">Love</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/movie" title="Movie GIFs">Movie</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/nature" title="Nature GIFs">Nature</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/pusheen" title="Pusheen GIFs">Pusheen</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sports" title="Sports GIFs">Sports</a></li>
+                    
+                </ul>
+            </div>
+
+            
+            <div class="col-lg col-md-6 col-sm-12 flex-column">
+                <div class="menu-title"><h3 style="color:#fff; font-size:14px; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Top Reactions</h3></div>
+                <ul class="nav mr-auto flex-row flex-sm-wrap" style="font-size:13px;">
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/happy" title="Happy GIFs">Happy</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sad" title="Sad GIFs">Sad</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/love" title="Love GIFs">Love</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/thank-you" title="Thank You GIFs">Thank You</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/laughing" title="Laughing GIFs">Laughing</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/excited" title="Excited GIFs">Excited</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/thumbs-up" title="Thumbs Up GIFs">Thumbs Up</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/crying" title="Crying GIFs">Crying</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/confused" title="Confused GIFs">Confused</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/no" title="No GIFs">No</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/yes" title="Yes GIFs">Yes</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/bye" title="Bye GIFs">Bye</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/hug" title="Hug GIFs">Hug</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/congratulations" title="Congrats GIFs">Congrats</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/good-morning" title="Good Morning GIFs">Good Morning</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/eye-roll" title="Eye Roll GIFs">Eye Roll</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/shocked" title="Shocked GIFs">Shocked</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/welcome" title="Welcome GIFs">Welcome</a></li>
+                    
+                </ul>
+            </div>
+
+            
+            <div class="col-lg col-md-6 col-sm-12 flex-column">
+                <div class="menu-title"><h3 style="color:#fff; font-size:14px; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Top Stickers</h3></div>
+                <ul class="nav mr-auto flex-row flex-sm-wrap" style="font-size:13px;">
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/cartoon" title="Cartoon Stickers">Cartoon</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/cupid" title="Cupid Stickers">Cupid</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/cuphead" title="Cuphead Stickers">Cuphead</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/christmas" title="Christmas Stickers">Christmas</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/football" title="Football Stickers">Football</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/confetti" title="Confetti Stickers">Confetti</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/heart" title="Heart Stickers">Heart</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/love" title="Love Stickers">Love</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/awesome" title="Awesome Stickers">Awesome</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/brain" title="Brain Stickers">Brain</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/bye" title="Bye Stickers">Bye</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/baby-girl" title="Baby Girl Stickers">Baby Girl</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/coming-soon" title="Coming Soon Stickers">Coming Soon</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/date-night" title="Date Night Stickers">Date Night</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/blessing" title="Blessing Stickers">Blessing</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/boy-mom" title="Boy Mom Stickers">Boy Mom</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/buy-now" title="Buy Now Stickers">Buy Now</a></li>
+                    
+                    <li class="nav-item"><a class="nav-link py-1" href="/sticker/50-cent" title="50 Cent Stickers">50 Cent</a></li>
+                    
+                </ul>
+            </div>
+
+            
+            <div class="col-lg col-md-6 col-sm-12 flex-column">
+                <div class="menu-title"><h3 style="font-size:14px; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;"><a href="/tools/" style="color:#fff; text-decoration:none;">Tools</a></h3></div>
+                <ul class="nav mr-auto flex-row flex-sm-wrap" style="font-size:13px;">
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/" style="color:#1796E6; font-weight:600;">All tools →</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/face-swap/">GIF Face Swap</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/gif-maker/">GIF Maker</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/mp4-to-gif/">MP4 to GIF</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/gif-compressor/">GIF Compressor</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/gif-resizer/">GIF Resizer</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/gif-to-mp4/">GIF to MP4</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/gif-reverse/">GIF Reverser</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/gif-speed/">GIF Speed</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/gif-frame-splitter/">Frame Splitter</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/gif-combiner/">GIF Combiner</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/gif-caption/">Meme Maker</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/images-to-gif/">Image to GIF</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/gif-to-sticker/">GIF to Sticker</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/image-to-sticker/">Image to Sticker</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/whatsapp-sticker-pack/">WhatsApp Pack</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/telegram-sticker-pack/">Telegram Pack</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/youtube-to-gif/">YouTube to GIF</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/vimeo-to-gif/">Vimeo to GIF</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/tiktok-downloader/">TikTok Downloader</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/twitter-downloader/">Twitter Downloader</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/instagram-downloader/">Instagram Downloader</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/reddit-downloader/">Reddit Downloader</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/tools/facebook-downloader/">Facebook Downloader</a></li>
+                </ul>
+            </div>
+
+            
+            <div class="col-lg col-md-6 col-sm-12 flex-column">
+                <div class="menu-title"><h3 style="color:#fff; font-size:14px; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Guides</h3></div>
+                <ul class="nav mr-auto flex-row flex-sm-wrap" style="font-size:13px;">
+                    <li class="nav-item"><a class="nav-link py-1" href="/how-to-make-gifs/" style="font-weight:600;">How to Make GIFs</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/how-to-make-gifs/how-to-make-gif-on-iphone/">GIF on iPhone</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/how-to-make-gifs/how-to-make-gif-in-photoshop/">GIF in Photoshop</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/how-to-share-gifs/" style="font-weight:600;">How to Share GIFs</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/how-to-share-gifs/how-to-send-gifs-on-whatsapp/">GIFs on WhatsApp</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/how-to-share-gifs/how-to-send-gifs-on-discord/">GIFs on Discord</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/gif-format-guide/" style="font-weight:600;">GIF Format Guide</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/gif-format-guide/gif-vs-mp4/">GIF vs MP4</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/download-videos-for-gifs/" style="font-weight:600;">Download Videos</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/download-videos-for-gifs/how-to-download-tiktok-videos/">TikTok Downloads</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/best-gifs-by-category/" style="font-weight:600;">Best GIFs</a></li>
+                    <li class="nav-item"><a class="nav-link py-1" href="/best-gifs-by-category/funniest-reaction-gifs/">Reaction GIFs</a></li>
+                </ul>
+            </div>
+
+            
+            <div class="footer-extra-mobile d-md-none w-100">
+                <div class="row">
+                    <div class="col-6">
+                        <div class="menu-title"><h3 style="color:#fff; font-size:14px; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Company</h3></div>
+                        <ul class="nav mr-auto flex-row flex-sm-wrap" style="font-size:13px;">
+                            <li class="nav-item"><a class="nav-link py-1" href="/about-us/">About GIFDB</a></li>
+                            <li class="nav-item"><a class="nav-link py-1" href="/blog/">Blog</a></li>
+                            <li class="nav-item"><a class="nav-link py-1" href="/contact-us/">Contact Us</a></li>
+                            <li class="nav-item"><a class="nav-link py-1" href="/dmca/">DMCA</a></li>
+                            <li class="nav-item"><a class="nav-link py-1" href="/privacy-policy/">Privacy Policy</a></li>
+                            <li class="nav-item"><a class="nav-link py-1" href="/terms/">Terms of Use</a></li>
+                        </ul>
+                    </div>
+                    <div class="col-6">
+                        <div class="menu-title"><h3 style="color:#fff; font-size:14px; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px;">Help</h3></div>
+                        <ul class="nav mr-auto flex-row flex-sm-wrap" style="font-size:13px;">
+                            <li class="nav-item"><a class="nav-link py-1" href="/faq/">FAQ</a></li>
+                            <li class="nav-item"><a class="nav-link py-1" href="/faq/how-to-download-gif/">How to Download GIFs</a></li>
+                            <li class="nav-item"><a class="nav-link py-1" href="/faq/how-to-share-gif/">How to Share GIFs</a></li>
+                            <li class="nav-item"><a class="nav-link py-1" href="/faq/how-to-make-gif/">How to Make a GIF</a></li>
+                            <li class="nav-item"><a class="nav-link py-1" href="/faq/what-are-stickers/">What are Stickers</a></li>
+                            <li class="nav-item"><a class="nav-link py-1" href="/popular-gif-images/">Popular GIFs</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</footer>
+<style>
+/* Kill the legacy `main { min-height: 600px }` + `main > div { margin: 20px 0 }`
+   global rules from style.css. Those were sized for a layout that had
+   shorter page content; the new pages (tools/*, sticker pages, etc.)
+   already provide their own padding. The leftover bottom margin and
+   forced height showed as a "big white gap" between the page content
+   and the dark footer on desktop. Let content size itself. */
+main{ min-height:auto !important; }
+main > div{ margin-top:0 !important; margin-bottom:0 !important; }
+.footer{ margin-top:24px; }
+.footer .nav-link{color:#aab;font-size:13px;padding:4px 0 !important;display:block;width:100%}.footer .nav-link:hover{color:#fff}
+.footer .nav{flex-direction:column !important}
+.footer .nav-item{width:100% !important}
+.footer .copy-right{color:#777;font-size:12px}
+/* Mobile footer: logo row spans full width, every other column in 2-up. */
+@media (max-width: 767.98px){
+    .footer{ margin-top:32px; }
+    .footer .row > [class*="col-"]{
+        flex: 0 0 50% !important;
+        max-width: 50% !important;
+        padding-bottom: 16px;
+    }
+    /* First column (logo + copyright) takes both columns. */
+    .footer .row > [class*="col-"]:first-child{
+        flex: 0 0 100% !important;
+        max-width: 100% !important;
+        text-align: left;
+        padding-bottom: 20px;
+    }
+    /* The Company+Help mobile-only column also spans full width and sits last. */
+    .footer .footer-extra-mobile{
+        flex: 0 0 100% !important;
+        max-width: 100% !important;
+        order: 99;
+        padding-top: 8px;
+        border-top: 1px solid rgba(255,255,255,0.06);
+        margin-top: 8px;
+    }
+    .footer .menu-title h3{ font-size:12px !important; margin-bottom:6px !important; }
+    .footer .nav-link{ font-size:12px; padding:2px 0 !important; }
+    .footer .nav{ display:flex !important; }
+}
+
+/* ── Tool-card pattern (used by /tools/* "Related GIF + video tools") ──
+   Equal-height cards regardless of body-text length, single-source styling. */
+.gdb-tool-card{
+    display:flex; flex-direction:column; flex:1 1 auto;
+    padding:14px; background:#fff; border:1px solid #e2e8f0;
+    border-radius:10px; text-decoration:none; color:#0f172a;
+    transition:border-color .15s, box-shadow .15s;
+}
+.gdb-tool-card:hover{ border-color:#1796E6; box-shadow:0 4px 12px rgba(23,150,230,.10); }
+.gdb-tool-card-title{ font-weight:700; margin-bottom:4px; }
+.gdb-tool-card-desc{ color:#475569; font-size:13px; flex:1; }
+</style>
+
+
+<button id="scrollBtn" title="Back to top" style="display:none; position:fixed; bottom:20px; right:20px; z-index:99; background:#1796E6; border:none; border-radius:50%; width:44px; height:44px; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.2);">
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
+</button>
+
+
+<script src="/static/js/jquery-3.5.1.min.js"></script>
+<script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Swiper/11.0.5/swiper-bundle.min.js"></script>
+<script src="/static/js/bootstrap.bundle.min.js"></script>
+
+<div id="gdb-auth-modal" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,0.55);" onclick="if(event.target===this)gdbCloseAuthModal()">
+    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:14px; padding:26px 24px; width:92%; max-width:400px; box-shadow:0 12px 40px rgba(0,0,0,0.35);">
+        <button type="button" onclick="gdbCloseAuthModal()" aria-label="Close" style="position:absolute; top:10px; right:12px; background:none; border:none; font-size:24px; cursor:pointer; color:#999;">&times;</button>
+        <h3 style="margin:0 0 6px 0; font-size:20px; text-align:center;">Sign in to continue</h3>
+        <p style="color:#666; font-size:13px; text-align:center; margin:0 0 18px 0;">Create a free account to like GIFs, save favorites, and comment.</p>
+        <div style="display:flex; flex-direction:column; gap:10px;">
+            <a id="gdb-oauth-google" href="#" style="display:flex; align-items:center; gap:10px; padding:11px 14px; background:#fff; border:1px solid #dadce0; border-radius:10px; text-decoration:none; color:#3c4043; font-weight:600; font-size:14px;">
+                <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                Continue with Google
+            </a>
+            <a id="gdb-oauth-microsoft" href="#" style="display:flex; align-items:center; gap:10px; padding:11px 14px; background:#fff; border:1px solid #dadce0; border-radius:10px; text-decoration:none; color:#3c4043; font-weight:600; font-size:14px;">
+                <svg width="18" height="18" viewBox="0 0 23 23"><rect width="10" height="10" x="1"  y="1"  fill="#F25022"/><rect width="10" height="10" x="12" y="1"  fill="#7FBA00"/><rect width="10" height="10" x="1"  y="12" fill="#00A4EF"/><rect width="10" height="10" x="12" y="12" fill="#FFB900"/></svg>
+                Continue with Microsoft
+            </a>
+            <a id="gdb-oauth-discord" href="#" style="display:flex; align-items:center; gap:10px; padding:11px 14px; background:#5865F2; border:1px solid #5865F2; border-radius:10px; text-decoration:none; color:#fff; font-weight:600; font-size:14px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M19.54 0c1.36 0 2.46 1.1 2.46 2.46V24l-2.58-2.28-1.45-1.34-1.53-1.42.64 2.22H4.46C3.1 21.18 2 20.08 2 18.72V2.46C2 1.1 3.1 0 4.46 0h15.08zm-4.63 15.6c2.52-.08 3.48-1.74 3.48-1.74 0-3.7-1.66-6.7-1.66-6.7-1.66-1.24-3.24-1.2-3.24-1.2l-.16.18c1.96.6 2.86 1.46 2.86 1.46-1.18-.65-2.35-.98-3.44-1.1-.82-.09-1.6-.07-2.3.02-.06 0-.11.01-.17.02-.4.04-1.38.18-2.62.72-.43.2-.68.34-.68.34s.95-.91 3.02-1.5l-.11-.14s-1.58-.04-3.24 1.2c0 0-1.66 3-1.66 6.7 0 0 .96 1.66 3.48 1.74 0 0 .42-.5.76-.95-1.44-.43-1.98-1.34-1.98-1.34s.11.08.32.2c.01 0 .02.01.04.02.02.01.04.02.06.03.15.08.3.15.44.2.25.1.55.2.9.28.46.11 1 .22 1.63.24.83.04 1.76-.05 2.68-.3.45-.12.91-.3 1.4-.56.32-.19.66-.41.99-.68 0 0-.57.93-2.05 1.34.33.45.76.95.76.95zm-5.15-6.95c-.65 0-1.16.56-1.16 1.25 0 .69.52 1.25 1.16 1.25.65 0 1.16-.56 1.16-1.25 0-.69-.52-1.25-1.16-1.25zm4.27 0c-.65 0-1.16.56-1.16 1.25 0 .69.52 1.25 1.16 1.25.65 0 1.16-.56 1.16-1.25 0-.69-.52-1.25-1.16-1.25z"/></svg>
+                Continue with Discord
+            </a>
+            
+            
+        </div>
+        <p style="color:#999; font-size:11px; text-align:center; margin:14px 0 0 0;">By continuing, you agree to our <a href="/terms/" style="color:#1796E6;">Terms</a> and <a href="/privacy-policy/" style="color:#1796E6;">Privacy Policy</a>.</p>
+    </div>
+</div>
+<script>
+window.gdbOpenAuthModal = function(nextPath){
+    var m = document.getElementById('gdb-auth-modal');
+    if (!m) return;
+    var next = encodeURIComponent(nextPath || location.pathname + location.search);
+    document.getElementById('gdb-oauth-google').href    = '/auth/login/google?next='    + next;
+    document.getElementById('gdb-oauth-microsoft').href = '/auth/login/microsoft?next=' + next;
+    document.getElementById('gdb-oauth-discord').href   = '/auth/login/discord?next='   + next;
+    // X / Twitter disabled — see comment-blocked anchor above. Re-enable both together.
+    // document.getElementById('gdb-oauth-twitter').href   = '/auth/login/twitter?next='   + next;
+    m.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+};
+window.gdbCloseAuthModal = function(){
+    var m = document.getElementById('gdb-auth-modal');
+    if (m) m.style.display = 'none';
+    document.body.style.overflow = '';
+};
+document.addEventListener('keydown', function(e){ if (e.key === 'Escape') window.gdbCloseAuthModal(); });
+</script>
+
+
+<div id="report-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; z-index:9999; background:rgba(0,0,0,0.5);" onclick="if(event.target===this)closeReportModal()">
+    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:12px; padding:24px; width:90%; max-width:400px; box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <h4 style="margin:0; font-size:18px;">Report GIF</h4>
+            <button onclick="closeReportModal()" style="background:none; border:none; font-size:24px; cursor:pointer;">&times;</button>
+        </div>
+        <p style="color:#666; font-size:14px; margin-bottom:12px;">Why are you reporting this GIF?</p>
+        <input type="hidden" id="report-gif-id">
+        <input type="hidden" id="report-gif-slug">
+        <div style="display:flex; flex-direction:column; gap:8px;" id="report-reasons">
+            <label style="display:flex; align-items:center; gap:8px; padding:8px; border:1px solid #eee; border-radius:8px; cursor:pointer;"><input type="radio" name="report-reason" value="nsfw"> Sexual or adult content</label>
+            <label style="display:flex; align-items:center; gap:8px; padding:8px; border:1px solid #eee; border-radius:8px; cursor:pointer;"><input type="radio" name="report-reason" value="violence"> Violence or disturbing</label>
+            <label style="display:flex; align-items:center; gap:8px; padding:8px; border:1px solid #eee; border-radius:8px; cursor:pointer;"><input type="radio" name="report-reason" value="copyright"> Copyright violation</label>
+            <label style="display:flex; align-items:center; gap:8px; padding:8px; border:1px solid #eee; border-radius:8px; cursor:pointer;"><input type="radio" name="report-reason" value="spam"> Spam or low quality</label>
+            <label style="display:flex; align-items:center; gap:8px; padding:8px; border:1px solid #eee; border-radius:8px; cursor:pointer;"><input type="radio" name="report-reason" value="hate"> Harassment or hate speech</label>
+            <label style="display:flex; align-items:center; gap:8px; padding:8px; border:1px solid #eee; border-radius:8px; cursor:pointer;"><input type="radio" name="report-reason" value="other"> Other</label>
+        </div>
+        <textarea id="report-description" placeholder="Additional details (optional)..." style="width:100%; margin-top:12px; padding:8px; border:1px solid #ddd; border-radius:8px; resize:none; height:60px; font-size:14px;"></textarea>
+        <button id="report-submit-btn" onclick="submitReport()" style="width:100%; margin-top:12px; padding:10px; background:#dc3545; color:#fff; border:none; border-radius:8px; font-weight:600; cursor:pointer; font-size:15px;">Submit Report</button>
+        <p id="report-msg" style="display:none; margin-top:8px; text-align:center; font-size:14px;"></p>
+    </div>
+</div>
+
+<script>
+function openReportModal(btn){
+    document.getElementById('report-gif-id').value=btn.getAttribute('data-gif-id')||'';
+    document.getElementById('report-gif-slug').value=btn.getAttribute('data-slug')||'';
+    document.getElementById('report-modal').style.display='block';
+    document.getElementById('report-msg').style.display='none';
+    document.getElementById('report-submit-btn').disabled=false;
+    document.getElementById('report-description').value='';
+    document.querySelectorAll('input[name="report-reason"]').forEach(function(r){r.checked=false;});
+}
+function closeReportModal(){document.getElementById('report-modal').style.display='none';}
+function submitReport(){
+    var reason=document.querySelector('input[name="report-reason"]:checked');
+    if(!reason){alert('Please select a reason.');return;}
+    var btn=document.getElementById('report-submit-btn');
+    btn.disabled=true;btn.textContent='Submitting...';
+    fetch('/api/report-gif',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        gif_id:parseInt(document.getElementById('report-gif-id').value)||null,
+        slug:document.getElementById('report-gif-slug').value,
+        reason:reason.value,
+        description:document.getElementById('report-description').value
+    })}).then(function(r){return r.json()}).then(function(d){
+        var msg=document.getElementById('report-msg');
+        msg.style.display='block';
+        if(d.success){msg.style.color='#28a745';msg.textContent=d.message;setTimeout(closeReportModal,2000);}
+        else{msg.style.color='#dc3545';msg.textContent=d.error||'Failed';btn.disabled=false;btn.textContent='Submit Report';}
+    }).catch(function(){btn.disabled=false;btn.textContent='Submit Report';});
+}
+</script>
+
+<script src="/static/js/scripts.js?v="></script>
+<script src="/static/js/masonry.js?v=" defer></script>
+
+
+<style>
+.gdb-nav-btn{background:none;border:none;font-size:15px;font-weight:600;color:#333;cursor:pointer;padding:6px 14px;border-radius:6px;display:flex;align-items:center;gap:4px;transition:background .15s}
+.gdb-nav-btn:hover,.gdb-nav-btn.active{background:#eee;color:#1796E6}
+.gdb-hamburger:hover{opacity:.7}
+#gdb-mega-panels a{text-decoration:none !important}
+#gdb-mega-panels a:hover{color:#fff !important;text-decoration:none !important}
+#gdb-lang-menu a:hover{background:#f0f1f3}
+</style>
+<script>
+(function(){
+    var panels = document.getElementById('gdb-mega-panels');
+    var hamburgerBtn = document.getElementById('gdb-hamburger-btn');
+    var activePanel = null;
+
+    function setHeaderHeightVar(){
+        var h = document.querySelector('header');
+        if (h) document.documentElement.style.setProperty('--gdb-header-h', h.getBoundingClientRect().height + 'px');
+    }
+    window.addEventListener('resize', setHeaderHeightVar);
+    setHeaderHeightVar();
+
+    function closeAll(){
+        panels.style.display='none';
+        document.querySelectorAll('.gdb-panel').forEach(function(p){p.style.display='none';});
+        document.querySelectorAll('.gdb-nav-btn').forEach(function(b){b.classList.remove('active');b.style.background='';});
+        document.body.classList.remove('gdb-menu-open');
+        if (hamburgerBtn) { hamburgerBtn.classList.remove('is-open'); hamburgerBtn.setAttribute('aria-expanded','false'); }
+        activePanel=null;
+    }
+
+    var panelColors = {
+        'panel-categories': '#1a1a2e',
+        'panel-reactions': '#2d1b4e',
+        'panel-trending': '#1b3a2e',
+        'panel-tools': '#1b2d3e',
+        'panel-all': '#1a1a2e'
+    };
+    var navBtnColors = {
+        'panel-categories': '#e8eef4',
+        'panel-reactions': '#f0e8f4',
+        'panel-trending': '#e8f4eb',
+        'panel-tools': '#e8f0f4',
+        'panel-all': '#eee'
+    };
+
+    function openPanel(id, fromHamburger){
+        if(activePanel===id){closeAll();return;}
+        closeAll();
+        var el=document.getElementById(id);
+        var inner=document.getElementById('gdb-mega-inner');
+        if(el){
+            el.style.display='block';
+            panels.style.display='block';
+            if(inner) inner.style.background=panelColors[id]||'#1a1a2e';
+            activePanel=id;
+            document.querySelectorAll('.gdb-nav-btn').forEach(function(b){
+                if(b.getAttribute('data-panel')===id){
+                    b.classList.add('active');
+                    b.style.background=navBtnColors[id]||'#eee';
+                }
+            });
+            if (fromHamburger || id === 'panel-all') {
+                setHeaderHeightVar();
+                document.body.classList.add('gdb-menu-open');
+                if (hamburgerBtn) { hamburgerBtn.classList.add('is-open'); hamburgerBtn.setAttribute('aria-expanded','true'); }
+            }
+        }
+    }
+
+    document.querySelectorAll('.gdb-nav-btn').forEach(function(btn){
+        btn.addEventListener('click',function(e){
+            e.preventDefault();
+            openPanel(btn.getAttribute('data-panel'));
+        });
+    });
+
+    var hamburger=document.getElementById('gdb-hamburger-btn');
+    if(hamburger) hamburger.addEventListener('click',function(e){
+        e.preventDefault();
+        openPanel('panel-all', true);
+    });
+
+    // NSFW "safe mode" indicator — shown in top-right if user previously opted out
+    try {
+        var nsfwBtn = document.getElementById('gdb-nsfw-indicator');
+        if (nsfwBtn) {
+            if (localStorage.getItem('gdb_nsfw_ok') === '0') {
+                nsfwBtn.style.display = 'inline-flex';
+            }
+            nsfwBtn.addEventListener('click', function(){
+                if (confirm("Re-enable NSFW content? You'll be asked again next time you hit a flagged page.")) {
+                    localStorage.removeItem('gdb_nsfw_ok');
+                    nsfwBtn.style.display = 'none';
+                    // If we're currently on /disney/ (the safe-redirect), no reload needed.
+                    // If on a regular page, next NSFW kw will re-prompt.
+                }
+            });
+        }
+    } catch(e) {}
+
+    // Language dropdown
+    var langBtn=document.getElementById('gdb-lang-btn');
+    var langMenu=document.getElementById('gdb-lang-menu');
+    if(langBtn && langMenu) {
+        langBtn.addEventListener('click', function(e){
+            e.stopPropagation();
+            langMenu.style.display = langMenu.style.display === 'block' ? 'none' : 'block';
+        });
+        document.addEventListener('click', function(e){
+            if(!langBtn.contains(e.target) && !langMenu.contains(e.target)) langMenu.style.display='none';
+        });
+    }
+
+    var closeBtn=document.getElementById('gdb-mega-close');
+    if(closeBtn) closeBtn.addEventListener('click',closeAll);
+
+    document.addEventListener('keydown',function(e){if(e.key==='Escape')closeAll();});
+})();
+</script>
+
+
+<script>
+(function(){
+    var buttons = document.querySelectorAll('.gdb-follow-btn');
+    if (!buttons.length) return;
+
+    function setState(btn, following, count){
+        var label = btn.querySelector('.gdb-follow-label');
+        var countEl = btn.querySelector('.gdb-follow-count');
+        btn.setAttribute('aria-pressed', following ? 'true' : 'false');
+        if (label) label.textContent = following ? btn.dataset.labelFollowing : btn.dataset.labelFollow;
+        btn.style.background = following ? '#0f172a' : '#1796E6';
+        if (countEl && typeof count === 'number') {
+            countEl.textContent = count > 0 ? '· ' + count.toLocaleString() : '';
+        }
+    }
+
+    // One batch request for initial state of every button on the page
+    var ids = Array.from(buttons).map(function(b){ return b.dataset.authorId; }).filter(Boolean);
+    var uniq = Array.from(new Set(ids));
+    uniq.forEach(function(aid){
+        fetch('/api/follow/status?author_id=' + encodeURIComponent(aid), {credentials:'same-origin'})
+            .then(function(r){ return r.json(); })
+            .then(function(d){
+                if (!d.ok) return;
+                buttons.forEach(function(btn){
+                    if (btn.dataset.authorId === aid) setState(btn, d.following, d.followers);
+                });
+            }).catch(function(){});
+    });
+
+    buttons.forEach(function(btn){
+        btn.addEventListener('click', function(e){
+            e.preventDefault();
+            if (btn.dataset.busy) return;
+            btn.dataset.busy = '1';
+            fetch('/api/follow', {
+                method:'POST', credentials:'same-origin',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({author_id: btn.dataset.authorId}),
+            }).then(function(r){
+                return r.json().then(function(d){ return {status:r.status, data:d}; });
+            }).then(function(res){
+                btn.dataset.busy = '';
+                var d = res.data;
+                if (res.status === 401 && d.needs_login) {
+                    window.location.href = d.login_url || '/auth/login';
+                    return;
+                }
+                if (d.ok) {
+                    // Update every instance of this author on the page
+                    buttons.forEach(function(other){
+                        if (other.dataset.authorId === btn.dataset.authorId) setState(other, d.following, d.followers);
+                    });
+                }
+            }).catch(function(){ btn.dataset.busy = ''; });
+        });
+    });
+})();
+</script>
+
+<script>
+(function(){
+    if (typeof window === 'undefined') return;
+    const already = new Set();
+    // Skip prefetch if the user explicitly opted out (Data Saver mode)
+    if (navigator.connection && navigator.connection.saveData) return;
+    function prefetch(url){
+        if (!url || already.has(url)) return;
+        if (url.startsWith('#') || url.startsWith('javascript:')) return;
+        // Only prefetch same-origin
+        try {
+            const u = new URL(url, location.href);
+            if (u.origin !== location.origin) return;
+            url = u.pathname + u.search;
+        } catch(e){ return; }
+        already.add(url);
+        const link = document.createElement('link');
+        link.rel = 'prefetch';
+        link.href = url;
+        document.head.appendChild(link);
+    }
+    // Selector: any <a> inside a GIF card, keyword pill, or related-pill row
+    const SEL = 'a.content-link, .content a[href^="/"], .top-search-list a, .related-pill-wrap a, .card.content a, a.kw-pill';
+    let hoverTimer = null;
+    document.addEventListener('mouseover', function(e){
+        const a = e.target.closest && e.target.closest(SEL);
+        if (!a || !a.href) return;
+        clearTimeout(hoverTimer);
+        hoverTimer = setTimeout(() => prefetch(a.href), 80);
+    }, {passive: true});
+    document.addEventListener('mouseout', function(){ clearTimeout(hoverTimer); }, {passive: true});
+    // Touch devices: prefetch on touchstart (users commit within ~300ms)
+    document.addEventListener('touchstart', function(e){
+        const a = e.target.closest && e.target.closest(SEL);
+        if (a && a.href) prefetch(a.href);
+    }, {passive: true});
+})();
+</script>
+
+
+<script>
+(function(){
+    var toastEl = null, toastT = null;
+    function shareToast(msg) {
+        if (!toastEl) {
+            toastEl = document.createElement('div');
+            toastEl.id = 'gdb-share-toast';
+            // Sit above the mobile sticky share bar (52px) so it isn't covered.
+            toastEl.style.cssText = 'position:fixed; left:50%; bottom:80px; ' +
+                'transform:translateX(-50%) translateY(12px); ' +
+                'background:#0f172a; color:#fff; padding:10px 16px; border-radius:999px; ' +
+                'font-size:13px; font-weight:600; box-shadow:0 4px 12px rgba(0,0,0,0.18); ' +
+                'z-index:2147483647; opacity:0; transition:opacity .18s, transform .18s; ' +
+                'pointer-events:none; max-width:90vw; white-space:nowrap; ' +
+                'overflow:hidden; text-overflow:ellipsis;';
+            document.body.appendChild(toastEl);
+        }
+        toastEl.textContent = msg;
+        // Force reflow so the transition fires.
+        // eslint-disable-next-line no-unused-expressions
+        toastEl.offsetHeight;
+        toastEl.style.opacity = '1';
+        toastEl.style.transform = 'translateX(-50%) translateY(0)';
+        clearTimeout(toastT);
+        toastT = setTimeout(function(){
+            toastEl.style.opacity = '0';
+            toastEl.style.transform = 'translateX(-50%) translateY(12px)';
+        }, 1500);
+    }
+    document.addEventListener('click', function(e){
+        var el = e.target.closest && e.target.closest('[data-share-toast]');
+        if (!el) return;
+        var platform = el.getAttribute('data-share-toast') || 'app';
+        // Email opens the OS mail client; the others open the platform tab.
+        var verb = (platform === 'Email') ? 'Opening email…' : 'Opening ' + platform + '…';
+        shareToast(verb);
+    }, {capture: true, passive: true});
+})();
+</script>
+
+
+<script>
+(function(){
+    var params = new URLSearchParams(window.location.search);
+    var rawSource = params.get('source');
+    var input = document.getElementById('gif-input');
+    if (!rawSource || !input) return;
+
+    var source;
+    try {
+        source = new URL(rawSource, window.location.origin);
+        if (source.origin !== window.location.origin || !source.pathname.startsWith('/images/')) return;
+    } catch (_err) { return; }
+
+    // Keep the fetched value in memory while making the visible URL clean.
+    try { window.history.replaceState({}, '', window.location.pathname + window.location.hash); } catch (_err) {}
+
+    var status = document.createElement('p');
+    status.setAttribute('role', 'status');
+    status.style.cssText = 'margin:8px 0;color:#64748b;font-size:13px;';
+    status.textContent = 'Loading the selected GIF…';
+    (input.parentElement || input).appendChild(status);
+
+    fetch(source.href, {credentials:'same-origin'})
+        .then(function(response){
+            if (!response.ok) throw new Error('source fetch failed');
+            return response.blob();
+        })
+        .then(function(blob){
+            var requestedName = (params.get('source_name') || 'gifdb-source.gif').replace(/[^a-z0-9._-]/gi, '-');
+            var type = blob.type && blob.type !== 'application/octet-stream' ? blob.type : 'image/gif';
+            var file = new File([blob], requestedName, {type:type});
+            var transfer = new DataTransfer();
+            transfer.items.add(file);
+            input.files = transfer.files;
+            input.dispatchEvent(new Event('change', {bubbles:true}));
+            status.textContent = 'Selected GIF loaded. Choose the remaining options below.';
+            window.setTimeout(function(){ status.remove(); }, 4000);
+        })
+        .catch(function(){
+            status.textContent = 'We could not preload that GIF. You can upload it manually.';
+        });
+})();
+</script>
+</body>
+</html>

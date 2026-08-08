@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   AtSign,
   AudioLines,
+  Ban,
   Disc3,
   DoorOpen,
   Download,
@@ -26,6 +27,7 @@ import { PlayerPanels, PlayerQueueRail } from "@/components/player-panels";
 import { PlayerProvider } from "@/components/player-provider";
 import { NotificationsBell } from "@/components/admin-error-notifications";
 import { UserMenu } from "@/components/user-menu";
+import { BanStatusBox } from "@/components/ban-status-box";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePlayer } from "@/components/player-provider";
 import { roleIsStaff, type UserRole } from "@/lib/roles";
@@ -41,6 +43,7 @@ const adminNavGroups = [
     items: [
       { href: "/admin", label: "Info", icon: Info },
       { href: "/admin/users", label: "Users", icon: Users },
+      { href: "/admin/bans", label: "Bans", icon: Ban },
       { href: "/admin/invites", label: "Invites", icon: Mail },
     ],
   },
@@ -60,7 +63,7 @@ const adminNavGroups = [
     items: [
       { href: "/admin/lidarr", label: "Lidarr", icon: Radio },
       { href: "/admin/import", label: "Import", icon: Download },
-      { href: "/admin/email", label: "Email", icon: AtSign },
+      { href: "/admin/email", label: "SMTP", icon: AtSign },
       { href: "/admin/notifications", label: "Notifications", icon: Bell },
       { href: "/", label: "Exit", icon: DoorOpen },
     ],
@@ -68,6 +71,7 @@ const adminNavGroups = [
 ] as const;
 
 const AUTH_PATHS = new Set(["/setup", "/login", "/join"]);
+const MINIPLAYER_PATH = "/miniplayer";
 
 function PolarrMark({ className }: { className?: string }) {
   return (
@@ -263,8 +267,11 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                     ))}
                   </nav>
                 </ScrollArea>
-                <div className="mt-auto border-t border-border pt-3">
-                  <UserMenu variant="sidebar" />
+                <div className="mt-auto space-y-2">
+                  <BanStatusBox />
+                  <div className="-mx-3 border-t border-border px-3 pt-3">
+                    <UserMenu variant="sidebar" />
+                  </div>
                 </div>
               </div>
             </>
@@ -291,6 +298,9 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                     onExpandedChange={setLibraryExpanded}
                   />
                 </Suspense>
+                <div className="mt-auto">
+                  <BanStatusBox />
+                </div>
               </div>
             </>
           )}
@@ -317,11 +327,22 @@ function ShellInner({ children }: { children: React.ReactNode }) {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isAuthScreen = AUTH_PATHS.has(pathname);
+  const isMiniplayer = pathname === MINIPLAYER_PATH;
 
   if (isAuthScreen) {
     return (
       <PlayerProvider>
         <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12 text-foreground">
+          {children}
+        </div>
+      </PlayerProvider>
+    );
+  }
+
+  if (isMiniplayer) {
+    return (
+      <PlayerProvider>
+        <div className="h-screen min-h-0 overflow-hidden bg-background text-foreground">
           {children}
         </div>
       </PlayerProvider>

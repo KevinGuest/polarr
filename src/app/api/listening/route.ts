@@ -11,13 +11,20 @@ export async function GET(req: Request) {
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
 
   const limitRaw = Number(new URL(req.url).searchParams.get("limit") || "16");
-  const limit = Math.min(60, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 16));
+  const limit = Math.min(
+    60,
+    Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 16),
+  );
 
   const covers = await getAlbumCoverMap();
   const items = listOthersListening(user.id, limit).map((t) => {
     const fromDb =
       t.coverPath && /^https?:\/\//i.test(t.coverPath) ? t.coverPath : null;
     const fromLidarr = covers.get(albumCoverKey(t.artist, t.album)) || null;
+    const listeners = (t.listeners || []).map((l) => ({
+      username: l.username,
+      avatarUrl: l.avatarUrl,
+    }));
     return {
       id: t.id,
       title: t.title,
@@ -27,6 +34,7 @@ export async function GET(req: Request) {
       playedAt: t.playedAt,
       listenedBy: t.listenedBy,
       listenedByAvatarUrl: t.listenedByAvatarUrl,
+      listeners,
     };
   });
 

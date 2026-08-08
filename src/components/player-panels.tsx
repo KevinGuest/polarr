@@ -1,10 +1,12 @@
 "use client";
 
+import { toastInfo } from "@/lib/toast";
+
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as SliderPrimitive from "@radix-ui/react-slider";
 import {
   Check,
-  Info,
   Laptop,
   Mic2,
   MonitorSpeaker,
@@ -16,7 +18,6 @@ import {
   Wifi,
   X,
 } from "lucide-react";
-import { toast } from "sonner";
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { TrackContextMenu } from "@/components/track-context-menu";
@@ -24,6 +25,7 @@ import { TrackLikeButton } from "@/components/track-like-button";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { albumHref } from "@/lib/album-ref";
 import { getDragTrack, POLARR_TRACK_MIME } from "@/lib/drag-track";
 import { LISTEN_CREDITED_EVENT } from "@/lib/ui-events";
 import { cn, formatDuration } from "@/lib/utils";
@@ -340,6 +342,10 @@ function NowPlayingPopup() {
   if (!isPanelOpen("nowPlaying") || !track) return null;
 
   const pct = duration ? (progress / duration) * 100 : 0;
+  const albumPath = albumHref({
+    title: (track.album || track.title).trim() || track.title,
+    artist: track.artist,
+  });
 
   return (
     <div className="pointer-events-auto absolute inset-0 z-40 flex flex-col bg-background">
@@ -358,7 +364,12 @@ function NowPlayingPopup() {
       </div>
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-8 px-8 pb-10">
         <TrackContextMenu track={track}>
-          <div className="flex w-full max-w-sm flex-col items-center gap-8 md:max-w-md">
+          <Link
+            href={albumPath}
+            onClick={() => closePanel("nowPlaying")}
+            className="flex w-full max-w-sm flex-col items-center gap-8 transition-opacity hover:opacity-90 md:max-w-md"
+            aria-label={`Open album ${track.album || track.title}`}
+          >
             <CoverArt
               seed={track.album || track.title}
               image={
@@ -389,7 +400,7 @@ function NowPlayingPopup() {
                 </span>
               ) : null}
             </div>
-          </div>
+          </Link>
         </TrackContextMenu>
         <div className="w-full max-w-md space-y-4">
           <div className="flex items-center gap-2">
@@ -548,15 +559,7 @@ function QueuePanel() {
         const dropped = getDragTrack(e);
         if (!dropped) return;
         addToQueue(dropped);
-        toast("Queue updated", {
-          description: "Cleared upcoming tracks",
-          icon: <Info className="size-4" />,
-          style: {
-            background: "#000",
-            color: "#fff",
-            border: "1px solid rgba(255,255,255,0.12)",
-          },
-        });
+        toastInfo("Queue updated", { description: "Cleared upcoming tracks" });
       }}
     >
       <div className="flex shrink-0 items-center gap-2 px-4 py-3">

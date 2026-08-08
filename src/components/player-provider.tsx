@@ -288,14 +288,14 @@ function isEphemeralTrack(track: PlayerTrack): boolean {
  * Always re-POST /api/live for ephemeral ids — in-memory sessions die on
  * refresh/restart (410 Gone). Server dedupes by artist|title so this is cheap
  * when the session is still alive.
+ * Library plays also hit live once so stream+download bans can force rickroll.
  */
 async function resolveIfNeeded(track: PlayerTrack): Promise<PlayerTrack> {
-  if (!isEphemeralTrack(track)) {
-    // Drop a stale live proxy URL stuck on a library track.
+  const ephemeral = isEphemeralTrack(track);
+  if (!ephemeral) {
     if (track.streamUrl && /\/api\/live\//i.test(track.streamUrl)) {
       return { ...track, streamUrl: null };
     }
-    return track;
   }
   try {
     const res = await fetch("/api/live", {
@@ -308,7 +308,38 @@ async function resolveIfNeeded(track: PlayerTrack): Promise<PlayerTrack> {
       }),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok || !data) return track;
+    if (res.status === 403) {
+      const msg =
+        typeof data?.error === "string"
+          ? data.error
+          : "Playback isn’t allowed on your account.";
+      try {
+        const { toastError } = await import("@/lib/toast");
+        toastError(msg);
+      } catch {
+        /* ignore */
+      }
+      return track;
+    }
+    if (!res.ok || !data) {
+      if (!ephemeral) return track;
+      return track;
+    }
+    // Library OK path: only rewrite when server forces rickroll (or ephemeral)
+    if (
+      !ephemeral &&
+      !data.rickroll &&
+      data.mode === "library" &&
+      data.track?.id === track.id
+    ) {
+      return {
+        ...track,
+        streamUrl: data.streamUrl || track.streamUrl || null,
+      };
+    }
+    if (!ephemeral && !data.rickroll) {
+      return track;
+    }
     return {
       ...track,
       id: data.track?.id || track.id,
@@ -670,8 +701,33 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     ownerIdRef.current = payload.ownerId;
 
     const audio = audioRef.current;
-    if (audio && !audio.paused) audio.pause();
-    instAudioRef.current?.pause();
+    // UI-only follower: stop local media so we never compete for the stream
+    // (opening miniplayer used to load the same URL and hiccup playback).
+    if (audio) {
+      if (!audio.paused) audio.pause();
+      if (audio.src) {
+        audio.removeAttribute("src");
+        try {
+          audio.load();
+        } catch {
+          /* ignore */
+        }
+      }
+      audio.volume = payload.volume;
+    }
+    const inst = instAudioRef.current;
+    if (inst) {
+      inst.pause();
+      if (inst.src) {
+        inst.removeAttribute("src");
+        try {
+          inst.load();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    instReadyRef.current = false;
 
     queueRef.current = payload.queue;
     trackRef.current = payload.track;
@@ -690,32 +746,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       shuffleRef.current = payload.shuffle;
       setShuffle(payload.shuffle);
     }
-    if (audio) {
-      audio.volume = payload.volume;
-    }
-    applyMixVolumes();
 
-    // Followers mirror UI only — never play local audio while another tab owns it.
-    if (audio && payload.track) {
-      const nextSrc = audioSrcFor(payload.track);
-      const abs = new URL(nextSrc, window.location.origin).href;
-      if (audio.src !== abs) {
-        audio.src = nextSrc;
-      }
-      if (Number.isFinite(payload.progress)) {
-        try {
-          audio.currentTime = payload.progress;
-        } catch {
-          /* not seekable yet */
-        }
-      }
-    }
-
-    writeStored(payload);
+    // Followers must not write localStorage — that can race the owner mid-play.
     queueMicrotask(() => {
       applyingRemoteRef.current = false;
     });
-  }, [applyMixVolumes]);
+  }, []);
 
   useEffect(() => {
     const onTime = () => {
@@ -904,11 +940,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const stored = readStored();
     if (stored?.track) {
       applyingRemoteRef.current = true;
-      ownerIdRef.current = stored.ownerId;
+      // Another tab owns active playback — mirror UI only until hello/sync.
+      const remoteOwner =
+        Boolean(stored.ownerId) && stored.ownerId !== tabIdRef.current;
+      ownerIdRef.current = stored.ownerId || null;
       queueRef.current = stored.queue ?? [];
       trackRef.current = stored.track;
-      // Don't auto-resume audio in a new tab (autoplay + dual playback).
-      playingRef.current = false;
+      // Never autoplay in a freshly opened tab (dual audio + autoplay block).
+      // Keep UI `playing` from store when following so controls don't flash.
+      const uiPlaying = remoteOwner ? Boolean(stored.playing) : false;
+      playingRef.current = uiPlaying;
       progressRef.current = stored.progress ?? 0;
       durationRef.current = stored.duration ?? 0;
       volumeRef.current = stored.volume ?? 0.8;
@@ -916,7 +957,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       shuffleRef.current = storedShuffle;
       setQueue(stored.queue ?? []);
       setTrack(stored.track);
-      setPlaying(false);
+      setPlaying(uiPlaying);
       setProgress(stored.progress ?? 0);
       setDuration(stored.duration ?? 0);
       setVolumeState(stored.volume ?? 0.8);
@@ -939,26 +980,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setQueue(nextQ);
         trackRef.current = ready;
         setTrack(ready);
-        audio.src = audioSrcFor(ready);
-        const seekTo = () => {
-          try {
-            if (Number.isFinite(savedProgress) && savedProgress > 0) {
-              audio.currentTime = savedProgress;
+        // Only prime local audio when no other tab is already playing.
+        if (!remoteOwner) {
+          audio.src = audioSrcFor(ready);
+          const seekTo = () => {
+            try {
+              if (Number.isFinite(savedProgress) && savedProgress > 0) {
+                audio.currentTime = savedProgress;
+              }
+            } catch {
+              /* not seekable yet */
             }
-          } catch {
-            /* not seekable yet */
-          }
-        };
-        seekTo();
-        audio.addEventListener("loadedmetadata", seekTo, { once: true });
-        writeStored({
-          ...stored,
-          track: ready,
-          queue: nextQ,
-          playing: false,
-          progress: savedProgress,
-          updatedAt: Date.now(),
-        });
+          };
+          seekTo();
+          audio.addEventListener("loadedmetadata", seekTo, { once: true });
+        }
+        // Do not writeStored({ playing: false }) — that used to race the owner.
       };
 
       if (isEphemeralTrack(stored.track)) {
@@ -1082,9 +1119,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           const data = await res.json();
           discordPresenceCache = {
             at: Date.now(),
-            presenceOn: Boolean(
-              data.discord?.linked && data.discord?.presenceEnabled,
-            ),
+            presenceOn: Boolean(data.discord?.presenceEnabled),
             appId:
               typeof data.discordClientId === "string" &&
               data.discordClientId.trim()

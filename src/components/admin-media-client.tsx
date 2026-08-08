@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { CoverArt } from "@/components/cover-art";
 import { formatDuration } from "@/lib/utils";
 import { emitLibraryChanged } from "@/lib/ui-events";
+import { toastError, toastSuccess } from "@/lib/toast";
 
 type Track = {
   id: string;
@@ -50,11 +51,9 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
   const [forbidden, setForbidden] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
 
   async function load(scan = false) {
     setScanning(scan);
-    setMsg(null);
     const gate = await fetch("/api/admin/stats");
     if (gate.status === 403 || gate.status === 401) {
       setForbidden(true);
@@ -66,7 +65,7 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
     const data = await res.json();
     setTracks(data.tracks || []);
     if (scan) {
-      setMsg(
+      toastSuccess(
         typeof data.added === "number"
           ? `Scan complete · ${data.added} added · ${(data.tracks || []).length} total`
           : "Scan complete",
@@ -94,11 +93,11 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
     const data = await res.json().catch(() => null);
     setBusyKey(null);
     if (!res.ok) {
-      setMsg(data?.error || "Delete failed");
+      toastError(data?.error || "Delete failed");
       return;
     }
     setTracks((prev) => prev.filter((x) => x.id !== t.id));
-    setMsg(`Hard-deleted “${t.title}”`);
+    toastSuccess(`Hard-deleted “${t.title}”`);
     emitLibraryChanged({ trackId: t.id });
   }
 
@@ -119,7 +118,7 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
     const data = await res.json().catch(() => null);
     setBusyKey(null);
     if (!res.ok) {
-      setMsg(data?.error || "Delete failed");
+      toastError(data?.error || "Delete failed");
       return;
     }
     setTracks((prev) =>
@@ -132,7 +131,7 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
           ),
       ),
     );
-    setMsg(`Removed ${data?.removed ?? 0} track(s) from “${title}”`);
+    toastSuccess(`Removed ${data?.removed ?? 0} track(s) from “${title}”`);
   }
 
   const albums = useMemo(() => {
@@ -205,8 +204,6 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
           {scanning ? "Scanning…" : "Scan library"}
         </Button>
       </div>
-
-      {msg ? <p className="text-sm text-foreground">{msg}</p> : null}
 
       {mode === "tracks" ? (
         tracks.length === 0 ? (

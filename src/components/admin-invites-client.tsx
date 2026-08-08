@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { buildInviteEmail } from "@/lib/invite-email";
+import { toastError, toastSuccess } from "@/lib/toast";
 
 type InviteRow = {
   id: string;
@@ -38,7 +39,6 @@ export function AdminInvitesClient() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [email, setEmail] = useState("");
@@ -85,7 +85,6 @@ export function AdminInvitesClient() {
   async function sendInvite() {
     setCreating(true);
     setDialogError(null);
-    setMsg(null);
     const res = await fetch("/api/admin/invites", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -100,13 +99,12 @@ export function AdminInvitesClient() {
     setDialogOpen(false);
     setEmail("");
     setShowPreview(false);
-    setMsg(`Invite emailed to ${data.emailedTo || email.trim()}`);
+    toastSuccess(`Invite emailed to ${data.emailedTo || email.trim()}`);
     void refresh();
   }
 
   async function revoke(id: string) {
     setBusy(id);
-    setMsg(null);
     const res = await fetch("/api/admin/invites", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
@@ -115,9 +113,10 @@ export function AdminInvitesClient() {
     const data = await res.json();
     setBusy(null);
     if (!res.ok) {
-      setMsg(data.error || "Revoke failed");
+      toastError(data.error || "Revoke failed");
       return;
     }
+    toastSuccess("Invite revoked");
     void refresh();
   }
 
@@ -126,9 +125,10 @@ export function AdminInvitesClient() {
     try {
       await navigator.clipboard.writeText(url);
       setCopied(code);
+      toastSuccess("Link copied");
       setTimeout(() => setCopied(null), 2000);
     } catch {
-      setMsg("Could not copy link");
+      toastError("Could not copy link");
     }
   }
 
@@ -158,7 +158,7 @@ export function AdminInvitesClient() {
               ? "Loading…"
               : emailConfigured
                 ? "Single-use invite codes for others to join your Polarr server."
-                : "Invites are disabled as Email Service has not been setup"}
+                : "Invites are disabled until SMTP is configured"}
           </p>
         </div>
         {emailConfigured ? (
@@ -171,8 +171,6 @@ export function AdminInvitesClient() {
           </Button>
         )}
       </div>
-
-      {msg && <p className="text-sm text-foreground">{msg}</p>}
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-muted-foreground">Codes</h2>

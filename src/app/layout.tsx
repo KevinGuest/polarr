@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Toaster } from "sonner";
 import { AppShell } from "@/components/app-shell";
+import { TOAST_CLASS_NAMES } from "@/lib/toast-styles";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -14,7 +15,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className="dark h-full">
       <body className="min-h-full">
         <AppShell>{children}</AppShell>
-        <Toaster theme="dark" richColors closeButton position="top-center" />
+        <Toaster
+          theme="dark"
+          closeButton
+          position="top-center"
+          toastOptions={{
+            classNames: { ...TOAST_CLASS_NAMES },
+          }}
+        />
       </body>
     </html>
   );

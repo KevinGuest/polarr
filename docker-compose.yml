@@ -8,6 +8,9 @@ services:
       - POLARR_DATA_DIR=/data
       - POLARR_MUSIC_DIR=/music
       - POLARR_DOWNLOADS_DIR=/music/downloads
+      # Optional per-instance Discord app (Admin UI can set these instead)
+      # - POLARR_DISCORD_CLIENT_ID=
+      # - POLARR_DISCORD_CLIENT_SECRET=
       - HOSTNAME=0.0.0.0
       - PORT=3000
     volumes:

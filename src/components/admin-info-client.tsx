@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toastError, toastSaved } from "@/lib/toast";
 
 type Snapshot = {
   version: string;
@@ -51,7 +52,6 @@ export function AdminInfoClient() {
   const [forbidden, setForbidden] = useState(false);
   const [serverName, setServerName] = useState("Polarr");
   const [publicUrl, setPublicUrl] = useState("");
-  const [serverMsg, setServerMsg] = useState<string | null>(null);
   const [savingServer, setSavingServer] = useState(false);
 
   useEffect(() => {
@@ -81,7 +81,6 @@ export function AdminInfoClient() {
 
   async function saveServer() {
     setSavingServer(true);
-    setServerMsg(null);
     try {
       const res = await fetch("/api/settings", {
         method: "POST",
@@ -89,11 +88,17 @@ export function AdminInfoClient() {
         body: JSON.stringify({ serverName, publicUrl }),
       });
       const json = await res.json().catch(() => ({}));
-      setServerMsg(res.ok ? "Saved" : json.error || "Save failed");
-      if (res.ok && json.settings) {
+      if (!res.ok) {
+        toastError(
+          typeof json.error === "string" ? json.error : "Save failed",
+        );
+        return;
+      }
+      if (json.settings) {
         setServerName(json.settings.serverName || serverName);
         setPublicUrl(json.settings.publicUrl || publicUrl);
       }
+      toastSaved();
     } finally {
       setSavingServer(false);
     }
@@ -149,9 +154,6 @@ export function AdminInfoClient() {
               placeholder="http://localhost:3000"
             />
           </div>
-          {serverMsg ? (
-            <p className="text-sm text-foreground">{serverMsg}</p>
-          ) : null}
           <Button
             type="button"
             disabled={savingServer}
@@ -299,7 +301,7 @@ export function AdminInfoClient() {
                 className="rounded-xl border border-border px-4 py-4 transition-colors hover:border-foreground/30"
               >
                 <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                  Email service
+                  SMTP
                 </div>
                 <div className="mt-2 text-sm font-semibold">{data.email}</div>
               </Link>

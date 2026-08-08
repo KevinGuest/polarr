@@ -2,7 +2,9 @@ import { z } from "zod";
 import { getAuthUser, json } from "@/lib/api";
 import {
   discordOAuthConfigured,
+  discordPresenceAppConfigured,
   getDiscordLink,
+  getDiscordPresenceEnabled,
   getSettings,
   getUserEmail,
   setDiscordPresenceEnabled,
@@ -19,6 +21,7 @@ export async function GET() {
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
   const settings = getSettings();
   const discord = getDiscordLink(user.id);
+  const presenceEnabled = getDiscordPresenceEnabled(user.id);
   return json({
     username: user.username,
     email: getUserEmail(user.id),
@@ -26,10 +29,11 @@ export async function GET() {
       ? {
           linked: true,
           username: discord.discordUsername,
-          presenceEnabled: discord.presenceEnabled,
+          presenceEnabled,
         }
-      : { linked: false, username: null, presenceEnabled: false },
+      : { linked: false, username: null, presenceEnabled },
     discordOAuthReady: discordOAuthConfigured(settings),
+    discordPresenceReady: discordPresenceAppConfigured(settings),
     discordClientId: settings.discordClientId.trim() || null,
   });
 }
@@ -102,14 +106,17 @@ export async function PATCH(req: Request) {
   }
 
   if (body.discordPresenceEnabled !== undefined) {
-    const link = getDiscordLink(user.id);
-    if (!link) {
-      return json({ error: "Link Discord first" }, { status: 400 });
+    if (!discordPresenceAppConfigured()) {
+      return json(
+        { error: "Discord Client ID is not configured on this server" },
+        { status: 400 },
+      );
     }
     setDiscordPresenceEnabled(user.id, body.discordPresenceEnabled);
   }
 
   const discord = getDiscordLink(user.id);
+  const presenceEnabled = getDiscordPresenceEnabled(user.id);
   return json({
     ok: true,
     username,
@@ -118,8 +125,8 @@ export async function PATCH(req: Request) {
       ? {
           linked: true,
           username: discord.discordUsername,
-          presenceEnabled: discord.presenceEnabled,
+          presenceEnabled,
         }
-      : { linked: false, username: null, presenceEnabled: false },
+      : { linked: false, username: null, presenceEnabled },
   });
 }

@@ -8,7 +8,7 @@ services:
       PROXY_AUTH_WHITELIST: "/api/*"
 
   web:
-    image: ghcr.io/kevinguest/polarr-app:0.4.0@sha256:822bdd2ee7998cd2a3a53d4096552e2abcb98cb8884169d7c0ac99a1060b4e81
+    image: ghcr.io/kevinguest/polarr-app:0.5.0@sha256:ae4cac821f3bc425374ca5b52c603c35ea966a3dcda1e6171b601aa6e002381a
     user: "1000:1000"
     init: true
     restart: on-failure
@@ -18,7 +18,7 @@ services:
       - POLARR_DOWNLOADS_DIR=/music/downloads
       - PORT=3000
       - HOSTNAME=0.0.0.0
-      - POLARR_APP_VERSION=0.4.0
+      - POLARR_APP_VERSION=0.5.0
     volumes:
       - ${APP_DATA_DIR}/data:/data
       - ${UMBREL_ROOT}/data/storage/downloads/music:/music

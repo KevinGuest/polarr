@@ -23,6 +23,13 @@ import {
   isDownloadQuality,
   type DownloadQuality,
 } from "./download-quality";
+import {
+  matchSearchQueries,
+  primaryArtistName,
+  scoreTrackMatch,
+  TRACK_MATCH_MIN_SCORE,
+  trackMatchKey,
+} from "./track-match";
 
 export type { UserRole } from "./roles";
 export type { NotifyEventFlags, NotifyEventId } from "./notify-events";
@@ -323,6 +330,25 @@ export function ensureHistoryTrack(input: {
   return getTrack(id);
 }
 
+/** Fill match_key from artist/title for rows indexed before the column existed. */
+function backfillTrackMatchKeys(database: Database.Database) {
+  const rows = database
+    .prepare(
+      `SELECT id, artist, title FROM tracks
+       WHERE match_key = '' OR match_key IS NULL`,
+    )
+    .all() as { id: string; artist: string; title: string }[];
+  if (!rows.length) return;
+  const upd = database.prepare(`UPDATE tracks SET match_key = ? WHERE id = ?`);
+  const tx = database.transaction(() => {
+    for (const row of rows) {
+      const key = trackMatchKey(row.artist, row.title);
+      if (key) upd.run(key, row.id);
+    }
+  });
+  tx();
+}
+
 /**
  * Drop track FK and keep title/artist metadata so streamed tracks can be liked
  * without downloading. Safe to re-run (no-op when already migrated).
@@ -445,6 +471,7 @@ function migrate(database: Database.Database) {
       external_id TEXT,
       file_size INTEGER NOT NULL DEFAULT 0,
       mtime_ms REAL NOT NULL DEFAULT 0,
+      match_key TEXT NOT NULL DEFAULT '',
       added_at TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT ''
     );
@@ -652,6 +679,7 @@ function migrate(database: Database.Database) {
   ensureColumn(database, "tracks", "file_size", "file_size INTEGER NOT NULL DEFAULT 0");
   ensureColumn(database, "tracks", "mtime_ms", "mtime_ms REAL NOT NULL DEFAULT 0");
   ensureColumn(database, "tracks", "updated_at", "updated_at TEXT NOT NULL DEFAULT ''");
+  ensureColumn(database, "tracks", "match_key", "match_key TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, "requests", "media_type", "media_type TEXT NOT NULL DEFAULT 'album'");
   ensureColumn(database, "requests", "foreign_artist_id", "foreign_artist_id TEXT");
   ensureColumn(database, "requests", "foreign_album_id", "foreign_album_id TEXT");
@@ -703,6 +731,8 @@ function migrate(database: Database.Database) {
       WHERE normalized_key = '' OR normalized_key IS NULL;
   `);
 
+  backfillTrackMatchKeys(database);
+
   // Single-user installs are the server owner
   const userCount = database
     .prepare(`SELECT COUNT(*) as c FROM users`)
@@ -730,6 +760,7 @@ function migrate(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title);
     CREATE INDEX IF NOT EXISTS idx_tracks_source ON tracks(source);
     CREATE INDEX IF NOT EXISTS idx_tracks_updated ON tracks(updated_at);
+    CREATE INDEX IF NOT EXISTS idx_tracks_match_key ON tracks(match_key);
 
     CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
     CREATE INDEX IF NOT EXISTS idx_requests_artist ON requests(artist);
@@ -1675,8 +1706,26 @@ export function authenticate(
   };
 }
 
+type AuthUser = {
+  id: string;
+  username: string;
+  isAdmin: boolean;
+  role: UserRole;
+};
+
+/** Short TTL cache — media Range requests re-auth on every chunk. */
+const tokenUserCache = new Map<
+  string,
+  { at: number; user: AuthUser | null }
+>();
+const TOKEN_USER_TTL_MS = 5_000;
+
 export function getUserByToken(token: string | null | undefined) {
   if (!token) return null;
+  const cached = tokenUserCache.get(token);
+  if (cached && Date.now() - cached.at < TOKEN_USER_TTL_MS) {
+    return cached.user;
+  }
   const row = getDb()
     .prepare(
       `SELECT u.id, u.username, u.is_admin as isAdmin, u.role,
@@ -1694,25 +1743,39 @@ export function getUserByToken(token: string | null | undefined) {
         expires_at: string;
       }
     | undefined;
-  if (!row) return null;
-  if (row.accessRevokedAt) return null;
-  if (new Date(row.expires_at).getTime() < Date.now()) return null;
+  if (!row) {
+    tokenUserCache.set(token, { at: Date.now(), user: null });
+    return null;
+  }
+  if (row.accessRevokedAt) {
+    tokenUserCache.set(token, { at: Date.now(), user: null });
+    return null;
+  }
+  if (new Date(row.expires_at).getTime() < Date.now()) {
+    tokenUserCache.set(token, { at: Date.now(), user: null });
+    return null;
+  }
   // Full user bans kill the session immediately (lazy check)
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getActiveBan } = require("./bans") as typeof import("./bans");
     const ban = getActiveBan(row.id);
-    if (ban?.user) return null;
+    if (ban?.user) {
+      tokenUserCache.set(token, { at: Date.now(), user: null });
+      return null;
+    }
   } catch {
     /* ignore circular init */
   }
   const role = resolveRole(row.role, row.isAdmin);
-  return {
+  const user: AuthUser = {
     id: row.id,
     username: row.username,
     isAdmin: role === "admin" || role === "owner",
     role,
   };
+  tokenUserCache.set(token, { at: Date.now(), user });
+  return user;
 }
 
 function resolveRole(
@@ -2041,9 +2104,10 @@ export function getTrackByPath(filePath: string): TrackRow | null {
   return row ? mapTrack(row) : null;
 }
 
-export function findTrack(artist: string, title: string): TrackRow | null {
+function findTrackExact(artist: string, title: string): TrackRow | null {
   const a = artist.trim().toLowerCase();
   const t = title.trim().toLowerCase();
+  if (!a || !t) return null;
   const row = getDb()
     .prepare(
       `${TRACK_SELECT}
@@ -2056,6 +2120,69 @@ export function findTrack(artist: string, title: string): TrackRow | null {
     )
     .get(a, t) as Record<string, unknown> | undefined;
   return row ? mapTrack(row) : null;
+}
+
+function findTrackByMatchKey(key: string): TrackRow | null {
+  if (!key) return null;
+  const row = getDb()
+    .prepare(
+      `${TRACK_SELECT}
+       WHERE match_key = ?
+         AND source != 'stream'
+         AND path NOT LIKE 'stream:%'
+         AND path NOT LIKE 'stream://%'
+       ORDER BY CASE source WHEN 'fallback' THEN 0 WHEN 'library' THEN 1 ELSE 2 END
+       LIMIT 1`,
+    )
+    .get(key) as Record<string, unknown> | undefined;
+  return row ? mapTrack(row) : null;
+}
+
+/**
+ * Prefer local library files.
+ * 1) exact artist+title
+ * 2) indexed match_key (from scan / tag read)
+ * 3) soft candidate score (last resort)
+ */
+export function findTrack(artist: string, title: string): TrackRow | null {
+  const rawArtist = artist.trim();
+  const rawTitle = title.trim();
+  if (!rawArtist || !rawTitle) return null;
+
+  const exact = findTrackExact(rawArtist, rawTitle);
+  if (exact) return exact;
+
+  const primary = primaryArtistName(rawArtist);
+  if (primary && primary.toLowerCase() !== rawArtist.toLowerCase()) {
+    const byPrimary = findTrackExact(primary, rawTitle);
+    if (byPrimary) return byPrimary;
+  }
+
+  const indexed =
+    findTrackByMatchKey(trackMatchKey(rawArtist, rawTitle)) ||
+    (primary ? findTrackByMatchKey(trackMatchKey(primary, rawTitle)) : null);
+  if (indexed) return indexed;
+
+  const candidates = new Map<string, TrackRow>();
+  for (const q of matchSearchQueries(rawArtist, rawTitle)) {
+    for (const hit of searchTracksLocal(q, 40)) {
+      candidates.set(hit.id, hit);
+    }
+  }
+
+  let best: TrackRow | null = null;
+  let bestScore = 0;
+  for (const hit of candidates.values()) {
+    const score = Math.max(
+      scoreTrackMatch(hit, rawArtist, rawTitle),
+      primary ? scoreTrackMatch(hit, primary, rawTitle) : 0,
+    );
+    if (score > bestScore) {
+      bestScore = score;
+      best = hit;
+    }
+  }
+  return best && bestScore >= TRACK_MATCH_MIN_SCORE ? best : null;
 }
 
 export function listTracks(limit = 200, offset = 0): TrackRow[] {
@@ -2187,14 +2314,15 @@ export function upsertTrack(
   },
 ) {
   const ts = nowIso();
+  const matchKey = trackMatchKey(track.artist, track.title);
   getDb()
     .prepare(
       `INSERT INTO tracks(
          id, title, artist, album, duration, path, cover_path, source,
-         external_id, file_size, mtime_ms, added_at, updated_at
+         external_id, file_size, mtime_ms, match_key, added_at, updated_at
        ) VALUES (
          @id, @title, @artist, @album, @duration, @path, @coverPath, @source,
-         @externalId, @fileSize, @mtimeMs, @addedAt, @updatedAt
+         @externalId, @fileSize, @mtimeMs, @matchKey, @addedAt, @updatedAt
        )
        ON CONFLICT(path) DO UPDATE SET
          title=excluded.title,
@@ -2206,6 +2334,7 @@ export function upsertTrack(
          external_id=excluded.external_id,
          file_size=excluded.file_size,
          mtime_ms=excluded.mtime_ms,
+         match_key=excluded.match_key,
          updated_at=excluded.updated_at`,
     )
     .run({
@@ -2220,6 +2349,7 @@ export function upsertTrack(
       externalId: track.externalId,
       fileSize: track.fileSize ?? 0,
       mtimeMs: track.mtimeMs ?? 0,
+      matchKey,
       addedAt: track.addedAt || ts,
       updatedAt: track.updatedAt || ts,
     });

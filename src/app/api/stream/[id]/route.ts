@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { getAuthUser, json } from "@/lib/api";
+import { getAuthUserFromRequest, json } from "@/lib/api";
 import { isRickrollTrack, streamPolicy } from "@/lib/bans";
 import { getTrack } from "@/lib/db";
 
@@ -24,7 +24,7 @@ export async function GET(
   const track = getTrack(id);
   if (!track) return json({ error: "Track not found" }, { status: 404 });
 
-  const user = await getAuthUser();
+  const user = getAuthUserFromRequest(req);
   if (user) {
     const policy = streamPolicy(user.id);
     if (!policy.ok) {
@@ -47,14 +47,21 @@ export async function GET(
     }
   }
 
-  if (!fs.existsSync(track.path)) {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(track.path);
+  } catch {
+    return json({ error: "Audio file missing on disk" }, { status: 404 });
+  }
+  if (!stat.isFile()) {
     return json({ error: "Audio file missing on disk" }, { status: 404 });
   }
 
-  const stat = fs.statSync(track.path);
   const ext = path.extname(track.path).toLowerCase();
   const contentType = MIME[ext] || "application/octet-stream";
   const range = req.headers.get("range");
+  // Immutable library files — allow browser reuse across seeks / next-track prefetch
+  const cacheControl = "private, max-age=86400, immutable";
 
   if (range) {
     const match = /bytes=(\d+)-(\d*)/.exec(range);
@@ -78,7 +85,7 @@ export async function GET(
         "Accept-Ranges": "bytes",
         "Content-Length": String(chunk),
         "Content-Type": contentType,
-        "Cache-Control": "private, max-age=3600",
+        "Cache-Control": cacheControl,
       },
     });
   }
@@ -89,7 +96,7 @@ export async function GET(
       "Content-Length": String(stat.size),
       "Content-Type": contentType,
       "Accept-Ranges": "bytes",
-      "Cache-Control": "private, max-age=3600",
+      "Cache-Control": cacheControl,
     },
   });
 }

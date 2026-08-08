@@ -14,8 +14,12 @@ import {
 import {
   namesMatch,
   normalizeArtistName,
+  normalizeTitle,
   primaryArtistName,
-} from "@/lib/artist-portrait";
+  scoreTrackMatch,
+  titlesMatch,
+  TRACK_MATCH_MIN_SCORE,
+} from "@/lib/track-match";
 import { searchCatalog } from "@/lib/catalog-search";
 
 export const PLAYLIST_IMPORT_MAX = 500;
@@ -34,32 +38,6 @@ export type ImportResult = {
   total: number;
   unresolvedSample: { title: string; artist: string }[];
 };
-
-function normalizeTitle(title: string): string {
-  return title
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[‘’´`]/g, "'")
-    .replace(/\(.*?\)|\[.*?\]/g, " ")
-    .replace(/[^a-z0-9'\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function titlesMatch(a: string, b: string): boolean {
-  const na = normalizeTitle(a);
-  const nb = normalizeTitle(b);
-  if (!na || !nb) return false;
-  if (na === nb) return true;
-  // Remaster / radio edit suffixes already stripped; allow prefix
-  if (na.startsWith(nb) || nb.startsWith(na)) {
-    const longer = na.length >= nb.length ? na : nb;
-    const shorter = na.length < nb.length ? na : nb;
-    return longer.length - shorter.length <= 12;
-  }
-  return false;
-}
 
 /** Minimal CSV line split respecting double-quoted fields. */
 function splitCsvLine(line: string): string[] {
@@ -218,54 +196,27 @@ export function parsePlaylistText(text: string): ImportTrackRow[] {
   return out;
 }
 
-function scoreLocalHit(
-  hit: TrackRow,
-  wantArtist: string,
-  wantTitle: string,
-): number {
-  let score = 0;
-  if (titlesMatch(hit.title, wantTitle)) score += 50;
-  else if (normalizeTitle(hit.title).includes(normalizeTitle(wantTitle)))
-    score += 20;
-  else return 0;
-
-  if (namesMatch(hit.artist, wantArtist)) score += 40;
-  else if (
-    normalizeArtistName(hit.artist).includes(normalizeArtistName(wantArtist))
-  )
-    score += 15;
-  else score -= 10;
-  return score;
-}
-
 function matchLocal(row: ImportTrackRow): TrackRow | null {
-  const exact = findTrack(row.artist, row.title);
-  if (exact) return exact;
+  // findTrack already does exact + soft local match
+  const hit = findTrack(row.artist, row.title);
+  if (hit) return hit;
 
-  // Also try primary artist only against full stored credits
+  // Extra pass for odd catalog spellings searchTracksLocal may still surface
   const q = `${row.artist} ${row.title}`.trim();
-  const hits = searchTracksLocal(q, 12);
+  const hits = [
+    ...searchTracksLocal(q, 12),
+    ...searchTracksLocal(row.title, 12),
+  ];
   let best: TrackRow | null = null;
   let bestScore = 0;
   for (const h of hits) {
-    const s = scoreLocalHit(h, row.artist, row.title);
+    const s = scoreTrackMatch(h, row.artist, row.title);
     if (s > bestScore) {
       bestScore = s;
       best = h;
     }
   }
-  if (best && bestScore >= 70) return best;
-
-  // Title-only local search + artist check
-  const byTitle = searchTracksLocal(row.title, 12);
-  for (const h of byTitle) {
-    const s = scoreLocalHit(h, row.artist, row.title);
-    if (s > bestScore) {
-      bestScore = s;
-      best = h;
-    }
-  }
-  return best && bestScore >= 70 ? best : null;
+  return best && bestScore >= TRACK_MATCH_MIN_SCORE ? best : null;
 }
 
 async function matchCatalog(row: ImportTrackRow): Promise<TrackRow | null> {

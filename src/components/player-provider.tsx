@@ -21,6 +21,9 @@ export type KaraokeUiStatus =
   | "unavailable"
   | "error";
 
+/** Where the audio bytes are coming from right now. */
+export type PlaybackQuality = "local" | "youtube";
+
 export type PlayerTrack = {
   id: string;
   title: string;
@@ -31,13 +34,38 @@ export type PlayerTrack = {
   streamUrl?: string | null;
   /** Parental advisory / explicit content. */
   explicit?: boolean;
+  /** Local library file vs YouTube (yt-dlp) live fallback. */
+  quality?: PlaybackQuality | null;
 };
+
+/** Infer Local vs YouTube from id / stream URL / explicit stamp. */
+export function playbackQuality(track: PlayerTrack): PlaybackQuality {
+  if (track.quality === "local" || track.quality === "youtube") {
+    return track.quality;
+  }
+  if (track.streamUrl && /\/api\/live\//i.test(track.streamUrl)) {
+    return "youtube";
+  }
+  if (
+    track.id.startsWith("live:") ||
+    track.id.startsWith("stream:") ||
+    track.id.startsWith("catalog:")
+  ) {
+    return "youtube";
+  }
+  return "local";
+}
 
 function withExplicit(track: PlayerTrack): PlayerTrack {
   if (track.explicit) return track;
   return titleLooksExplicit(track.title)
     ? { ...track, explicit: true }
     : track;
+}
+
+function withPlayerMeta(track: PlayerTrack): PlayerTrack {
+  const base = withExplicit(track);
+  return { ...base, quality: playbackQuality(base) };
 }
 
 function shuffleTracks(items: PlayerTrack[]): PlayerTrack[] {
@@ -285,18 +313,40 @@ function isEphemeralTrack(track: PlayerTrack): boolean {
 
 /**
  * Resolve stream/catalog/live tracks to a playable URL.
- * Always re-POST /api/live for ephemeral ids — in-memory sessions die on
- * refresh/restart (410 Gone). Server dedupes by artist|title so this is cheap
- * when the session is still alive.
- * Library plays also hit live once so stream+download bans can force rickroll.
+ *
+ * Library tracks skip the network — /api/stream/{id} is ready immediately.
+ * Ban/rickroll is enforced on the stream endpoint; media errors force a
+ * resolve so restricted accounts still get the rewrite.
+ *
+ * Ephemeral ids with a fresh /api/live URL are reused (search/album already
+ * resolved). Re-POST only when streamUrl is missing, or opts.force (410 /
+ * media error). Server dedupes by artist|title when the session is alive.
  */
-async function resolveIfNeeded(track: PlayerTrack): Promise<PlayerTrack> {
+async function resolveIfNeeded(
+  track: PlayerTrack,
+  opts?: { force?: boolean },
+): Promise<PlayerTrack> {
   const ephemeral = isEphemeralTrack(track);
-  if (!ephemeral) {
+  const force = Boolean(opts?.force);
+
+  if (!ephemeral && !force) {
+    // Strip stale live proxy URLs from hydrated library tracks
     if (track.streamUrl && /\/api\/live\//i.test(track.streamUrl)) {
       return { ...track, streamUrl: null };
     }
+    return track;
   }
+
+  // Fresh live URL from search/album — skip a second /api/live round-trip
+  if (
+    ephemeral &&
+    !force &&
+    track.streamUrl &&
+    /\/api\/live\//i.test(track.streamUrl)
+  ) {
+    return track;
+  }
+
   try {
     const res = await fetch("/api/live", {
       method: "POST",
@@ -322,7 +372,6 @@ async function resolveIfNeeded(track: PlayerTrack): Promise<PlayerTrack> {
       return track;
     }
     if (!res.ok || !data) {
-      if (!ephemeral) return track;
       return track;
     }
     // Library OK path: only rewrite when server forces rickroll (or ephemeral)
@@ -335,11 +384,14 @@ async function resolveIfNeeded(track: PlayerTrack): Promise<PlayerTrack> {
       return {
         ...track,
         streamUrl: data.streamUrl || track.streamUrl || null,
+        quality: "local",
       };
     }
     if (!ephemeral && !data.rickroll) {
       return track;
     }
+    const liveUrl = data.streamUrl || data.track?.streamUrl || null;
+    const mode = data.mode === "library" ? "local" : "youtube";
     return {
       ...track,
       id: data.track?.id || track.id,
@@ -347,11 +399,53 @@ async function resolveIfNeeded(track: PlayerTrack): Promise<PlayerTrack> {
       artist: data.track?.artist || track.artist,
       album: data.track?.album || track.album,
       coverPath: data.track?.coverPath || track.coverPath,
-      streamUrl: data.streamUrl || data.track?.streamUrl || null,
+      streamUrl: liveUrl,
+      quality: mode,
     };
   } catch {
     return track;
   }
+}
+
+const prefetched = new Set<string>();
+
+/**
+ * Warm the next track while the current one plays.
+ * Library: Range-fetch the first bytes into the browser cache.
+ * Live/catalog: resolve the session server-side (yt-dlp is ~3s cold), which
+ * also warms the server's byte cache, so the skip starts instantly.
+ */
+function prefetchStream(track: PlayerTrack | null | undefined) {
+  if (!track) return;
+  if (prefetched.has(track.id)) return;
+  prefetched.add(track.id);
+  if (prefetched.size > 200) prefetched.clear();
+
+  if (isEphemeralTrack(track)) {
+    void fetch("/api/live", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+      }),
+      credentials: "same-origin",
+    }).catch(() => {
+      /* ignore */
+    });
+    return;
+  }
+
+  const src = audioSrcFor(track);
+  if (!src.startsWith("/api/stream/")) return;
+  void fetch(src, {
+    headers: { Range: "bytes=0-262143" },
+    credentials: "same-origin",
+    cache: "force-cache",
+  }).catch(() => {
+    /* ignore */
+  });
 }
 
 /** Swap a queue entry when a stream/catalog id resolves to a real track. */
@@ -643,8 +737,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const playGen = gen ?? ++playGenRef.current;
       if (playGen !== playGenRef.current) return;
 
-      const next = withExplicit(raw);
-      const queue = nextQueue?.map(withExplicit);
+      const next = withPlayerMeta(raw);
+      const queue = nextQueue?.map(withPlayerMeta);
       ownerIdRef.current = tabIdRef.current;
       if (queue) {
         queueRef.current = queue;
@@ -677,9 +771,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
       void (async () => {
         const current = () => playGen === playGenRef.current;
-        const ready = await waitForCanPlay(audio, current);
-        if (!ready || !current()) return;
-        const ok = await playBoth();
+        // Start immediately — don't wait for canplay (saves buffer latency).
+        // Retry once if the element wasn't ready yet.
+        let ok = await playBoth();
+        if (!ok && current()) {
+          const buffered = await waitForCanPlay(audio, current, 8_000);
+          if (!buffered || !current()) return;
+          ok = await playBoth();
+        }
         if (!ok || !current()) return;
         playingRef.current = true;
         setPlaying(true);
@@ -690,6 +789,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           progress: 0,
           ownerId: tabIdRef.current,
         });
+        const q = queueRef.current;
+        const idx = q.findIndex((t) => t.id === next.id);
+        prefetchStream(idx >= 0 ? q[idx + 1] : undefined);
       })();
     },
     [applyMixVolumes, playBoth, publish],
@@ -808,9 +910,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setTrack(ready);
         const gen = ++playGenRef.current;
         const currentGen = () => gen === playGenRef.current;
-        void waitForCanPlay(el, currentGen).then(async (ok) => {
-          if (!ok || !currentGen()) return;
-          const played = await safePlay(el);
+        void (async () => {
+          let played = await safePlay(el);
+          if (!played && currentGen()) {
+            const ok = await waitForCanPlay(el, currentGen, 8_000);
+            if (!ok || !currentGen()) return;
+            played = await safePlay(el);
+          }
           if (!played || !currentGen()) return;
           playingRef.current = true;
           setPlaying(true);
@@ -821,28 +927,37 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             progress: 0,
             ownerId: tabIdRef.current,
           });
-        });
+          const qi = nextQ.findIndex((t) => t.id === ready.id);
+          prefetchStream(qi >= 0 ? nextQ[qi + 1] : undefined);
+        })();
       })();
     };
 
-    /** 410 Gone / stale live URL mid-play — re-mint session and continue. */
+    /** 410 Gone / stale live URL / ban rewrite — re-mint session and continue. */
     let liveRecovering = false;
     const onMediaError = () => {
       const audio = audioRef.current;
       if (!audio || !isOwner() || liveRecovering) return;
       const current = trackRef.current;
-      if (!current || !isEphemeralTrack(current)) return;
+      if (!current) return;
       liveRecovering = true;
       const resumeAt = audio.currentTime || progressRef.current || 0;
       const wantPlay = playingRef.current || !audio.paused;
       void (async () => {
         try {
           const fromId = current.id;
-          const ready = await resolveIfNeeded({
-            ...current,
-            streamUrl: null,
-          });
+          const ready = await resolveIfNeeded(
+            {
+              ...current,
+              streamUrl: null,
+            },
+            { force: true },
+          );
           if (trackRef.current?.id !== fromId && trackRef.current?.id !== ready.id) {
+            return;
+          }
+          // Nothing usable changed (missing file / ban) — don't loop
+          if (audioSrcFor(ready) === audioSrcFor(current) && ready.id === fromId) {
             return;
           }
           if (!ready.streamUrl && isEphemeralTrack(ready)) return;
@@ -866,9 +981,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           if (wantPlay) {
             const gen = ++playGenRef.current;
             const currentGen = () => gen === playGenRef.current;
-            await waitForCanPlay(el, currentGen);
-            if (!currentGen()) return;
-            const played = await safePlay(el);
+            let played = await safePlay(el);
+            if (!played && currentGen()) {
+              await waitForCanPlay(el, currentGen, 8_000);
+              if (!currentGen()) return;
+              played = await safePlay(el);
+            }
             if (played && currentGen()) {
               playingRef.current = true;
               setPlaying(true);
@@ -905,6 +1023,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     detachAudioListenersRef.current = detach;
 
     const audio = new Audio();
+    audio.preload = "auto";
     audio.volume = volumeRef.current;
     audioRef.current = audio;
     const inst = new Audio();
@@ -1163,6 +1282,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const play = useCallback(
     (next: PlayerTrack, nextQueue?: PlayerTrack[]) => {
       const gen = ++playGenRef.current;
+      // Library tracks: set src + play() in this tick (no /api/live wait).
+      if (!isEphemeralTrack(next)) {
+        const ready =
+          next.streamUrl && /\/api\/live\//i.test(next.streamUrl)
+            ? { ...next, streamUrl: null, quality: "local" as const }
+            : { ...next, quality: next.quality ?? ("local" as const) };
+        let queue = nextQueue?.map(withExplicit);
+        if (queue) fallbackQueueRef.current = null;
+        claimAndPlay(ready, queue, gen);
+        return;
+      }
       void (async () => {
         const fromId = next.id;
         const ready = await resolveIfNeeded(next);
@@ -1240,16 +1370,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       seekTo();
       audio.addEventListener("loadedmetadata", seekTo, { once: true });
 
-      await waitForCanPlay(audio, currentGen);
-      if (!currentGen()) return;
       let ok = await playBoth();
+      if (!ok && currentGen()) {
+        const buffered = await waitForCanPlay(audio, currentGen, 8_000);
+        if (buffered && currentGen()) ok = await playBoth();
+      }
       if (!ok && isEphemeralTrack(ready) && currentGen()) {
         // Stale media / autoplay — one more live refresh then retry
         const fromId = ready.id;
-        const refreshed = await resolveIfNeeded({
-          ...ready,
-          streamUrl: null,
-        });
+        const refreshed = await resolveIfNeeded(
+          {
+            ...ready,
+            streamUrl: null,
+          },
+          { force: true },
+        );
         if (!currentGen()) return;
         const nextQ = replaceInQueue(queueRef.current, fromId, refreshed);
         queueRef.current = nextQ;
@@ -1258,9 +1393,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setTrack(refreshed);
         setAudioSrc(audio, audioSrcFor(refreshed));
         seekTo();
-        await waitForCanPlay(audio, currentGen);
-        if (!currentGen()) return;
         ok = await playBoth();
+        if (!ok && currentGen()) {
+          await waitForCanPlay(audio, currentGen, 8_000);
+          if (!currentGen()) return;
+          ok = await playBoth();
+        }
         ready = refreshed;
       }
       if (!ok || !currentGen()) return;

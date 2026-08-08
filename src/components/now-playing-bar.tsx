@@ -9,7 +9,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
-  Check,
   Maximize2,
   Mic2,
   MonitorSpeaker,
@@ -27,9 +26,10 @@ import {
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { MiniplayerClient } from "@/components/miniplayer-client";
+import { StreamQualityBadge } from "@/components/stream-quality-badge";
 import { TrackLikeButton } from "@/components/track-like-button";
 import { TrackContextMenu } from "@/components/track-context-menu";
-import { usePlayer } from "@/components/player-provider";
+import { playbackQuality, usePlayer } from "@/components/player-provider";
 import {
   Tooltip,
   TooltipContent,
@@ -78,7 +78,6 @@ export function NowPlayingBar() {
     toggleShuffle,
     togglePanel,
   } = usePlayer();
-  const [downloaded, setDownloaded] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [pipMount, setPipMount] = useState<HTMLElement | null>(null);
 
@@ -144,7 +143,6 @@ export function NowPlayingBar() {
 
   useEffect(() => {
     if (!track?.id) {
-      setDownloaded(false);
       setCoverUrl(null);
       return;
     }
@@ -156,12 +154,8 @@ export function NowPlayingBar() {
     setCoverUrl(fromTrack);
 
     if (track.id.startsWith("live:") || track.id.startsWith("stream:")) {
-      setDownloaded(false);
       return;
     }
-
-    // Only mark in-library after the track API confirms a real file
-    setDownloaded(false);
 
     let cancelled = false;
     void fetch(`/api/tracks/${encodeURIComponent(track.id)}`, {
@@ -176,12 +170,6 @@ export function NowPlayingBar() {
         const cover = data.track.coverUrl || data.track.coverPath;
         if (cover && /^https?:\/\//i.test(cover)) {
           setCoverUrl(cover);
-        }
-        if (data.downloaded || data.track?.path) {
-          const path = String(data.track.path || "");
-          if (path && !path.startsWith("stream:") && !path.startsWith("stream://")) {
-            setDownloaded(true);
-          }
         }
       })
       .catch(() => null);
@@ -237,16 +225,17 @@ export function NowPlayingBar() {
                 </div>
               </Link>
             </TrackContextMenu>
-            {downloaded ? (
-              <BarTooltip label="In library">
-                <span
-                  className="flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground text-background"
-                  aria-label="In library"
-                >
-                  <Check className="size-3" strokeWidth={3} />
-                </span>
-              </BarTooltip>
-            ) : null}
+            <BarTooltip
+              label={
+                playbackQuality(track) === "youtube"
+                  ? "Playing via YouTube fallback"
+                  : "Playing from local library"
+              }
+            >
+              <span className="shrink-0">
+                <StreamQualityBadge track={track} />
+              </span>
+            </BarTooltip>
           </div>
 
           <div className="flex flex-col items-center gap-1.5">

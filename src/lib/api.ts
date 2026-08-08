@@ -2,6 +2,30 @@ import { cookies, headers } from "next/headers";
 import { getUserByToken } from "./db";
 import { roleIsAdmin, roleIsStaff } from "./roles";
 
+function tokenFromCookieHeader(cookieHeader: string | null): string | null {
+  if (!cookieHeader) return null;
+  // Fast path — avoid splitting the whole jar when possible
+  const m = /(?:^|;\s*)polarr_token=([^;]+)/.exec(cookieHeader);
+  if (!m?.[1]) return null;
+  try {
+    return decodeURIComponent(m[1].trim());
+  } catch {
+    return m[1].trim();
+  }
+}
+
+/**
+ * Sync auth from a Route Handler Request. Prefer this on hot paths
+ * (stream / live) — skips Next.js async cookies()/headers() overhead.
+ */
+export function getAuthUserFromRequest(req: Request) {
+  const auth = req.headers.get("authorization");
+  if (auth?.toLowerCase().startsWith("bearer ")) {
+    return getUserByToken(auth.slice(7).trim());
+  }
+  return getUserByToken(tokenFromCookieHeader(req.headers.get("cookie")));
+}
+
 export async function getAuthUser() {
   const headerStore = await headers();
   const auth = headerStore.get("authorization");

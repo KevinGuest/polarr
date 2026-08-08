@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
+import { StreamQualityBadge } from "@/components/stream-quality-badge";
 import { TrackLikeButton } from "@/components/track-like-button";
 import { usePlayer } from "@/components/player-provider";
 import { albumHref } from "@/lib/album-ref";
@@ -132,6 +133,9 @@ export function MiniplayerClient({
             <span className="truncate">
               {formatTrackArtistLine(track.artist, track.title)}
             </span>
+          </div>
+          <div className="flex justify-center pt-1">
+            <StreamQualityBadge track={track} />
           </div>
           {track.album ? (
             <div className="truncate text-[11px] text-muted-foreground">

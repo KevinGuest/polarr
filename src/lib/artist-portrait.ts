@@ -9,6 +9,12 @@ import {
   LidarrClient,
   coverFrom,
 } from "@/lib/lidarr";
+import {
+  namesMatch,
+  normalizeArtistName,
+  primaryArtistName,
+} from "@/lib/track-match";
+export { namesMatch, normalizeArtistName, primaryArtistName };
 
 const PORTRAIT_TTL_MS = 6 * 60 * 60 * 1000;
 /** Bump when matching rules change so stale wrong URLs are dropped. */
@@ -25,42 +31,6 @@ type DeezerArtist = {
 
 function cacheKey(artist: string, mbid?: string | null): string {
   return `v${PORTRAIT_CACHE_VERSION}|${(mbid || "").toLowerCase()}|${artist.trim().toLowerCase()}`;
-}
-
-/** Primary credit only — drop “feat.” / comma lists / & pairs. */
-export function primaryArtistName(credit: string): string {
-  let s = credit.trim();
-  if (!s) return "";
-  // Cut featured artists
-  s = s.split(/\s+(?:feat\.?|ft\.?|featuring)\s+/i)[0] || s;
-  // Multi-artist credits: "A, B, C" or "A & B" / "A and B" → first
-  s = s.split(/\s*,\s*/)[0] || s;
-  s = s.split(/\s+(?:&|and|x|with)\s+/i)[0] || s;
-  return s.trim();
-}
-
-/** Compare artist names ignoring case, accents, and light punctuation. */
-export function normalizeArtistName(name: string): string {
-  return name
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[‘’´`]/g, "'")
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9'\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-export function namesMatch(a: string, b: string): boolean {
-  const na = normalizeArtistName(a);
-  const nb = normalizeArtistName(b);
-  if (!na || !nb) return false;
-  if (na === nb) return true;
-  // Allow "The X" ↔ "X"
-  if (na.startsWith("the ") && na.slice(4) === nb) return true;
-  if (nb.startsWith("the ") && nb.slice(4) === na) return true;
-  return false;
 }
 
 function deezerPicture(a: DeezerArtist | undefined): string | null {

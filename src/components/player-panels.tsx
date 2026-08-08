@@ -6,7 +6,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as SliderPrimitive from "@radix-ui/react-slider";
 import {
-  Check,
   Laptop,
   Mic2,
   MonitorSpeaker,
@@ -20,6 +19,7 @@ import {
 } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
+import { StreamQualityBadge } from "@/components/stream-quality-badge";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackLikeButton } from "@/components/track-like-button";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
@@ -390,15 +390,7 @@ function NowPlayingPopup() {
                   </span>
                 </div>
               </div>
-              {!track.id.startsWith("live:") ? (
-                <span
-                  className="flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground text-background"
-                  title="In library"
-                  aria-label="In library"
-                >
-                  <Check className="size-3" strokeWidth={3} />
-                </span>
-              ) : null}
+              <StreamQualityBadge track={track} />
             </div>
           </Link>
         </TrackContextMenu>

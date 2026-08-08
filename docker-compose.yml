@@ -1,6 +1,7 @@
 services:
   polarr:
     build: .
+    image: ghcr.io/kevinguest/polarr-app
     container_name: polarr
     ports:
       - "3647:3000"

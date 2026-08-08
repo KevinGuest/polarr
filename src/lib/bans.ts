@@ -54,7 +54,10 @@ function isNotExpired(expiresAt: string | null | undefined): boolean {
   return t > Date.now();
 }
 
+let bansTableReady = false;
+
 export function ensureUserBansTable() {
+  if (bansTableReady) return;
   getDb().exec(`
     CREATE TABLE IF NOT EXISTS user_bans (
       id TEXT PRIMARY KEY,
@@ -78,6 +81,7 @@ export function ensureUserBansTable() {
   } catch {
     /* ignore */
   }
+  bansTableReady = true;
 }
 
 export function isRickrollTrack(artist: string, title: string): boolean {
@@ -89,9 +93,18 @@ export function isRickrollTrack(artist: string, title: string): boolean {
   );
 }
 
+const activeBanCache = new Map<
+  string,
+  { at: number; ban: ActiveBan | null }
+>();
+const ACTIVE_BAN_TTL_MS = 5_000;
+
 /** Merge all still-active (not lifted, not expired) ban rows for a user. */
 export function getActiveBan(userId: string): ActiveBan | null {
   if (!userId) return null;
+  const hit = activeBanCache.get(userId);
+  if (hit && Date.now() - hit.at < ACTIVE_BAN_TTL_MS) return hit.ban;
+
   ensureUserBansTable();
   const rows = getDb()
     .prepare(
@@ -145,17 +158,25 @@ export function getActiveBan(userId: string): ActiveBan | null {
     }
   }
 
-  if (!any) return null;
+  const ban = !any
+    ? null
+    : {
+        stream,
+        download,
+        user,
+        expiresAt: permanent ? null : expiresAt ?? null,
+        reason,
+        id,
+        createdAt,
+      };
+  activeBanCache.set(userId, { at: Date.now(), ban });
+  return ban;
+}
 
-  return {
-    stream,
-    download,
-    user,
-    expiresAt: permanent ? null : expiresAt ?? null,
-    reason,
-    id,
-    createdAt,
-  };
+/** Call after ban create / lift so stream policy updates immediately. */
+export function invalidateActiveBanCache(userId?: string) {
+  if (userId) activeBanCache.delete(userId);
+  else activeBanCache.clear();
 }
 
 export function getActiveBanByUsername(username: string): ActiveBan | null {
@@ -250,6 +271,7 @@ export function createUserBan(input: {
   if (input.user) {
     getDb().prepare(`DELETE FROM sessions WHERE user_id = ?`).run(user.id);
   }
+  invalidateActiveBanCache(user.id);
 
   return {
     id,
@@ -270,12 +292,16 @@ export function createUserBan(input: {
 
 export function liftUserBan(banId: string): boolean {
   ensureUserBansTable();
+  const prev = getDb()
+    .prepare(`SELECT user_id as userId FROM user_bans WHERE id = ?`)
+    .get(banId) as { userId: string } | undefined;
   const r = getDb()
     .prepare(
       `UPDATE user_bans SET lifted_at = ?
        WHERE id = ? AND lifted_at IS NULL`,
     )
     .run(nowIso(), banId);
+  if (r.changes > 0 && prev?.userId) invalidateActiveBanCache(prev.userId);
   return r.changes > 0;
 }
 

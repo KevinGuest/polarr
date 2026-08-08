@@ -1,4 +1,4 @@
-import { getAuthUser, json } from "@/lib/api";
+import { getAuthUserFromRequest, json } from "@/lib/api";
 import {
   isRickrollTrack,
   RICKROLL,
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  * Body: { artist, title, album? }
  */
 export async function POST(req: Request) {
-  const user = await getAuthUser();
+  const user = getAuthUserFromRequest(req);
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
 
   const policy = streamPolicy(user.id);

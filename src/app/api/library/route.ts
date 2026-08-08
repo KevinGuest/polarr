@@ -26,7 +26,7 @@ export async function GET(req: Request) {
   const user = await getAuthUser();
   const offlineIds = user ? listOfflineTrackIds(user.id) : [];
   if (searchParams.get("scan") === "1") {
-    const result = scanMusicLibrary();
+    const result = await scanMusicLibrary();
     return json({
       ...result,
       tracks: await tracksWithCovers(),
@@ -38,7 +38,7 @@ export async function GET(req: Request) {
 
 export async function POST() {
   const user = await getAuthUser();
-  const result = scanMusicLibrary();
+  const result = await scanMusicLibrary();
   return json({
     ...result,
     tracks: await tracksWithCovers(),

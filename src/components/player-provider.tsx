@@ -1339,6 +1339,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       instReadyRef.current = false;
       applyMixVolumes();
 
+      // A prior failed attempt leaves the element errored with the same src;
+      // setAudioSrc would no-op and every retry would time out. Hard-reset.
+      if (inst.error) {
+        inst.removeAttribute("src");
+        try {
+          inst.load();
+        } catch {
+          /* ignore */
+        }
+      }
       setAudioSrc(inst, streamUrl);
       const ready = await waitForCanPlay(
         inst,
@@ -1346,8 +1356,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         20_000,
       );
       if (!ready || trackRef.current?.id !== trackId) {
+        const codes: Record<number, string> = {
+          1: "load aborted",
+          2: "network error",
+          3: "decode error",
+          4: "format not supported",
+        };
+        const detail = inst.error ? codes[inst.error.code] : null;
         setKaraokeStatus("error");
-        setKaraokeError("Instrumental failed to load");
+        setKaraokeError(
+          detail
+            ? `Instrumental failed to load (${detail}) — slide again to retry`
+            : "Instrumental failed to load — slide again to retry",
+        );
         return;
       }
       if (!audioLooksPlayable(inst)) {

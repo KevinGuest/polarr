@@ -10,6 +10,7 @@ import {
   Disc3,
   DoorOpen,
   Download,
+  Gauge,
   Home,
   Info,
   ListMusic,
@@ -62,6 +63,7 @@ const adminNavGroups = [
     staff: false as const,
     items: [
       { href: "/admin/lidarr", label: "Lidarr", icon: Radio },
+      { href: "/admin/quality", label: "Quality", icon: Gauge },
       { href: "/admin/import", label: "Import", icon: Download },
       { href: "/admin/email", label: "SMTP", icon: AtSign },
       { href: "/admin/notifications", label: "Notifications", icon: Bell },
@@ -75,17 +77,13 @@ const MINIPLAYER_PATH = "/miniplayer";
 
 function PolarrMark({ className }: { className?: string }) {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="currentColor"
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src="/polarr-icon.png"
+      alt=""
       aria-hidden
-      className={className}
-    >
-      <rect x="2.5" y="11" width="2.75" height="8" rx="1.25" />
-      <rect x="7.25" y="6" width="2.75" height="13" rx="1.25" />
-      <rect x="12" y="9" width="2.75" height="10" rx="1.25" />
-      <rect x="16.75" y="3.5" width="2.75" height="15.5" rx="1.25" />
-    </svg>
+      className={cn("rounded-md object-cover", className)}
+    />
   );
 }
 
@@ -202,8 +200,8 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             className="inline-flex w-fit items-center gap-2.5 justify-self-start text-foreground"
             aria-label="Polarr home"
           >
-            <PolarrMark className="size-5" />
-            <span className="text-base font-semibold tracking-tight">Polarr</span>
+            <PolarrMark className="size-7" />
+            <span className="text-lg font-semibold tracking-tight">Polarr</span>
           </Link>
           <div className="relative w-full justify-self-center">
             <Suspense
@@ -241,8 +239,8 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                 className="mb-6 flex items-center gap-2.5 px-3 text-foreground"
                 aria-label="Polarr admin"
               >
-                <PolarrMark className="size-5" />
-                <span className="text-base font-semibold tracking-tight">
+                <PolarrMark className="size-7" />
+                <span className="text-lg font-semibold tracking-tight">
                   Polarr
                 </span>
               </Link>

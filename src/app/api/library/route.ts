@@ -1,4 +1,4 @@
-import { json } from "@/lib/api";
+import { getAuthUser, json } from "@/lib/api";
 import { listOfflineTrackIds, listTracks, type TrackRow } from "@/lib/db";
 import { scanMusicLibrary } from "@/lib/library";
 import { albumCoverKey, getAlbumCoverMap } from "@/lib/lidarr";
@@ -23,7 +23,8 @@ async function tracksWithCovers(): Promise<TrackRow[]> {
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const offlineIds = listOfflineTrackIds();
+  const user = await getAuthUser();
+  const offlineIds = user ? listOfflineTrackIds(user.id) : [];
   if (searchParams.get("scan") === "1") {
     const result = scanMusicLibrary();
     return json({
@@ -36,10 +37,11 @@ export async function GET(req: Request) {
 }
 
 export async function POST() {
+  const user = await getAuthUser();
   const result = scanMusicLibrary();
   return json({
     ...result,
     tracks: await tracksWithCovers(),
-    offlineIds: listOfflineTrackIds(),
+    offlineIds: user ? listOfflineTrackIds(user.id) : [],
   });
 }

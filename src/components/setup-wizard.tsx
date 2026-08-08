@@ -225,6 +225,13 @@ export function SetupWizard() {
   return (
     <div className="mx-auto w-full max-w-md">
       <div className="mb-8 text-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/polarr-icon.png"
+          alt=""
+          aria-hidden
+          className="mx-auto mb-4 size-14 rounded-xl object-cover"
+        />
         <h1 className="text-3xl font-semibold tracking-tight">Polarr</h1>
         <p className="mt-2 text-muted-foreground">
           {step === "account"

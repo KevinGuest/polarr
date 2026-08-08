@@ -10,6 +10,7 @@ import {
   type NotifyEventFlags,
 } from "@/lib/db";
 import { NOTIFY_EVENT_IDS } from "@/lib/notify-events";
+import { DOWNLOAD_QUALITIES } from "@/lib/download-quality";
 import { isDiscordWebhookUrl, sendDiscordTest } from "@/lib/discord";
 import { sendSmtpTestEmail } from "@/lib/mail";
 import { probeLidarr } from "@/lib/lidarr";
@@ -82,6 +83,9 @@ const bodySchema = z.object({
   lidarrApiKey: z.string().optional(),
   musicRoot: z.string().optional(),
   fallbackEnabled: z.boolean().optional(),
+  downloadQuality: z
+    .enum(DOWNLOAD_QUALITIES.map((q) => q.id) as [string, ...string[]])
+    .optional(),
   publicUrl: z.string().optional(),
   testLidarr: z.boolean().optional(),
   testDiscord: z.boolean().optional(),
@@ -126,7 +130,9 @@ export async function POST(req: Request) {
     body.discordClientId !== undefined ||
     body.discordClientSecret !== undefined;
   const touchesServer =
-    body.serverName !== undefined || body.publicUrl !== undefined;
+    body.serverName !== undefined ||
+    body.publicUrl !== undefined ||
+    body.downloadQuality !== undefined;
   const touchesSmtp =
     body.smtpHost !== undefined ||
     body.smtpPort !== undefined ||
@@ -279,6 +285,9 @@ export async function POST(req: Request) {
         : current.lidarrApiKey,
     musicRoot: body.musicRoot ?? current.musicRoot,
     fallbackEnabled: true,
+    downloadQuality:
+      (body.downloadQuality as typeof current.downloadQuality | undefined) ??
+      current.downloadQuality,
     publicUrl: body.publicUrl ?? current.publicUrl,
     smtpHost: body.smtpHost ?? current.smtpHost,
     smtpPort: body.smtpPort ?? current.smtpPort,

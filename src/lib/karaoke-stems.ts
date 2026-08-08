@@ -4,7 +4,7 @@
  * Cache: data/karaoke/{key}/instrumental.m4a
  */
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -63,6 +63,20 @@ const jobs = new Map<string, JobState>();
 /** trackId / live id → stable cache key */
 const idToKey = new Map<string, string>();
 let chain: Promise<void> = Promise.resolve();
+
+/**
+ * Identifies this server process in status.json. A "processing"/"queued"
+ * status written by a previous (dead) process must not block a re-queue —
+ * without this, a crash mid-separation leaves the track stuck forever.
+ */
+const BOOT_ID = randomUUID();
+
+function hasLiveJobForKey(key: string): boolean {
+  for (const j of jobs.values()) {
+    if (j.key === key) return true;
+  }
+  return false;
+}
 
 function requireFromApp() {
   return createRequire(path.join(process.cwd(), "package.json"));
@@ -171,6 +185,7 @@ function writeStatus(key: string, job: JobState) {
         progress: job.progress,
         quality: job.status === "ready" ? "demucs" : "none",
         updatedAt: Date.now(),
+        bootId: BOOT_ID,
       }),
     );
   } catch {
@@ -602,6 +617,7 @@ function infoFromKey(
       status?: KaraokeStatus;
       error?: string;
       progress?: number;
+      bootId?: string;
     };
     if (parsed.status === "ready" && fs.existsSync(inst)) {
       return {
@@ -611,13 +627,23 @@ function infoFromKey(
         progress: 1,
       };
     }
-    if (
-      parsed.status === "processing" ||
-      parsed.status === "error" ||
-      parsed.status === "queued"
-    ) {
+    if (parsed.status === "processing" || parsed.status === "queued") {
+      // Only trust in-flight statuses backed by a job in this process.
+      // Otherwise it is a leftover from a dead server — report null so the
+      // caller falls through to idle and can re-queue separation.
+      if (parsed.bootId === BOOT_ID && hasLiveJobForKey(key)) {
+        return {
+          status: parsed.status,
+          quality: "none",
+          error: parsed.error,
+          progress: parsed.progress ?? 0,
+        };
+      }
+      return null;
+    }
+    if (parsed.status === "error") {
       return {
-        status: parsed.status,
+        status: "error",
         quality: "none",
         error: parsed.error,
         progress: parsed.progress ?? 0,

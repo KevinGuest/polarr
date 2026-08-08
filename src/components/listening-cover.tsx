@@ -9,8 +9,8 @@ export type ListeningAvatar = {
 };
 
 /**
- * Album cover with listener avatars (stacked). One head drifts; extras sit
- * stacked under it so multiple listeners show up on the same track.
+ * Album cover with listener avatars (stacked). Every head drifts on its own
+ * staggered cycle so multiple listeners all float, not just the lead.
  */
 export function ListeningCover({
   title,
@@ -57,11 +57,13 @@ export function ListeningCover({
                   key={`${p.username}-${i}`}
                   className={cn(
                     "relative overflow-hidden rounded-full border-2 border-white/90 shadow-md",
-                    isLead ? "size-8 animate-listener-drift" : "size-7 -ml-2",
+                    "animate-listener-drift",
+                    isLead ? "size-8" : "size-7 -ml-2",
                   )}
                   style={{
                     zIndex: show.length - i,
-                    ...(isLead ? { animationDelay: `${delayMs}ms` } : {}),
+                    // Negative stagger starts extras mid-cycle: no dead wait
+                    animationDelay: `${delayMs - i * 1100}ms`,
                   }}
                   title={p.username}
                 >

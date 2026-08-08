@@ -6,10 +6,6 @@ import {
   ListenHoursChart,
   type ListenDashboard,
 } from "@/components/listen-hours-chart";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { toastError, toastSaved } from "@/lib/toast";
 
 type Snapshot = {
   version: string;
@@ -50,17 +46,11 @@ function formatMinutes(mins: number) {
 export function AdminInfoClient() {
   const [data, setData] = useState<Snapshot | null>(null);
   const [forbidden, setForbidden] = useState(false);
-  const [serverName, setServerName] = useState("Polarr");
-  const [publicUrl, setPublicUrl] = useState("");
-  const [savingServer, setSavingServer] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [statsRes, settingsRes] = await Promise.all([
-        fetch("/api/admin/stats"),
-        fetch("/api/settings"),
-      ]);
+      const statsRes = await fetch("/api/admin/stats");
       if (cancelled) return;
       if (statsRes.status === 403 || statsRes.status === 401) {
         setForbidden(true);
@@ -68,41 +58,11 @@ export function AdminInfoClient() {
       }
       const json = await statsRes.json();
       setData(json);
-      if (settingsRes.ok) {
-        const settings = await settingsRes.json();
-        setServerName(settings.serverName || "Polarr");
-        setPublicUrl(settings.publicUrl || "");
-      }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
-
-  async function saveServer() {
-    setSavingServer(true);
-    try {
-      const res = await fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ serverName, publicUrl }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toastError(
-          typeof json.error === "string" ? json.error : "Save failed",
-        );
-        return;
-      }
-      if (json.settings) {
-        setServerName(json.settings.serverName || serverName);
-        setPublicUrl(json.settings.publicUrl || publicUrl);
-      }
-      toastSaved();
-    } finally {
-      setSavingServer(false);
-    }
-  }
 
   if (forbidden) {
     return (
@@ -131,38 +91,6 @@ export function AdminInfoClient() {
           Overview of this Polarr homeserver.
         </p>
       </div>
-
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">
-          Homeserver
-        </h2>
-        <div className="space-y-4 rounded-xl border border-border px-4 py-4">
-          <div className="space-y-2">
-            <Label htmlFor="server-name">Server name</Label>
-            <Input
-              id="server-name"
-              value={serverName}
-              onChange={(e) => setServerName(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="public-url">Public URL (for mobile clients)</Label>
-            <Input
-              id="public-url"
-              value={publicUrl}
-              onChange={(e) => setPublicUrl(e.target.value)}
-              placeholder="http://localhost:3000"
-            />
-          </div>
-          <Button
-            type="button"
-            disabled={savingServer}
-            onClick={() => void saveServer()}
-          >
-            {savingServer ? "Saving…" : "Save"}
-          </Button>
-        </div>
-      </section>
 
       {!data ? (
         <p className="text-sm text-muted-foreground">Loading…</p>

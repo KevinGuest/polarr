@@ -18,6 +18,11 @@ import {
   isUserRole,
   type UserRole,
 } from "./roles";
+import {
+  DEFAULT_DOWNLOAD_QUALITY,
+  isDownloadQuality,
+  type DownloadQuality,
+} from "./download-quality";
 
 export type { UserRole } from "./roles";
 export type { NotifyEventFlags, NotifyEventId } from "./notify-events";
@@ -33,6 +38,8 @@ export type Settings = {
   lidarrApiKey: string;
   musicRoot: string;
   fallbackEnabled: boolean;
+  /** Fallback download quality preset (see lib/download-quality). */
+  downloadQuality: DownloadQuality;
   serverName: string;
   publicUrl: string;
   smtpHost: string;
@@ -375,6 +382,29 @@ function migrateTrackLikesV3(database: Database.Database) {
   );
 }
 
+/**
+ * Offline "Downloaded" marks used to be global (UNIQUE track_id, no user) so
+ * one user's download badged every library. Rebuild per-user. Legacy rows
+ * can't be attributed to anyone, so they are dropped — badge only, files stay.
+ */
+function migrateOfflineMarksV2(database: Database.Database) {
+  const cols = tableColumns(database, "offline_marks");
+  if (cols.size === 0 || cols.has("user_id")) return;
+  database.exec(`
+    DROP TABLE offline_marks;
+    CREATE TABLE offline_marks (
+      id TEXT PRIMARY KEY,
+      track_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      device_id TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(track_id, user_id),
+      FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
+}
+
 function migrate(database: Database.Database) {
   database.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -457,10 +487,13 @@ function migrate(database: Database.Database) {
 
     CREATE TABLE IF NOT EXISTS offline_marks (
       id TEXT PRIMARY KEY,
-      track_id TEXT NOT NULL UNIQUE,
+      track_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
       device_id TEXT,
       created_at TEXT NOT NULL,
-      FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
+      UNIQUE(track_id, user_id),
+      FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS request_events (
@@ -659,6 +692,9 @@ function migrate(database: Database.Database) {
   // v3: likes may reference streamed tracks (no library file / no track FK)
   migrateTrackLikesV3(database);
 
+  // v2: offline marks are per-user, not global
+  migrateOfflineMarksV2(database);
+
   // Backfill missing updated_at / normalized_key
   database.exec(`
     UPDATE tracks SET updated_at = added_at WHERE updated_at = '' OR updated_at IS NULL;
@@ -748,12 +784,16 @@ function getSetting(key: string, fallback = ""): string {
 export function getSettings(): Settings {
   const portRaw = getSetting("smtpPort", "587");
   const port = Number.parseInt(portRaw, 10);
+  const qualityRaw = getSetting("downloadQuality", DEFAULT_DOWNLOAD_QUALITY);
   return {
     setupComplete: getSetting("setupComplete", "false") === "true",
     lidarrUrl: getSetting("lidarrUrl", ""),
     lidarrApiKey: getSetting("lidarrApiKey", ""),
     musicRoot: getSetting("musicRoot", process.env.POLARR_MUSIC_DIR || ""),
     fallbackEnabled: true, // always-on acquire path (Lidarr + yt-dlp)
+    downloadQuality: isDownloadQuality(qualityRaw)
+      ? qualityRaw
+      : DEFAULT_DOWNLOAD_QUALITY,
     serverName: getSetting("serverName", "Polarr"),
     publicUrl: getSetting("publicUrl", ""),
     smtpHost: getSetting("smtpHost", ""),
@@ -797,6 +837,7 @@ export function updateSettings(partial: Partial<Settings>): Settings {
   setSetting("lidarrApiKey", next.lidarrApiKey);
   setSetting("musicRoot", next.musicRoot);
   setSetting("fallbackEnabled", String(next.fallbackEnabled));
+  setSetting("downloadQuality", next.downloadQuality);
   setSetting("serverName", next.serverName);
   setSetting("publicUrl", next.publicUrl);
   setSetting("smtpHost", next.smtpHost);
@@ -2928,20 +2969,20 @@ export function listDownloads(limit = 50): DownloadJob[] {
 
 // ─── Offline marks ──────────────────────────────────────────────────────────
 
-export function markOffline(trackId: string, deviceId?: string) {
+export function markOffline(trackId: string, userId: string, deviceId?: string) {
   getDb()
     .prepare(
-      `INSERT INTO offline_marks(id, track_id, device_id, created_at)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(track_id) DO UPDATE SET device_id=excluded.device_id`,
+      `INSERT INTO offline_marks(id, track_id, user_id, device_id, created_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(track_id, user_id) DO UPDATE SET device_id=excluded.device_id`,
     )
-    .run(newId(8), trackId, deviceId ?? null, nowIso());
+    .run(newId(8), trackId, userId, deviceId ?? null, nowIso());
 }
 
-export function listOfflineTrackIds(): string[] {
+export function listOfflineTrackIds(userId: string): string[] {
   const rows = getDb()
-    .prepare(`SELECT track_id as trackId FROM offline_marks`)
-    .all() as { trackId: string }[];
+    .prepare(`SELECT track_id as trackId FROM offline_marks WHERE user_id = ?`)
+    .all(userId) as { trackId: string }[];
   return rows.map((r) => r.trackId);
 }
 

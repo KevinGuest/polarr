@@ -6,6 +6,7 @@ import {
   createDownloadJob,
   getDownload,
   getRequest,
+  getSettings,
   getTrackByPath,
   listDownloads,
   updateDownloadJob,
@@ -13,6 +14,7 @@ import {
   upsertTrack,
   type TrackRow,
 } from "./db";
+import { ytDlpAudioArgs } from "./download-quality";
 import { downloadsDir } from "./paths";
 import {
   ensureYtDlp,
@@ -334,10 +336,7 @@ export async function processDownloadJob(id: string) {
       [
         searchQuery,
         "-x",
-        "--audio-format",
-        "mp3",
-        "--audio-quality",
-        "0",
+        ...ytDlpAudioArgs(getSettings().downloadQuality),
         "--embed-metadata",
         "--embed-thumbnail",
         "-o",

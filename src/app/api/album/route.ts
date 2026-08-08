@@ -1,4 +1,4 @@
-import { json } from "@/lib/api";
+import { getAuthUser, json } from "@/lib/api";
 import {
   findTrack,
   getSettings,
@@ -74,18 +74,14 @@ function caaCover(foreignAlbumId: string): string {
   return `https://coverartarchive.org/release-group/${encodeURIComponent(foreignAlbumId)}/front-500`;
 }
 
-function mapLocalFallback(
-  artist: string,
-  albumTitle: string,
-  offline: Set<string>,
-): AlbumTrackDto[] {
+function mapLocalFallback(artist: string, albumTitle: string): AlbumTrackDto[] {
   return listTracksForAlbum(artist, albumTitle).map((t, i) => ({
     key: `local-${t.id}`,
     title: t.title,
     trackNumber: i + 1,
     duration: t.duration || 0,
     available: true,
-    downloaded: offline.has(t.id),
+    downloaded: false,
     hasFile: true,
     localTrackId: t.id,
     streamUrl: `/api/stream/${t.id}`,
@@ -97,7 +93,6 @@ function mapLocalFallback(
 function mergeAvailability(
   tracks: AlbumTrackDto[],
   artist: string,
-  offline: Set<string>,
 ): AlbumTrackDto[] {
   return tracks.map((t) => {
     const local = findTrack(artist, t.title);
@@ -105,12 +100,28 @@ function mergeAvailability(
     return {
       ...t,
       available: true,
-      downloaded: offline.has(local.id) || t.downloaded,
       localTrackId: local.id,
       streamUrl: `/api/stream/${local.id}`,
       duration: t.duration || local.duration || 0,
     };
   });
+}
+
+/**
+ * `downloaded` is per-user (offline marks) while the payload cache is shared —
+ * so the cache stores neutral flags and each response overlays the viewer's.
+ */
+function withUserDownloads(
+  payload: AlbumPayload,
+  offline: Set<string>,
+): AlbumPayload {
+  return {
+    ...payload,
+    tracks: payload.tracks.map((t) => ({
+      ...t,
+      downloaded: Boolean(t.localTrackId && offline.has(t.localTrackId)),
+    })),
+  };
 }
 
 function cacheKey(params: URLSearchParams): string {
@@ -130,10 +141,12 @@ function cacheKey(params: URLSearchParams): string {
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
+  const user = await getAuthUser();
+  const offline = new Set(user ? listOfflineTrackIds(user.id) : []);
   const key = cacheKey(searchParams);
   const cached = albumResponseCache.get(key);
   if (cached && Date.now() - cached.at < ALBUM_CACHE_TTL_MS) {
-    return json(cached.payload, {
+    return json(withUserDownloads(cached.payload, offline), {
       headers: { "Cache-Control": "private, max-age=60" },
     });
   }
@@ -155,7 +168,6 @@ export async function GET(req: Request) {
   }
 
   const settings = getSettings();
-  const offline = new Set(listOfflineTrackIds());
   const client = LidarrClient.fromSettings();
 
   let tracks: AlbumTrackDto[] = [];
@@ -314,7 +326,7 @@ export async function GET(req: Request) {
                 trackNumber,
                 duration: durationSec,
                 available: Boolean(local),
-                downloaded: local ? offline.has(local.id) : false,
+                downloaded: false,
                 hasFile: Boolean(t.hasFile),
                 localTrackId: local?.id ?? null,
                 streamUrl: local ? `/api/stream/${local.id}` : null,
@@ -373,7 +385,6 @@ export async function GET(req: Request) {
               artists: formatTrackArtistLine(artist, t.title, t.artists),
             })),
             artist,
-            offline,
           );
           error = null;
         }
@@ -385,12 +396,12 @@ export async function GET(req: Request) {
       }
     }
   } else {
-    tracks = mergeAvailability(tracks, artist, offline);
+    tracks = mergeAvailability(tracks, artist);
   }
 
   // Always surface local files for this album (partial downloads)
   if (tracks.length === 0) {
-    const local = mapLocalFallback(artist, title, offline);
+    const local = mapLocalFallback(artist, title);
     if (local.length) {
       source = "library";
       tracks = local;
@@ -478,7 +489,7 @@ export async function GET(req: Request) {
     for (const [k] of oldest.slice(0, 20)) albumResponseCache.delete(k);
   }
 
-  return json(payload, {
+  return json(withUserDownloads(payload, offline), {
     headers: { "Cache-Control": "private, max-age=60" },
   });
 }

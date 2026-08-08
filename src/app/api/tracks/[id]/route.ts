@@ -22,7 +22,8 @@ export async function GET(
     artist: track.artist,
     album: track.album,
   });
-  const offline = listOfflineTrackIds().includes(id);
+  const user = await getAuthUser();
+  const offline = user ? listOfflineTrackIds(user.id).includes(id) : false;
   return json({
     track: {
       ...track,
@@ -44,11 +45,13 @@ export async function POST(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const user = await getAuthUser();
+  if (!user) return json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await ctx.params;
   const track = getTrack(id);
   if (!track) return json({ error: "Not found" }, { status: 404 });
   const body = offlineSchema.safeParse(await req.json().catch(() => ({})));
-  markOffline(id, body.success ? body.data.deviceId : undefined);
+  markOffline(id, user.id, body.success ? body.data.deviceId : undefined);
   return json({
     ok: true,
     offline: {

@@ -7,11 +7,12 @@
  *   ~3s yt-dlp resolve.
  * - Leading audio bytes are warmed in memory, then served as the head of a
  *   continuous stream so first-byte is instant with no second request.
+ *
+ * Source pick: ranked YouTube Music / audio-first search (not raw ytsearch1 MV).
  */
-import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { getDb } from "./db";
-import { ensureYtDlp } from "./tools";
+import { resolveYtmStreamRemote } from "./ytm-match";
 
 const LIVE_UA =
   "Mozilla/5.0 (compatible; Polarr/1.0; +https://github.com/KevinGuest/polarr)";
@@ -153,55 +154,29 @@ function dropLiveSession(entry: LiveEntry) {
   }
 }
 
-/* ── yt-dlp ───────────────────────────────────────────────────────────────── */
-
-function runYtDlp(ytDlp: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(ytDlp, args, {
-      shell: false,
-      env: process.env,
-      windowsHide: true,
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout?.on("data", (buf: Buffer) => {
-      stdout += buf.toString();
-    });
-    child.stderr?.on("data", (buf: Buffer) => {
-      stderr += buf.toString();
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      resolve({ code: code ?? 1, stdout, stderr });
-    });
-  });
-}
+/* ── remote resolve ───────────────────────────────────────────────────────── */
 
 /** Resolve a remote progressive/audio URL (may expire). */
 export async function resolveLiveRemoteUrl(query: string): Promise<string | null> {
-  const ytDlp = await ensureYtDlp();
-  if (!ytDlp) return null;
+  return resolveYtmStreamRemote({
+    artist: "",
+    title: "",
+    query: query.trim(),
+  });
+}
 
-  const searchQuery = `ytsearch1:${query.trim()}`;
-  const result = await runYtDlp(ytDlp, [
-    searchQuery,
-    "-g",
-    "-f",
-    "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
-    "--no-playlist",
-    "--no-warnings",
-    "--socket-timeout",
-    "10",
-    "--extractor-args",
-    "youtube:player_client=android,web",
-  ]);
-
-  if (result.code !== 0) return null;
-  const url = result.stdout
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .find((l) => /^https?:\/\//i.test(l));
-  return url || null;
+/** Prefer structured artist/title so scoring can demote MVs. */
+export async function resolveLiveRemoteForTrack(input: {
+  artist: string;
+  title: string;
+  expectedDurationSec?: number | null;
+}): Promise<string | null> {
+  return resolveYtmStreamRemote({
+    artist: input.artist,
+    title: input.title,
+    query: `${input.artist} ${input.title}`.trim(),
+    expectedDurationSec: input.expectedDurationSec,
+  });
 }
 
 /* ── serving ──────────────────────────────────────────────────────────────── */
@@ -529,7 +504,10 @@ export async function createLiveSession(input: {
   if (pending) return pending;
 
   const work = (async () => {
-    const remoteUrl = await resolveLiveRemoteUrl(query);
+    const remoteUrl = await resolveLiveRemoteForTrack({
+      artist: input.artist,
+      title: input.title,
+    });
     if (!remoteUrl) return null;
 
     const entry = registerSession({

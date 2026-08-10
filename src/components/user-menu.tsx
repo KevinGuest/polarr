@@ -13,6 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { UserAvatar } from "@/components/user-avatar";
 
 type AuthUser = {
   publicId?: string;
@@ -64,26 +65,17 @@ export function UserMenu({
     router.refresh();
   }
 
-  const letter = (user?.username?.trim()?.[0] || "?").toUpperCase();
   const avatarSrc = user?.avatarUrl
     ? `${user.avatarUrl}${user.avatarUrl.includes("?") ? "&" : "?"}v=${avatarVer || 1}`
     : null;
 
   const avatar = (
-    <span
-      className="relative flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-xs font-medium uppercase leading-none"
-      aria-hidden
-    >
-      {avatarSrc ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={avatarSrc}
-          alt=""
-          className="absolute inset-0 size-full object-cover"
-        />
-      ) : (
-        <span className="translate-y-px">{letter}</span>
-      )}
+    <span className="relative size-8 shrink-0 overflow-hidden rounded-full border border-border text-xs">
+      <UserAvatar
+        username={user?.username || "?"}
+        avatarUrl={avatarSrc}
+        textClassName="text-xs font-medium translate-y-px"
+      />
     </span>
   );
 
@@ -109,15 +101,12 @@ export function UserMenu({
                 {user?.username || "Account"}
               </span>
             </>
-          ) : avatarSrc ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={avatarSrc}
-              alt=""
-              className="absolute inset-0 size-full object-cover"
-            />
           ) : (
-            <span className="translate-y-px">{letter}</span>
+            <UserAvatar
+              username={user?.username || "?"}
+              avatarUrl={avatarSrc}
+              textClassName="text-xs font-medium translate-y-px"
+            />
           )}
         </button>
       </DropdownMenuTrigger>

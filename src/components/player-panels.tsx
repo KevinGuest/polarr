@@ -3,15 +3,17 @@
 import { toastInfo } from "@/lib/toast";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as SliderPrimitive from "@radix-ui/react-slider";
 import {
   Laptop,
   Mic2,
+  Minus,
   MonitorSpeaker,
   Music2,
   Pause,
   Play,
+  Plus,
   SkipBack,
   SkipForward,
   Wifi,
@@ -29,8 +31,7 @@ import { albumHref } from "@/lib/album-ref";
 import { getDragTrack, POLARR_TRACK_MIME } from "@/lib/drag-track";
 import { LISTEN_CREDITED_EVENT } from "@/lib/ui-events";
 import { cn, formatDuration } from "@/lib/utils";
-
-type LyricLine = { time: number; text: string };
+import { useKaraokeSession } from "@/components/use-karaoke-session";
 
 /** Dark saturated backdrop from track seed — always readable with white text. */
 function lyricsBackdrop(seed: string): string {
@@ -58,64 +59,24 @@ function LyricsPanel() {
     karaokeProgress,
     karaokeError,
   } = usePlayer();
-  const [lines, setLines] = useState<LyricLine[]>([]);
-  const [synced, setSynced] = useState(false);
-  const [status, setStatus] = useState<"loading" | "ready" | "empty" | "error">(
-    "loading",
-  );
-  const [instrumental, setInstrumental] = useState(false);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const activeRef = useRef<HTMLButtonElement | null>(null);
   const lyricsOpen = isPanelOpen("lyrics");
 
-  useEffect(() => {
-    if (!lyricsOpen || !track) return;
-    let cancelled = false;
-    setStatus("loading");
-    setLines([]);
-    setSynced(false);
-    setInstrumental(false);
-    void fetch(
-      `/api/lyrics?artist=${encodeURIComponent(track.artist)}&title=${encodeURIComponent(track.title)}`,
-    )
-      .then(async (res) => {
-        if (!res.ok) throw new Error("fail");
-        return res.json();
-      })
-      .then((data) => {
-        if (cancelled) return;
-        if (data.instrumental) {
-          setInstrumental(true);
-          setStatus("empty");
-          return;
-        }
-        const next = Array.isArray(data.lines) ? data.lines : [];
-        setLines(next);
-        setSynced(Boolean(data.synced));
-        setStatus(next.length ? "ready" : "empty");
-      })
-      .catch(() => {
-        if (!cancelled) setStatus("error");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [lyricsOpen, track?.id, track?.artist, track?.title]);
-
-  const activeIndex = useMemo(() => {
-    if (!lines.length) return -1;
-    let idx = 0;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].time <= progress + 0.15) idx = i;
-      else break;
-    }
-    return idx;
-  }, [lines, progress]);
+  const session = useKaraokeSession({
+    open: lyricsOpen,
+    artist: track?.artist,
+    title: track?.title,
+    album: track?.album,
+    trackId: track?.id,
+    mediaDurationSec: duration > 0 ? duration : undefined,
+    progressSec: progress,
+  });
 
   useEffect(() => {
     const scroller = scrollerRef.current;
     const active = activeRef.current;
-    if (!scroller || !active) return;
+    if (!scroller || !active || !session.synced) return;
     const offset =
       active.offsetTop -
       scroller.clientHeight / 2 +
@@ -124,11 +85,12 @@ function LyricsPanel() {
       top: Math.max(0, offset),
       behavior: "smooth",
     });
-  }, [activeIndex]);
+  }, [session.activeIndex, session.synced]);
 
   if (!lyricsOpen || !track) return null;
 
   const bg = lyricsBackdrop(`${track.id}:${track.artist}:${track.title}`);
+  const canSeek = session.synced && duration > 0;
 
   return (
     <div
@@ -148,52 +110,109 @@ function LyricsPanel() {
         ref={scrollerRef}
         className="min-h-0 flex-1 overflow-y-auto px-8 py-[28vh] md:px-16 lg:px-24 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
       >
-        {status === "loading" && (
+        {session.status === "loading" && (
           <p className="text-lg font-bold text-white/50">Loading lyrics…</p>
         )}
-        {status === "error" && (
+        {session.status === "error" && (
           <p className="text-lg font-bold text-white/50">
-            Couldn’t load lyrics right now.
+            {session.error || "Couldn’t load lyrics right now."}
           </p>
         )}
-        {status === "empty" && (
+        {session.status === "empty" && (
           <p className="text-lg font-bold text-white/50">
-            {instrumental
+            {session.instrumental
               ? "This track is instrumental."
               : "No lyrics found for this track."}
           </p>
         )}
-        {status === "ready" &&
-          lines.map((line, i) => {
-            const active = i === activeIndex;
-            const near = Math.abs(i - activeIndex) <= 1;
-            const canSeek = synced && duration > 0;
+        {session.status === "ready" &&
+          session.lines.map((line, i) => {
+            const active = session.synced && i === session.activeIndex;
+            const near =
+              session.synced && Math.abs(i - session.activeIndex) <= 1;
+            const isGap = line.text === "♪" || line.text === "♫";
+
             return (
               <button
-                key={`${line.time}-${i}`}
+                key={`${line.time}-${i}-${line.text.slice(0, 12)}`}
                 type="button"
                 ref={active ? activeRef : undefined}
                 disabled={!canSeek}
                 onClick={() => {
                   if (!canSeek) return;
-                  seek(Math.min(1, Math.max(0, line.time / duration)));
+                  const t = Math.max(0, line.time - (session.offsetSec || 0));
+                  seek(Math.min(1, Math.max(0, t / duration)));
                 }}
                 className={cn(
                   "block max-w-3xl py-3 text-left text-2xl font-semibold leading-snug tracking-tight transition-all duration-300 md:text-3xl md:leading-snug",
                   canSeek && "cursor-pointer hover:text-white",
                   !canSeek && "cursor-default",
-                  active
-                    ? "scale-[1.01] text-white"
-                    : near
-                      ? "text-white/40"
-                      : "text-white/22",
+                  // Plain session: all lines readable, equal weight (no fake sync)
+                  !session.synced && "text-white/75",
+                  session.synced &&
+                    active &&
+                    "scale-[1.01] text-white underline decoration-white decoration-2 underline-offset-[10px]",
+                  session.synced && near && !active && "text-white/40",
+                  session.synced && !near && !active && "text-white/22",
+                  isGap && "tracking-widest",
                 )}
               >
                 {line.text}
               </button>
             );
           })}
+        {session.status === "ready" && session.quality === "plain" && (
+          <p className="mt-10 max-w-md text-sm font-medium text-white/35">
+            Unsynced lyrics — timing isn’t mapped to this audio.
+          </p>
+        )}
       </div>
+
+      {/* Offset controls — only when line-timed lyrics exist */}
+      {session.synced && session.status === "ready" ? (
+        <div className="absolute bottom-8 left-6 z-20 flex items-center gap-1.5 rounded-full bg-black/45 px-2 py-1.5 ring-1 ring-white/12 backdrop-blur-md">
+          <button
+            type="button"
+            aria-label="Lyrics earlier"
+            title="Lyrics earlier (−0.5s)"
+            onClick={() => session.nudgeOffset(-0.5)}
+            className="rounded-full p-1.5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <Minus className="size-3.5" strokeWidth={2.5} />
+          </button>
+          <button
+            type="button"
+            title={
+              session.offsetUserSet
+                ? session.offsetSuggested !== 0
+                  ? `Back to auto (${session.offsetSuggested > 0 ? "+" : ""}${session.offsetSuggested.toFixed(1)}s${session.offsetSource === "audio" ? ", from track" : ""})`
+                  : "Back to auto (0s)"
+                : session.offsetSource === "audio"
+                  ? "Auto-aligned to this track — click to keep / re-apply"
+                  : session.offsetSource === "duration"
+                    ? "Auto from duration match — click to re-apply"
+                    : "Auto offset (0s)"
+            }
+            onClick={() => session.resetOffsetToSuggested()}
+            className="min-w-[3.25rem] px-1 text-center text-[11px] font-semibold tabular-nums text-white/80"
+          >
+            {!session.offsetUserSet && session.offsetSource === "audio" ? (
+              <span className="text-white/55">auto </span>
+            ) : null}
+            {session.offsetSec > 0 ? "+" : ""}
+            {session.offsetSec.toFixed(1)}s
+          </button>
+          <button
+            type="button"
+            aria-label="Lyrics later"
+            title="Lyrics later (+0.5s)"
+            onClick={() => session.nudgeOffset(0.5)}
+            className="rounded-full p-1.5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <Plus className="size-3.5" strokeWidth={2.5} />
+          </button>
+        </div>
+      ) : null}
 
       {/* Bottom-right: full mix ↔ Demucs instrumental */}
       <div className="absolute bottom-8 right-6 z-20 flex flex-col items-center gap-2 rounded-full bg-black/45 px-2.5 py-3.5 ring-1 ring-white/12 backdrop-blur-md">

@@ -1,6 +1,7 @@
 "use client";
 
 import { CoverArt } from "@/components/cover-art";
+import { UserAvatar } from "@/components/user-avatar";
 import { cn } from "@/lib/utils";
 
 export type ListeningAvatar = {
@@ -67,7 +68,12 @@ export function ListeningCover({
                   }}
                   title={p.username}
                 >
-                  <AvatarFace username={p.username} avatarUrl={p.avatarUrl} />
+                  <UserAvatar
+                    username={p.username}
+                    avatarUrl={p.avatarUrl}
+                    textClassName="text-[10px] text-background"
+                    className="bg-foreground text-background"
+                  />
                 </span>
               );
             })}
@@ -83,27 +89,6 @@ export function ListeningCover({
           </div>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function AvatarFace({
-  username,
-  avatarUrl,
-}: {
-  username: string;
-  avatarUrl?: string | null;
-}) {
-  const initial = (username.trim()[0] || "?").toUpperCase();
-  if (avatarUrl) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img src={avatarUrl} alt="" className="size-full object-cover" />
-    );
-  }
-  return (
-    <div className="flex size-full items-center justify-center bg-foreground text-[10px] font-semibold text-background">
-      {initial}
     </div>
   );
 }

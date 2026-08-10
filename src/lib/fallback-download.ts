@@ -21,6 +21,11 @@ import {
   ffmpegAvailable,
   ytDlpAvailable as toolsYtDlpAvailable,
 } from "./tools";
+import {
+  matchYtmAudio,
+  safeFilenamePart,
+  YTM_AUDIO_FORMAT,
+} from "./ytm-match";
 
 /**
  * Fallback acquisition pipeline (Downtify-inspired):
@@ -323,21 +328,42 @@ export async function processDownloadJob(id: string) {
 
   const outDir = path.join(
     downloadsDir(),
-    job.artist.replace(/[<>:"/\\|?*]/g, "_"),
+    job.artist.replace(/[<>:"/\\|?*]/g, "_") || "Unknown",
   );
   fs.mkdirSync(outDir, { recursive: true });
-  const outTemplate = path.join(outDir, "%(artist)s - %(title)s.%(ext)s");
+
+  // Known metadata filenames — avoid yt-dlp %(artist)s → "NA" mess from MVs
+  const artistPart = safeFilenamePart(job.artist, "Unknown Artist");
+  const titlePart = safeFilenamePart(job.title, "Unknown Title");
+  const outTemplate = path.join(
+    outDir,
+    `${artistPart} - ${titlePart}.%(ext)s`,
+  );
 
   try {
-    const searchQuery = `ytsearch1:${job.query}`;
+    const linked = job.requestId ? getRequest(job.requestId) : null;
+    const albumName =
+      (linked?.album && linked.album.trim()) || "Fallback Downloads";
+
+    // Rank YouTube Music / audio-first results; only then download that ID
+    const match = await matchYtmAudio({
+      artist: job.artist,
+      title: job.title,
+      query: job.query,
+    });
+    const sourceArg =
+      match?.url || `ytsearch1:${job.query.trim()} official audio`;
+
     const result = await run(
       id,
       ytDlp,
       [
-        searchQuery,
+        sourceArg,
         "-x",
         ...ytDlpAudioArgs(getSettings().downloadQuality),
-        "--embed-metadata",
+        "-f",
+        YTM_AUDIO_FORMAT,
+        // Skip YouTube title/artist tagging — we name the file + DB from job metadata
         "--embed-thumbnail",
         "-o",
         outTemplate,
@@ -399,10 +425,7 @@ export async function processDownloadJob(id: string) {
       ? base.split(" - ").map((s) => s.trim())
       : [job.artist, job.title];
 
-    const linked = job.requestId ? getRequest(job.requestId) : null;
-    const albumName =
-      (linked?.album && linked.album.trim()) || "Fallback Downloads";
-
+    // linked / albumName already resolved above for tagging
     const st = fs.statSync(/*turbopackIgnore: true*/ outputPath);
     upsertTrack({
       id: randomBytes(12).toString("hex"),

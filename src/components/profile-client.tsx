@@ -7,6 +7,7 @@ import { Camera } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
+import { UserAvatar } from "@/components/user-avatar";
 import { usePlayer } from "@/components/player-provider";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -240,7 +241,6 @@ export function ProfileClient({
   }
 
   const { user: profile, stats, topTracks, albums, isSelf } = data;
-  const letter = profile.username.trim()[0]?.toUpperCase() || "?";
   const avatarSrc = cacheBust(profile.avatarUrl, avatarVer);
   const bannerColors = liveBanner ?? profile.bannerColors;
 
@@ -274,16 +274,12 @@ export function ProfileClient({
                       : "Upload profile photo"
                   }
                 >
-                  {avatarSrc ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={avatarSrc}
-                      alt=""
-                      className="absolute inset-0 size-full object-cover"
-                    />
-                  ) : (
-                    <span aria-hidden>{letter}</span>
-                  )}
+                  <UserAvatar
+                    username={profile.username}
+                    avatarUrl={avatarSrc}
+                    textClassName="text-5xl sm:text-6xl"
+                    className="bg-transparent"
+                  />
                   <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
                     <Camera className="size-7" strokeWidth={1.75} />
                     <span className="text-[11px] font-medium tracking-wide">
@@ -294,19 +290,14 @@ export function ProfileClient({
               </>
             ) : (
               <div
-                className="relative flex size-36 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-muted text-5xl font-semibold uppercase shadow-lg sm:size-44 sm:text-6xl"
+                className="relative size-36 overflow-hidden rounded-full border border-border/60 bg-muted shadow-lg sm:size-44"
                 aria-hidden
               >
-                {avatarSrc ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={avatarSrc}
-                    alt=""
-                    className="absolute inset-0 size-full object-cover"
-                  />
-                ) : (
-                  letter
-                )}
+                <UserAvatar
+                  username={profile.username}
+                  avatarUrl={avatarSrc}
+                  textClassName="text-5xl sm:text-6xl"
+                />
               </div>
             )}
           </div>

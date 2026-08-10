@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Check, Loader2, RefreshCw, X } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
+import { UserAvatar } from "@/components/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toastError } from "@/lib/toast";
@@ -637,23 +638,17 @@ function AvatarStack({ users }: { users: ActivityUser[] }) {
     >
       <div className="flex -space-x-1.5">
         {show.map((u) => {
-          const initial = (u.username.trim()[0] || "?").toUpperCase();
           return (
             <span
               key={u.username}
               title={u.username}
-              className="relative inline-flex size-6 items-center justify-center overflow-hidden rounded-full border-2 border-background bg-muted text-[9px] font-semibold uppercase text-muted-foreground"
+              className="relative inline-flex size-6 overflow-hidden rounded-full border-2 border-background"
             >
-              {u.avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={u.avatarUrl}
-                  alt=""
-                  className="size-full object-cover"
-                />
-              ) : (
-                initial
-              )}
+              <UserAvatar
+                username={u.username}
+                avatarUrl={u.avatarUrl}
+                textClassName="text-[9px]"
+              />
             </span>
           );
         })}

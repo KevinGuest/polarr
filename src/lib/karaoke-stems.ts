@@ -12,6 +12,7 @@ import { getTrack } from "./db";
 import { createLiveSession, getLiveSession } from "./live-stream";
 import { dataDir } from "./paths";
 import { ensureYtDlp, ffmpegAvailable } from "./tools";
+import { matchYtmAudio, YTM_AUDIO_FORMAT } from "./ytm-match";
 
 export type KaraokeStatus =
   | "ready"
@@ -344,26 +345,31 @@ async function acquireRemoteWav(
   writeStatus(source.key, job);
 
   if (ytDlp) {
-    // Prefer downloading the exact remote (live session), else ytsearch
-    const args = source.remoteUrl
-      ? [
-          source.remoteUrl,
-          "-f",
-          "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
-          "-o",
-          rawOut,
-          "--no-playlist",
-          "--no-warnings",
-        ]
-      : [
-          `ytsearch1:${source.searchQuery}`,
-          "-f",
-          "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best",
-          "-o",
-          rawOut,
-          "--no-playlist",
-          "--no-warnings",
-        ];
+    // Prefer exact remote (live session), else ranked YTM match
+    let sourceArg = source.remoteUrl;
+    if (!sourceArg) {
+      const parts = source.searchQuery.trim().split(/\s+/);
+      const artistHint = parts.length > 1 ? parts[0]! : "";
+      const titleHint =
+        parts.length > 1 ? parts.slice(1).join(" ") : source.searchQuery;
+      const match = await matchYtmAudio({
+        artist: artistHint,
+        title: titleHint,
+        query: source.searchQuery,
+      });
+      sourceArg =
+        match?.url ||
+        `ytsearch1:${source.searchQuery.trim()} official audio`;
+    }
+    const args = [
+      sourceArg,
+      "-f",
+      YTM_AUDIO_FORMAT,
+      "-o",
+      rawOut,
+      "--no-playlist",
+      "--no-warnings",
+    ];
 
     const dl = await run(ytDlp, args);
     if (dl.code !== 0) {

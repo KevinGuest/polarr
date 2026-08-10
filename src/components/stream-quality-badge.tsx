@@ -11,7 +11,7 @@ const LABELS: Record<PlaybackQuality, string> = {
   youtube: "YouTube",
 };
 
-const TITLES: Record<PlaybackQuality, string> = {
+const DESCRIPTIONS: Record<PlaybackQuality, string> = {
   local: "Playing from local library",
   youtube: "Playing via YouTube fallback",
 };
@@ -26,7 +26,7 @@ export function StreamQualityBadge({
   track?: PlayerTrack | null;
   quality?: PlaybackQuality | null;
   className?: string;
-  /** Icon-only (tooltip via title/aria). */
+  /** Icon-only — longer name for screen readers only (no native title tip). */
   compact?: boolean;
 }) {
   const quality =
@@ -36,7 +36,6 @@ export function StreamQualityBadge({
   // lucide dropped brand icons — Radio = live/remote stream
   const Icon = quality === "local" ? HardDrive : Radio;
   const label = LABELS[quality];
-  const title = TITLES[quality];
 
   return (
     <span
@@ -48,8 +47,8 @@ export function StreamQualityBadge({
         compact && "px-1",
         className,
       )}
-      title={title}
-      aria-label={title}
+      // No `title` / default aria-label — stacks on BarTooltip. Icon-only keeps aria.
+      {...(compact ? { "aria-label": DESCRIPTIONS[quality] } : {})}
     >
       <Icon className="size-2.5 shrink-0" strokeWidth={2.5} aria-hidden />
       {compact ? null : <span>{label}</span>}

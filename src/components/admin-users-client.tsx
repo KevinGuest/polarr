@@ -23,6 +23,7 @@ import {
 import { roleLabel, type UserRole } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import { toastError, toastSuccess } from "@/lib/toast";
+import { UserAvatar } from "@/components/user-avatar";
 
 type UserRow = {
   publicId: string;
@@ -429,7 +430,6 @@ export function AdminUsersClient() {
         ) : (
           <ul className="space-y-3">
             {users.map((u) => {
-              const letter = u.username.trim()[0]?.toUpperCase() || "?";
               const role = u.role || (u.isAdmin ? "admin" : "member");
               const isSelf = u.publicId === mePublicId;
 
@@ -444,19 +444,14 @@ export function AdminUsersClient() {
                     className="flex min-w-0 flex-1 items-center gap-3 text-left"
                   >
                     <div
-                      className="relative flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-muted text-sm font-semibold uppercase"
+                      className="relative size-11 shrink-0 overflow-hidden rounded-full border border-border/60"
                       aria-hidden
                     >
-                      {u.avatarUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={u.avatarUrl}
-                          alt=""
-                          className="absolute inset-0 size-full object-cover"
-                        />
-                      ) : (
-                        letter
-                      )}
+                      <UserAvatar
+                        username={u.username}
+                        avatarUrl={u.avatarUrl}
+                        textClassName="text-sm"
+                      />
                     </div>
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -548,21 +543,16 @@ export function AdminUsersClient() {
           >
             <div className="flex items-start gap-3">
               <div
-                className="relative flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-muted text-lg font-semibold uppercase"
+                className="relative size-14 shrink-0 overflow-hidden rounded-full border border-border/60"
                 aria-hidden
               >
-                {(activity?.user.avatarUrl || activityUser.avatarUrl) ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={
-                      activity?.user.avatarUrl || activityUser.avatarUrl || ""
-                    }
-                    alt=""
-                    className="absolute inset-0 size-full object-cover"
-                  />
-                ) : (
-                  activityUser.username.trim()[0]?.toUpperCase() || "?"
-                )}
+                <UserAvatar
+                  username={activityUser.username}
+                  avatarUrl={
+                    activity?.user.avatarUrl || activityUser.avatarUrl
+                  }
+                  textClassName="text-lg"
+                />
               </div>
               <div className="min-w-0 flex-1">
                 <h2
@@ -712,19 +702,16 @@ export function AdminUsersClient() {
               <DialogHeader className="space-y-0 text-left">
                 <div className="flex items-start gap-3 pr-6">
                   <div
-                    className="relative flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-muted text-base font-semibold uppercase"
+                    className="relative size-12 shrink-0 overflow-hidden rounded-full border border-border/60"
                     aria-hidden
                   >
-                    {details.avatarUrl || detailsUser.avatarUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={details.avatarUrl || detailsUser.avatarUrl || ""}
-                        alt=""
-                        className="absolute inset-0 size-full object-cover"
-                      />
-                    ) : (
-                      details.username.trim()[0]?.toUpperCase() || "?"
-                    )}
+                    <UserAvatar
+                      username={details.username}
+                      avatarUrl={
+                        details.avatarUrl || detailsUser.avatarUrl
+                      }
+                      textClassName="text-base"
+                    />
                   </div>
                   <div className="min-w-0 flex-1 space-y-1.5">
                     <DialogTitle className="truncate leading-tight">

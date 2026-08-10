@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { getAuthUser, json } from "@/lib/api";
 import { getUserAvatarPath } from "@/lib/db";
@@ -51,9 +51,10 @@ export async function GET(
   const ext = path.extname(resolved).toLowerCase();
   const type = MIME[ext] || "application/octet-stream";
   const { size, mtimeMs } = statSync(resolved);
-  const stream = createReadStream(resolved);
+  // Buffer is more reliable than piping createReadStream through Next Responses
+  const body = readFileSync(resolved);
 
-  return new Response(stream as unknown as BodyInit, {
+  return new Response(body, {
     status: 200,
     headers: {
       "Content-Type": type,

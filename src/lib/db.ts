@@ -8,7 +8,9 @@
  */
 import Database from "better-sqlite3";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { dbPath, unlinkManagedAudioFile } from "./paths";
+import fs from "node:fs";
+import path from "node:path";
+import { avatarsDir, dbPath, unlinkManagedAudioFile } from "./paths";
 import {
   parseNotifyEvents,
   serializeNotifyEvents,
@@ -715,7 +717,27 @@ function migrate(database: Database.Database) {
       lifted_at TEXT,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS lyrics_cache (
+      cache_key TEXT PRIMARY KEY,
+      artist TEXT NOT NULL,
+      title TEXT NOT NULL,
+      quality TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'lrclib',
+      external_id TEXT,
+      source_duration_sec REAL,
+      lines_json TEXT NOT NULL DEFAULT '[]',
+      offset_sec REAL NOT NULL DEFAULT 0,
+      offset_user_set INTEGER NOT NULL DEFAULT 0,
+      fetched_at TEXT NOT NULL
+    );
   `);
+  ensureColumn(
+    database,
+    "lyrics_cache",
+    "offset_user_set",
+    "offset_user_set INTEGER NOT NULL DEFAULT 0",
+  );
 
   // v3: likes may reference streamed tracks (no library file / no track FK)
   migrateTrackLikesV3(database);
@@ -1827,9 +1849,10 @@ function parseBannerColors(raw: string | null | undefined): string[] | null {
 }
 
 function mapPublicProfile(row: UserProfileRow): PublicProfile {
-  const hasAvatar = Boolean(row.avatarPath);
   const publicId = scrambleUserId(row.id);
   const role = resolveRole(row.role, row.isAdmin);
+  // File must still resolve (DB path may be a stale absolute after data-dir move)
+  const hasAvatar = Boolean(getUserAvatarPath(row.id));
   return {
     id: row.id,
     publicId,
@@ -1847,13 +1870,58 @@ function mapPublicProfile(row: UserProfileRow): PublicProfile {
 const PROFILE_SELECT = `SELECT id, username, is_admin as isAdmin, role, created_at as createdAt,
   avatar_path as avatarPath, banner_colors as bannerColors FROM users`;
 
-/** Absolute filesystem path for a stored avatar, if any. */
+const AVATAR_EXTS = ["jpg", "jpeg", "png", "webp", "gif"] as const;
+
+/**
+ * Resolve avatar file on disk.
+ * Prefer current data/avatars/{userId}.ext — absolute paths in the DB break
+ * when POLARR_DATA_DIR / project layout changes (common broken-image cause).
+ */
 export function getUserAvatarPath(userId: string): string | null {
+  const id = userId.trim();
+  if (!id) return null;
+
   const row = getDb()
     .prepare(`SELECT avatar_path as avatarPath FROM users WHERE id = ?`)
-    .get(userId) as { avatarPath: string | null } | undefined;
-  if (!row?.avatarPath) return null;
-  return row.avatarPath;
+    .get(id) as { avatarPath: string | null } | undefined;
+
+  const dir = avatarsDir();
+  const tries: string[] = [];
+  const stored = row?.avatarPath?.trim();
+  if (stored) {
+    tries.push(stored);
+    tries.push(path.join(dir, path.basename(stored)));
+    if (!path.isAbsolute(stored)) tries.push(path.join(dir, stored));
+  }
+  for (const ext of AVATAR_EXTS) {
+    tries.push(path.join(dir, `${id}.${ext}`));
+  }
+
+  const seen = new Set<string>();
+  for (const candidate of tries) {
+    const abs = path.resolve(candidate);
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    try {
+      if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue;
+    } catch {
+      continue;
+    }
+    // Heal DB to a portable relative name under avatarsDir
+    const healed = path.basename(abs);
+    if (stored !== healed && path.resolve(path.join(dir, healed)) === abs) {
+      try {
+        getDb()
+          .prepare(`UPDATE users SET avatar_path = ? WHERE id = ?`)
+          .run(healed, id);
+      } catch {
+        /* best-effort */
+      }
+    }
+    return abs;
+  }
+
+  return null;
 }
 
 export function setUserAvatar(
@@ -1861,16 +1929,109 @@ export function setUserAvatar(
   avatarPath: string | null,
   bannerColors: string[] | null,
 ) {
+  // Store basename so moves of POLARR_DATA_DIR keep working
+  const stored = avatarPath ? path.basename(avatarPath) : null;
   getDb()
     .prepare(
       `UPDATE users SET avatar_path = ?, banner_colors = ? WHERE id = ?`,
     )
     .run(
-      avatarPath,
+      stored,
       bannerColors ? JSON.stringify(bannerColors) : null,
       userId,
     );
   return getPublicProfileById(userId);
+}
+
+/* ── lyrics session cache ─────────────────────────────────────────────────── */
+
+export type LyricsCacheRow = {
+  cacheKey: string;
+  artist: string;
+  title: string;
+  quality: string;
+  source: string;
+  externalId: string | null;
+  sourceDurationSec: number | null;
+  linesJson: string;
+  offsetSec: number;
+  offsetUserSet: boolean;
+  fetchedAt: string;
+};
+
+export function getLyricsCache(cacheKey: string): LyricsCacheRow | null {
+  const row = getDb()
+    .prepare(
+      `SELECT cache_key as cacheKey, artist, title, quality, source,
+              external_id as externalId, source_duration_sec as sourceDurationSec,
+              lines_json as linesJson, offset_sec as offsetSec,
+              coalesce(offset_user_set, 0) as offsetUserSet,
+              fetched_at as fetchedAt
+       FROM lyrics_cache WHERE cache_key = ?`,
+    )
+    .get(cacheKey) as
+    | (Omit<LyricsCacheRow, "offsetUserSet"> & {
+        offsetUserSet: number;
+      })
+    | undefined;
+  if (!row) return null;
+  return {
+    ...row,
+    offsetUserSet: Boolean(row.offsetUserSet),
+  };
+}
+
+/**
+ * Upsert lyrics document. Does not clear a user-chosen offset
+ * unless `offsetSec` + `offsetUserSet` are provided.
+ */
+export function setLyricsCache(input: {
+  cacheKey: string;
+  artist: string;
+  title: string;
+  quality: string;
+  source: string;
+  externalId: string | null;
+  sourceDurationSec: number | null;
+  linesJson: string;
+}): void {
+  getDb()
+    .prepare(
+      `INSERT INTO lyrics_cache(
+         cache_key, artist, title, quality, source, external_id,
+         source_duration_sec, lines_json, offset_sec, offset_user_set, fetched_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+       ON CONFLICT(cache_key) DO UPDATE SET
+         quality = excluded.quality,
+         source = excluded.source,
+         external_id = excluded.external_id,
+         source_duration_sec = excluded.source_duration_sec,
+         lines_json = excluded.lines_json,
+         fetched_at = excluded.fetched_at`,
+    )
+    .run(
+      input.cacheKey,
+      input.artist,
+      input.title,
+      input.quality,
+      input.source,
+      input.externalId,
+      input.sourceDurationSec,
+      input.linesJson,
+      nowIso(),
+    );
+}
+
+export function setLyricsCacheOffset(
+  cacheKey: string,
+  offsetSec: number,
+  userSet = true,
+): void {
+  getDb()
+    .prepare(
+      `UPDATE lyrics_cache SET offset_sec = ?, offset_user_set = ? WHERE cache_key = ?`,
+    )
+    .run(offsetSec, userSet ? 1 : 0, cacheKey);
 }
 
 /** Public profile listing (no secrets) — visible to all homeserver users. */
@@ -3715,12 +3876,7 @@ export function listOthersListening(
     const userId = String(row.listenedByUserId || "");
     const username = String(row.listenedBy || "").trim();
     if (!userId || !username) continue;
-    const publicId = scrambleUserId(userId);
-    const hasAvatar = Boolean(row.listenedByAvatarPath);
-    const avatarUrl =
-      hasAvatar && publicId
-        ? `/api/profiles/avatar/${encodeURIComponent(publicId)}`
-        : null;
+    const avatarUrl = avatarUrlForUser(userId);
 
     let entry = byKey.get(key);
     if (!entry) {
@@ -3777,8 +3933,8 @@ export type StreamedTrackActivity = {
   streamers: StreamActivityUser[];
 };
 
-function avatarUrlForUser(userId: string, hasAvatar: boolean): string | null {
-  if (!userId || !hasAvatar) return null;
+function avatarUrlForUser(userId: string): string | null {
+  if (!userId || !getUserAvatarPath(userId)) return null;
   const publicId = scrambleUserId(userId);
   return `/api/profiles/avatar/${encodeURIComponent(publicId)}`;
 }
@@ -3790,18 +3946,18 @@ export function activityUserForUsername(
   if (!username?.trim()) return null;
   const row = getDb()
     .prepare(
-      `SELECT id, username, avatar_path as avatarPath FROM users
+      `SELECT id, username FROM users
        WHERE lower(username) = lower(?) LIMIT 1`,
     )
     .get(username.trim()) as
-    | { id: string; username: string; avatarPath: string | null }
+    | { id: string; username: string }
     | undefined;
   if (!row) {
     return { username: username.trim(), avatarUrl: null };
   }
   return {
     username: row.username,
-    avatarUrl: avatarUrlForUser(row.id, Boolean(row.avatarPath)),
+    avatarUrl: avatarUrlForUser(row.id),
   };
 }
 
@@ -3861,7 +4017,7 @@ export function listStreamedTrackActivity(limit = 80): StreamedTrackActivity[] {
     const userId = String(row.userId || "");
     entry.streamers.push({
       username,
-      avatarUrl: avatarUrlForUser(userId, Boolean(row.avatarPath)),
+      avatarUrl: avatarUrlForUser(userId),
     });
     // Keep createdAt as newest play (rows ordered DESC — first write wins)
   }

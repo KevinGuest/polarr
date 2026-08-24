@@ -28,7 +28,6 @@ import {
   trackRowStartCell,
 } from "@/lib/player-row";
 import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine } from "@/lib/utils";
-import { toastError, toastSuccess } from "@/lib/toast";
 
 type Track = PlayerTrack & {
   source: string;
@@ -65,7 +64,6 @@ export function LibraryClient({
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const [scanning, setScanning] = useState(false);
   const [root, setRoot] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
 
   async function loadLibrary(scan = false) {
     setScanning(scan);
@@ -121,23 +119,6 @@ export function LibraryClient({
     if (mode === "library" && filterAlbum) return;
     void load(false);
   }, [mode, filterAlbum]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch("/api/auth/me", { cache: "no-store" });
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (!cancelled) setIsAdmin(Boolean(data.user?.isAdmin));
-      } catch {
-        if (!cancelled) setIsAdmin(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     if (mode !== "liked") return;
@@ -288,35 +269,6 @@ export function LibraryClient({
       );
     } catch {
       /* ignore */
-    }
-  }
-
-  async function removeFromLibrary(t: Track) {
-    if (
-      !confirm(
-        `Remove “${t.title}” from the library and delete the file on disk? It will need to be re-downloaded to play again.`,
-      )
-    ) {
-      return;
-    }
-    try {
-      const res = await fetch(`/api/tracks/${encodeURIComponent(t.id)}`, {
-        method: "DELETE",
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        toastError(
-          typeof data?.error === "string"
-            ? data.error
-            : "Couldn’t remove from library",
-        );
-        return;
-      }
-      setTracks((prev) => prev.filter((row) => row.id !== t.id));
-      emitLibraryChanged({ trackId: t.id });
-      toastSuccess("Removed from library");
-    } catch {
-      toastError("Couldn’t remove from library");
     }
   }
 
@@ -487,11 +439,6 @@ export function LibraryClient({
                               ? () => void downloadTrack(t)
                               : undefined
                           }
-                          onRemoveFromLibrary={
-                            isAdmin && !t.streamOnly
-                              ? () => void removeFromLibrary(t)
-                              : undefined
-                          }
                           onLikedChange={(liked) => onLikedChange(t.id, liked)}
                         />
                       </td>
@@ -616,11 +563,6 @@ export function LibraryClient({
                           onDownload={
                             t.streamOnly
                               ? () => void downloadTrack(t)
-                              : undefined
-                          }
-                          onRemoveFromLibrary={
-                            isAdmin && mode === "library" && !t.streamOnly
-                              ? () => void removeFromLibrary(t)
                               : undefined
                           }
                           onLikedChange={(liked) => onLikedChange(t.id, liked)}

@@ -17,6 +17,7 @@ import {
   Shuffle,
   Trash2,
 } from "lucide-react";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { TrackContextMenu } from "@/components/track-context-menu";
@@ -487,6 +488,8 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
   const [localCover, setLocalCover] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -674,9 +677,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
 
   async function deleteThisPlaylist() {
     if (!playlist) return;
-    if (!confirm(`Delete playlist “${playlist.name}”? This can’t be undone.`)) {
-      return;
-    }
+    setDeleteBusy(true);
     try {
       const res = await fetch("/api/playlists", {
         method: "POST",
@@ -690,11 +691,14 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
         toastError("Couldn’t delete playlist");
         return;
       }
+      setDeleteOpen(false);
       emitLibraryChanged();
       toastSuccess("Playlist deleted");
       router.push("/");
     } catch {
       toastError("Couldn’t delete playlist");
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -888,7 +892,9 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
-                onSelect={() => void deleteThisPlaylist()}
+                onSelect={() => {
+                  setTimeout(() => setDeleteOpen(true), 0);
+                }}
               >
                 <Trash2 className="size-4" />
                 Delete
@@ -1102,6 +1108,18 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
           onSaved={({ name, description }) => {
             setPlaylist((p) => (p ? { ...p, name, description } : p));
           }}
+        />
+      ) : null}
+      {playlist ? (
+        <ConfirmDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          title="Delete playlist?"
+          description={`“${playlist.name}” will be removed from Your Library. Songs on disk are not deleted.`}
+          confirmLabel="Delete playlist"
+          destructive
+          busy={deleteBusy}
+          onConfirm={() => void deleteThisPlaylist()}
         />
       ) : null}
     </div>

@@ -21,7 +21,6 @@ export function TrackRowActions({
   inLibrary,
   downloading,
   onDownload,
-  onRemoveFromLibrary,
   onLikedChange,
   className,
 }: {
@@ -36,8 +35,6 @@ export function TrackRowActions({
   inLibrary?: boolean;
   downloading?: boolean;
   onDownload?: () => void;
-  /** Called from the playlist menu’s remove-from-library action. */
-  onRemoveFromLibrary?: () => void;
   onLikedChange?: (liked: boolean) => void;
   className?: string;
 }) {
@@ -68,8 +65,6 @@ export function TrackRowActions({
         duration={duration}
         inLibrary={Boolean(inLibrary)}
         onDownload={onDownload}
-        canRemoveFromLibrary={Boolean(onRemoveFromLibrary)}
-        onRemovedFromLibrary={onRemoveFromLibrary}
       >
         <button
           type="button"

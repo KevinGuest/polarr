@@ -7,13 +7,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Check, Circle, HardDrive, Heart, Plus, Search, Trash2 } from "lucide-react";
+import { Check, Circle, HardDrive, Heart, Plus, Search } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { PromptDialog } from "@/components/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { emitLikesChanged, emitLibraryChanged } from "@/lib/ui-events";
 import { cn } from "@/lib/utils";
@@ -54,8 +55,6 @@ export function AddToPlaylistMenu({
   duration,
   inLibrary,
   onDownload,
-  canRemoveFromLibrary,
-  onRemovedFromLibrary,
   children,
 }: {
   trackId: string;
@@ -67,8 +66,6 @@ export function AddToPlaylistMenu({
   inLibrary?: boolean;
   /** Acquire / download into the library when the track isn’t local yet. */
   onDownload?: () => void;
-  canRemoveFromLibrary?: boolean;
-  onRemovedFromLibrary?: () => void;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -77,6 +74,7 @@ export function AddToPlaylistMenu({
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [namePromptOpen, setNamePromptOpen] = useState(false);
 
   const libraryTrack =
     Boolean(inLibrary) &&
@@ -244,23 +242,24 @@ export function AddToPlaylistMenu({
       }
       return;
     }
-    const name =
-      typeof window !== "undefined"
-        ? window.prompt("Playlist name", "My Playlist")
-        : null;
-    if (!name?.trim()) return;
+    setOpen(false);
+    setNamePromptOpen(true);
+  }
+
+  async function submitNewPlaylist(name: string) {
     setBusyId("new");
     try {
       const res = await fetch("/api/playlists", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), trackId }),
+        body: JSON.stringify({ name, trackId }),
       });
       if (!res.ok) {
         toastError("Couldn’t create playlist");
         return;
       }
-      toastSuccess(`Added to ${name.trim()}`);
+      setNamePromptOpen(false);
+      toastSuccess(`Added to ${name}`);
       emitLibraryChanged();
       void load();
     } finally {
@@ -269,13 +268,7 @@ export function AddToPlaylistMenu({
   }
 
   function toggleLibrary() {
-    if (inLibrary) {
-      if (canRemoveFromLibrary) {
-        setOpen(false);
-        onRemovedFromLibrary?.();
-      }
-      return;
-    }
+    if (inLibrary) return;
     if (!onDownload) {
       toastError("Can’t save this track to the library");
       return;
@@ -289,6 +282,7 @@ export function AddToPlaylistMenu({
   const showLibraryRow = Boolean(onDownload || inLibrary) && libraryQueryOk;
 
   return (
+    <>
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
       <DropdownMenuContent
@@ -455,24 +449,7 @@ export function AddToPlaylistMenu({
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2">
-          {canRemoveFromLibrary ? (
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setOpen(false);
-                onRemovedFromLibrary?.();
-              }}
-            >
-              <Trash2 className="size-3.5" />
-              Remove from library
-            </button>
-          ) : (
-            <span />
-          )}
+        <div className="flex items-center justify-end gap-2 border-t border-border px-3 py-2">
           <button
             type="button"
             className="rounded-md px-2 py-1 text-sm font-semibold transition-colors hover:bg-muted/60"
@@ -487,6 +464,17 @@ export function AddToPlaylistMenu({
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
+    <PromptDialog
+      open={namePromptOpen}
+      onOpenChange={setNamePromptOpen}
+      title="Playlist name"
+      defaultValue="My Playlist"
+      placeholder="My Playlist"
+      confirmLabel="Create"
+      busy={busyId === "new"}
+      onSubmit={(name) => void submitNewPlaylist(name)}
+    />
+    </>
   );
 }
 

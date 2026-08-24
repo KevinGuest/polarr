@@ -21,7 +21,6 @@ import { setDragTrack } from "@/lib/drag-track";
 import {
   LIBRARY_CHANGED_EVENT,
   LIBRARY_PINS_CHANGED_EVENT,
-  emitLibraryChanged,
   emitLibraryPinsChanged,
 } from "@/lib/ui-events";
 import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine } from "@/lib/utils";
@@ -78,7 +77,6 @@ export function AlbumClient({ albumId }: { albumId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [inYourLibrary, setInYourLibrary] = useState(false);
 
   const load = useCallback(async () => {
@@ -118,23 +116,6 @@ export function AlbumClient({ albumId }: { albumId: string }) {
     setLoading(true);
     void load();
   }, [load]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch("/api/auth/me", { cache: "no-store" });
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (!cancelled) setIsAdmin(Boolean(data.user?.isAdmin));
-      } catch {
-        if (!cancelled) setIsAdmin(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     const onLibraryChanged = (event: Event) => {
@@ -381,54 +362,6 @@ export function AlbumClient({ albumId }: { albumId: string }) {
       void load();
     } catch (err) {
       toastError(err instanceof Error ? err.message : "Download failed");
-    } finally {
-      setBusyKey(null);
-    }
-  }
-
-  async function removeFromLibrary(track: AlbumTrack) {
-    if (!track.localTrackId) return;
-    if (
-      !confirm(
-        `Remove “${track.title}” from the library and delete the file on disk? It will need to be re-downloaded to play again.`,
-      )
-    ) {
-      return;
-    }
-    setBusyKey(track.key);
-    try {
-      const res = await fetch(
-        `/api/tracks/${encodeURIComponent(track.localTrackId)}`,
-        { method: "DELETE" },
-      );
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        toastError(
-          typeof data?.error === "string"
-            ? data.error
-            : "Couldn’t remove from library",
-        );
-        return;
-      }
-      const removedId = track.localTrackId;
-      setTracks((prev) =>
-        prev.map((t) =>
-          t.key === track.key
-            ? {
-                ...t,
-                available: false,
-                downloaded: false,
-                hasFile: false,
-                localTrackId: null,
-                streamUrl: null,
-              }
-            : t,
-        ),
-      );
-      emitLibraryChanged({ trackId: removedId });
-      toastSuccess("Removed from library");
-    } catch {
-      toastError("Couldn’t remove from library");
     } finally {
       setBusyKey(null);
     }
@@ -708,11 +641,6 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                             t.available
                               ? undefined
                               : () => void markDownloaded(t)
-                          }
-                          onRemoveFromLibrary={
-                            isAdmin && t.available && t.localTrackId
-                              ? () => void removeFromLibrary(t)
-                              : undefined
                           }
                         />
                       </td>

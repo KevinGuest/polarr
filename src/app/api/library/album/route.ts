@@ -1,11 +1,11 @@
-import { json, getStaffUser, getAuthUser } from "@/lib/api";
+import { json, getAdminUser, getAuthUser } from "@/lib/api";
 import { deleteAlbumTracks } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-/** Admin: hard-delete all indexed tracks for an album (files + index). */
+/** Admin/Owner only: remove album tracks from the index and delete files on disk. */
 export async function DELETE(req: Request) {
-  const admin = await getStaffUser();
+  const admin = await getAdminUser();
   if (!admin) {
     const user = await getAuthUser();
     if (!user) return json({ error: "Unauthorized" }, { status: 401 });
@@ -19,6 +19,6 @@ export async function DELETE(req: Request) {
     return json({ error: "artist and album required" }, { status: 400 });
   }
 
-  const removed = deleteAlbumTracks(artist, album);
+  const removed = deleteAlbumTracks(artist, album, { deleteFiles: true });
   return json({ ok: true, removed });
 }

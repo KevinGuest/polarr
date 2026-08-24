@@ -32,6 +32,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { PromptDialog } from "@/components/confirm-dialog";
 import {
   Dialog,
   DialogContent,
@@ -61,23 +62,18 @@ function trackShareUrl(track: PlayerTrack) {
   return `${window.location.origin}${path}`;
 }
 
-function isLibraryTrackId(id: string) {
-  return Boolean(id) && !id.startsWith("stream:");
-}
-
 /** Right-click track menu with playlist, like, queue, share, etc. */
 export function TrackContextMenu({
   track,
   children,
   initialLiked,
-  inLibrary,
   playlistId,
   onRemovedFromPlaylist,
 }: {
   track: PlayerTrack;
   children: React.ReactNode;
   initialLiked?: boolean;
-  /** When true, show admin hard-delete for indexed library tracks. */
+  /** @deprecated Disk delete is no longer offered from this menu. */
   inLibrary?: boolean;
   /** When set, offer “Remove from this playlist”. */
   playlistId?: string;
@@ -86,8 +82,9 @@ export function TrackContextMenu({
   const { addToQueue } = usePlayer();
   const router = useRouter();
   const [liked, setLiked] = useState(Boolean(initialLiked));
-  const [isAdmin, setIsAdmin] = useState(false);
   const [playlists, setPlaylists] = useState<PlaylistRow[]>([]);
+  const [namePromptOpen, setNamePromptOpen] = useState(false);
+  const [promptBusy, setPromptBusy] = useState(false);
   const [creditsOpen, setCreditsOpen] = useState(false);
   const [credits, setCredits] = useState<{
     duration?: number;
@@ -108,25 +105,6 @@ export function TrackContextMenu({
       /* ignore */
     }
   }, []);
-
-  const loadAdmin = useCallback(async () => {
-    try {
-      const res = await fetch("/api/auth/me", { cache: "no-store" });
-      if (!res.ok) {
-        setIsAdmin(false);
-        return;
-      }
-      const data = await res.json();
-      setIsAdmin(Boolean(data.user?.isAdmin));
-    } catch {
-      setIsAdmin(false);
-    }
-  }, []);
-
-  const canHardDelete =
-    isAdmin &&
-    inLibrary !== false &&
-    isLibraryTrackId(track.id);
 
   async function saveLiked() {
     const next = !liked;
@@ -183,24 +161,25 @@ export function TrackContextMenu({
     emitLibraryChanged();
   }
 
-  async function createPlaylistAndAdd() {
-    const name =
-      typeof window !== "undefined"
-        ? window.prompt("Playlist name", "My Playlist")
-        : null;
-    if (!name?.trim()) return;
-    const res = await fetch("/api/playlists", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), trackId: track.id }),
-    });
-    if (!res.ok) {
-      toastError("Couldn’t create playlist");
-      return;
+  async function submitNewPlaylist(name: string) {
+    setPromptBusy(true);
+    try {
+      const res = await fetch("/api/playlists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, trackId: track.id }),
+      });
+      if (!res.ok) {
+        toastError("Couldn’t create playlist");
+        return;
+      }
+      setNamePromptOpen(false);
+      toastSuccess(`Added to ${name}`);
+      void loadPlaylists();
+      emitLibraryChanged();
+    } finally {
+      setPromptBusy(false);
     }
-    toastSuccess(`Added to ${name.trim()}`);
-    void loadPlaylists();
-    emitLibraryChanged();
   }
 
   async function excludeFromTaste() {
@@ -214,34 +193,6 @@ export function TrackContextMenu({
       return;
     }
     toastSuccess("Excluded from your taste profile");
-  }
-
-  async function removeFromLibrary() {
-    if (
-      !confirm(
-        `Remove “${track.title}” from the library and delete the file on disk? It will need to be re-downloaded to play again.`,
-      )
-    ) {
-      return;
-    }
-    try {
-      const res = await fetch(`/api/tracks/${encodeURIComponent(track.id)}`, {
-        method: "DELETE",
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        toastError(
-          typeof data?.error === "string"
-            ? data.error
-            : "Couldn’t remove from library",
-        );
-        return;
-      }
-      emitLibraryChanged({ trackId: track.id });
-      toastSuccess("Removed from library");
-    } catch {
-      toastError("Couldn’t remove from library");
-    }
   }
 
   async function openCredits() {
@@ -308,7 +259,6 @@ export function TrackContextMenu({
         onOpenChange={(open) => {
           if (open) {
             void loadPlaylists();
-            void loadAdmin();
           }
         }}
       >
@@ -320,7 +270,11 @@ export function TrackContextMenu({
               Add to playlist
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="w-52">
-              <ContextMenuItem onSelect={() => void createPlaylistAndAdd()}>
+              <ContextMenuItem
+                onSelect={() => {
+                  setTimeout(() => setNamePromptOpen(true), 0);
+                }}
+              >
                 <Plus className="size-4 shrink-0 text-muted-foreground" />
                 Create playlist
               </ContextMenuItem>
@@ -341,16 +295,6 @@ export function TrackContextMenu({
             <CirclePlus className="size-4 shrink-0 text-muted-foreground" />
             {liked ? "Remove from Liked Songs" : "Save to your Liked Songs"}
           </ContextMenuItem>
-
-          {canHardDelete ? (
-            <ContextMenuItem
-              className="text-destructive focus:bg-destructive/10 focus:text-destructive"
-              onSelect={() => void removeFromLibrary()}
-            >
-              <Trash2 className="size-4 shrink-0" />
-              Remove from library
-            </ContextMenuItem>
-          ) : null}
 
           {playlistId ? (
             <ContextMenuItem
@@ -451,6 +395,16 @@ export function TrackContextMenu({
           </dl>
         </DialogContent>
       </Dialog>
+      <PromptDialog
+        open={namePromptOpen}
+        onOpenChange={setNamePromptOpen}
+        title="Playlist name"
+        defaultValue="My Playlist"
+        placeholder="My Playlist"
+        confirmLabel="Create"
+        busy={promptBusy}
+        onSubmit={(name) => void submitNewPlaylist(name)}
+      />
     </>
   );
 }

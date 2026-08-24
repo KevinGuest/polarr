@@ -2617,10 +2617,13 @@ export function getTrack(id: string): TrackRow | null {
 
 /**
  * Remove a track from the library index (and related history/offline).
- * Hard-deletes the audio file when it lives under a managed music root so a
- * later scan cannot resurrect it without re-download.
+ * Pass `{ deleteFiles: true }` only from Admin/Owner APIs — that unlinks the
+ * audio file when it lives under a managed music root.
  */
-export function deleteTrack(id: string): TrackRow | null {
+export function deleteTrack(
+  id: string,
+  options?: { deleteFiles?: boolean },
+): TrackRow | null {
   const track = getTrack(id);
   if (!track) return null;
   const db = getDb();
@@ -2663,18 +2666,22 @@ export function deleteTrack(id: string): TrackRow | null {
   db.prepare(`DELETE FROM playlist_tracks WHERE track_id = ?`).run(id);
   db.prepare(`DELETE FROM tracks WHERE id = ?`).run(id);
 
-  const settings = getSettings();
-  unlinkManagedAudioFile(track.path, [
-    settings.musicRoot,
-  ].filter(Boolean));
+  if (options?.deleteFiles) {
+    const settings = getSettings();
+    unlinkManagedAudioFile(track.path, [settings.musicRoot].filter(Boolean));
+  }
 
   return track;
 }
 
 /** Remove all indexed tracks for an album (artist + album title). */
-export function deleteAlbumTracks(artist: string, album: string): number {
+export function deleteAlbumTracks(
+  artist: string,
+  album: string,
+  options?: { deleteFiles?: boolean },
+): number {
   const rows = listTracksForAlbum(artist, album, 500);
-  for (const t of rows) deleteTrack(t.id);
+  for (const t of rows) deleteTrack(t.id, options);
   return rows.length;
 }
 

@@ -2,7 +2,7 @@ manifestVersion: 1
 id: polarr
 category: media
 name: Polarr
-version: "0.6.2"
+version: "0.6.3"
 tagline: Discover, request, and stream your homeserver music
 description: >-
   Polarr is a self-hosted music hub for umbrelOS. Point it at Lidarr (the same
@@ -33,8 +33,9 @@ description: >-
   Polarr does not ship Lidarr itself; install Lidarr from the Umbrel App Store
   first if you want automated *arr-style acquisition.
 releaseNotes: >-
-  Your Library sidebar lists albums you save, not every Lidarr scan.
-  The player source badge now says Polarr instead of Local.
+  Confirms use in-app dialogs instead of browser alerts.
+  Removing from Your Library no longer deletes files on disk.
+  Admins and the Server Owner can delete files from Admin → Tracks / Albums.
 developer: Polarr
 website: https://github.com/KevinGuest/polarr
 dependencies:

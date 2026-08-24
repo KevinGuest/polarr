@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { RefreshCw, Trash2 } from "lucide-react";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CoverArt } from "@/components/cover-art";
 import { formatDuration } from "@/lib/utils";
 import { emitLibraryChanged } from "@/lib/ui-events";
 import { toastError, toastSuccess } from "@/lib/toast";
+import { roleIsAdmin } from "@/lib/roles";
 
 type Track = {
   id: string;
@@ -51,6 +53,12 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
   const [forbidden, setForbidden] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<
+    | { kind: "track"; track: Track }
+    | { kind: "album"; artist: string; title: string }
+    | null
+  >(null);
+  const [canDeleteFiles, setCanDeleteFiles] = useState(false);
 
   async function load(scan = false) {
     setScanning(scan);
@@ -78,14 +86,27 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
     void load(false);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) {
+          setCanDeleteFiles(roleIsAdmin(data.user?.role));
+        }
+      } catch {
+        if (!cancelled) setCanDeleteFiles(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function removeTrack(t: Track) {
-    if (
-      !confirm(
-        `Remove “${t.title}” from the library and delete the file on disk? It will need to be re-downloaded to play again.`,
-      )
-    ) {
-      return;
-    }
+    if (!canDeleteFiles) return;
     setBusyKey(t.id);
     const res = await fetch(`/api/tracks/${encodeURIComponent(t.id)}`, {
       method: "DELETE",
@@ -96,19 +117,14 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
       toastError(data?.error || "Delete failed");
       return;
     }
+    setPendingDelete(null);
     setTracks((prev) => prev.filter((x) => x.id !== t.id));
-    toastSuccess(`Hard-deleted “${t.title}”`);
+    toastSuccess(`Deleted “${t.title}” from disk`);
     emitLibraryChanged({ trackId: t.id });
   }
 
   async function removeAlbum(artist: string, title: string) {
-    if (
-      !confirm(
-        `Remove album “${title}” by ${artist} and delete its files on disk? Tracks will need to be re-downloaded.`,
-      )
-    ) {
-      return;
-    }
+    if (!canDeleteFiles) return;
     const key = `${artist}::${title}`;
     setBusyKey(key);
     const qs = new URLSearchParams({ artist, album: title });
@@ -121,6 +137,7 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
       toastError(data?.error || "Delete failed");
       return;
     }
+    setPendingDelete(null);
     setTracks((prev) =>
       prev.filter(
         (t) =>
@@ -131,7 +148,7 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
           ),
       ),
     );
-    toastSuccess(`Removed ${data?.removed ?? 0} track(s) from “${title}”`);
+    toastSuccess(`Deleted ${data?.removed ?? 0} file(s) from “${title}”`);
   }
 
   const albums = useMemo(() => {
@@ -234,16 +251,18 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
                   <span className="tabular-nums text-xs text-muted-foreground">
                     {formatDuration(t.duration || 0)}
                   </span>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-8"
-                    disabled={busyKey === t.id}
-                    onClick={() => void removeTrack(t)}
-                    aria-label={`Delete ${t.title}`}
-                  >
-                    <Trash2 className="size-3.5 text-muted-foreground" />
-                  </Button>
+                  {canDeleteFiles ? (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="size-8"
+                      disabled={busyKey === t.id}
+                      onClick={() => setPendingDelete({ kind: "track", track: t })}
+                      aria-label={`Delete ${t.title}`}
+                    >
+                      <Trash2 className="size-3.5 text-muted-foreground" />
+                    </Button>
+                  ) : null}
                 </div>
               </li>
             ))}
@@ -273,13 +292,19 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
                   {mode === "playlists" ? " · library shelf" : ""}
                 </p>
               </div>
-              {mode === "albums" ? (
+              {mode === "albums" && canDeleteFiles ? (
                 <Button
                   size="icon"
                   variant="ghost"
                   className="size-8 shrink-0 self-start"
                   disabled={busyKey === `${a.artist}::${a.title}`}
-                  onClick={() => void removeAlbum(a.artist, a.title)}
+                  onClick={() =>
+                    setPendingDelete({
+                      kind: "album",
+                      artist: a.artist,
+                      title: a.title,
+                    })
+                  }
                   aria-label={`Delete ${a.title}`}
                 >
                   <Trash2 className="size-3.5 text-muted-foreground" />
@@ -289,6 +314,35 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
           ))}
         </ul>
       )}
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        title={
+          pendingDelete?.kind === "album"
+            ? "Delete album files?"
+            : "Delete track file?"
+        }
+        description={
+          pendingDelete?.kind === "album"
+            ? `This permanently deletes “${pendingDelete.title}” by ${pendingDelete.artist} from disk. Lidarr may download it again later.`
+            : pendingDelete
+              ? `This permanently deletes “${pendingDelete.track.title}” from disk. Lidarr may download it again later.`
+              : ""
+        }
+        confirmLabel="Delete from disk"
+        destructive
+        busy={Boolean(busyKey)}
+        onConfirm={() => {
+          if (!canDeleteFiles) return;
+          if (pendingDelete?.kind === "track") {
+            void removeTrack(pendingDelete.track);
+          } else if (pendingDelete?.kind === "album") {
+            void removeAlbum(pendingDelete.artist, pendingDelete.title);
+          }
+        }}
+      />
     </div>
   );
 }

@@ -33,6 +33,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { ConfirmDialog, PromptDialog } from "@/components/confirm-dialog";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
 import { albumHref } from "@/lib/album-ref";
 import {
@@ -167,27 +168,17 @@ export function LibraryItemContextMenu({
   const router = useRouter();
   const pathname = usePathname();
   const [pinned, setPinned] = useState(Boolean(item.pinned));
-  const [isAdmin, setIsAdmin] = useState(false);
   const [playlists, setPlaylists] = useState<PlaylistRow[]>([]);
   const [folders, setFolders] = useState<FolderRow[]>([]);
+  const [confirmKind, setConfirmKind] = useState<null | "playlist" | "folder">(
+    null,
+  );
+  const [namePromptOpen, setNamePromptOpen] = useState(false);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   useEffect(() => {
     setPinned(Boolean(item.pinned));
   }, [item.pinned, item.pinKey]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/auth/me", { cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelled) setIsAdmin(Boolean(data.user?.isAdmin));
-      })
-      .catch(() => null);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const loadPlaylists = useCallback(async () => {
     try {
@@ -296,25 +287,26 @@ export function LibraryItemContextMenu({
     }
   }
 
-  async function createPlaylistAndAdd() {
-    const name =
-      typeof window !== "undefined"
-        ? window.prompt("Playlist name", item.title)
-        : null;
-    if (!name?.trim()) return;
-    const res = await fetch("/api/playlists", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim() }),
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data?.playlist?.id) {
-      toastError("Couldn’t create playlist");
-      return;
+  async function submitNewPlaylist(name: string) {
+    setConfirmBusy(true);
+    try {
+      const res = await fetch("/api/playlists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.playlist?.id) {
+        toastError("Couldn’t create playlist");
+        return;
+      }
+      setNamePromptOpen(false);
+      await addTracksToPlaylist(data.playlist.id, name);
+      void loadPlaylists();
+      emitLibraryChanged();
+    } finally {
+      setConfirmBusy(false);
     }
-    await addTracksToPlaylist(data.playlist.id, name.trim());
-    void loadPlaylists();
-    emitLibraryChanged();
   }
 
   async function downloadAll() {
@@ -364,46 +356,9 @@ export function LibraryItemContextMenu({
     }
   }
 
-  async function removeFromLibrary() {
-    if (item.kind !== "album") return;
-    if (!isAdmin) {
-      toastInfo("Only admins can remove albums from the shared library");
-      return;
-    }
-    if (
-      !confirm(
-        `Remove “${item.title}” by ${item.artist} from the library and delete files on disk?`,
-      )
-    ) {
-      return;
-    }
-    try {
-      const qs = new URLSearchParams({
-        artist: item.artist,
-        album: item.title,
-      });
-      const res = await fetch(`/api/library/album?${qs.toString()}`, {
-        method: "DELETE",
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        toastError(data?.error || "Couldn’t remove album");
-        return;
-      }
-      emitLibraryChanged();
-      toastSuccess(
-        `Removed ${typeof data?.removed === "number" ? data.removed : ""} tracks`.trim(),
-      );
-    } catch {
-      toastError("Couldn’t remove album");
-    }
-  }
-
   async function deleteThisPlaylist() {
     if (item.kind !== "playlist" || !item.playlistId) return;
-    if (!confirm(`Delete playlist “${item.title}”? This can’t be undone.`)) {
-      return;
-    }
+    setConfirmBusy(true);
     try {
       const res = await fetch("/api/playlists", {
         method: "POST",
@@ -417,6 +372,7 @@ export function LibraryItemContextMenu({
         toastError("Couldn’t delete playlist");
         return;
       }
+      setConfirmKind(null);
       emitLibraryChanged();
       toastSuccess("Playlist deleted");
       if (pathname.startsWith(`/playlist/${item.playlistId}`)) {
@@ -424,18 +380,14 @@ export function LibraryItemContextMenu({
       }
     } catch {
       toastError("Couldn’t delete playlist");
+    } finally {
+      setConfirmBusy(false);
     }
   }
 
   async function deleteThisFolder() {
     if (item.kind !== "folder" || !item.folderId) return;
-    if (
-      !confirm(
-        `Delete folder “${item.title}”? Playlists inside will stay in your library.`,
-      )
-    ) {
-      return;
-    }
+    setConfirmBusy(true);
     try {
       const res = await fetch("/api/playlist-folders", {
         method: "POST",
@@ -449,6 +401,7 @@ export function LibraryItemContextMenu({
         toastError("Couldn’t delete folder");
         return;
       }
+      setConfirmKind(null);
       emitLibraryChanged();
       toastSuccess("Folder deleted");
       if (pathname.startsWith(`/folder/${item.folderId}`)) {
@@ -456,6 +409,8 @@ export function LibraryItemContextMenu({
       }
     } catch {
       toastError("Couldn’t delete folder");
+    } finally {
+      setConfirmBusy(false);
     }
   }
 
@@ -529,6 +484,7 @@ export function LibraryItemContextMenu({
   }
 
   return (
+    <>
     <ContextMenu
       onOpenChange={(open) => {
         if (open) {
@@ -539,23 +495,11 @@ export function LibraryItemContextMenu({
     >
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-64">
-        {item.kind === "album" ? (
-          <ContextMenuItem
-            onSelect={() => void removeFromLibrary()}
-            className={
-              isAdmin
-                ? "text-destructive focus:bg-destructive/10 focus:text-destructive"
-                : undefined
-            }
-          >
-            <Trash2 className="size-4 shrink-0 text-muted-foreground" />
-            Delete album files
-          </ContextMenuItem>
-        ) : null}
-
         {item.kind === "playlist" ? (
           <ContextMenuItem
-            onSelect={() => void deleteThisPlaylist()}
+            onSelect={() => {
+              setTimeout(() => setConfirmKind("playlist"), 0);
+            }}
             className="text-destructive focus:bg-destructive/10 focus:text-destructive"
           >
             <Trash2 className="size-4 shrink-0" />
@@ -565,7 +509,9 @@ export function LibraryItemContextMenu({
 
         {item.kind === "folder" ? (
           <ContextMenuItem
-            onSelect={() => void deleteThisFolder()}
+            onSelect={() => {
+              setTimeout(() => setConfirmKind("folder"), 0);
+            }}
             className="text-destructive focus:bg-destructive/10 focus:text-destructive"
           >
             <Trash2 className="size-4 shrink-0" />
@@ -627,7 +573,11 @@ export function LibraryItemContextMenu({
               Add to playlist
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="w-52">
-              <ContextMenuItem onSelect={() => void createPlaylistAndAdd()}>
+              <ContextMenuItem
+                onSelect={() => {
+                  setTimeout(() => setNamePromptOpen(true), 0);
+                }}
+              >
                 <CirclePlus className="size-4 shrink-0 text-muted-foreground" />
                 New playlist
               </ContextMenuItem>
@@ -685,6 +635,41 @@ export function LibraryItemContextMenu({
         </ContextMenuSub>
       </ContextMenuContent>
     </ContextMenu>
+    <ConfirmDialog
+      open={confirmKind === "playlist"}
+      onOpenChange={(open) => {
+        if (!open) setConfirmKind(null);
+      }}
+      title="Delete playlist?"
+      description={`“${item.title}” will be removed from Your Library. Songs on disk are not deleted.`}
+      confirmLabel="Delete playlist"
+      destructive
+      busy={confirmBusy}
+      onConfirm={() => void deleteThisPlaylist()}
+    />
+    <ConfirmDialog
+      open={confirmKind === "folder"}
+      onOpenChange={(open) => {
+        if (!open) setConfirmKind(null);
+      }}
+      title="Delete folder?"
+      description={`“${item.title}” will be removed. Playlists inside stay in Your Library.`}
+      confirmLabel="Delete folder"
+      destructive
+      busy={confirmBusy}
+      onConfirm={() => void deleteThisFolder()}
+    />
+    <PromptDialog
+      open={namePromptOpen}
+      onOpenChange={setNamePromptOpen}
+      title="Playlist name"
+      defaultValue={item.title}
+      placeholder="My Playlist"
+      confirmLabel="Create"
+      busy={confirmBusy}
+      onSubmit={(name) => void submitNewPlaylist(name)}
+    />
+    </>
   );
 }
 

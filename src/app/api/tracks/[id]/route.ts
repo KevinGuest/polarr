@@ -1,4 +1,4 @@
-import { json, getStaffUser, getAuthUser } from "@/lib/api";
+import { json, getAdminUser, getAuthUser } from "@/lib/api";
 import {
   deleteTrack,
   getTrack,
@@ -64,12 +64,12 @@ export async function POST(
   });
 }
 
-/** Admin: hard-delete a track from the library index and managed disk path. */
+/** Admin/Owner only: remove from the index and delete the file on disk. */
 export async function DELETE(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const admin = await getStaffUser();
+  const admin = await getAdminUser();
   if (!admin) {
     const user = await getAuthUser();
     if (!user) return json({ error: "Unauthorized" }, { status: 401 });
@@ -77,7 +77,7 @@ export async function DELETE(
   }
 
   const { id } = await ctx.params;
-  const removed = deleteTrack(id);
+  const removed = deleteTrack(id, { deleteFiles: true });
   if (!removed) return json({ error: "Not found" }, { status: 404 });
   return json({ ok: true, track: removed, hardDeleted: true });
 }

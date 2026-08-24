@@ -38,7 +38,7 @@ export async function GET(
   return json(getKaraokeInfo(id, metaFromUrl(req)));
 }
 
-/** Start / ensure stem separation (library file or live/stream download). */
+/** Start / ensure stem separation for an on-disk library file. */
 export async function POST(
   req: Request,
   ctx: { params: Promise<{ id: string }> },

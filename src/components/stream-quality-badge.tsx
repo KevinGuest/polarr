@@ -16,22 +16,30 @@ const DESCRIPTIONS: Record<PlaybackQuality, string> = {
   youtube: "Playing via YouTube fallback",
 };
 
-/** Compact Polarr / YouTube source chip for the player. */
+/** Compact Polarr / YouTube source chip for the player and track rows. */
 export function StreamQualityBadge({
   track,
   quality: qualityProp,
   className,
   compact = false,
+  available = false,
 }: {
   track?: PlayerTrack | null;
   quality?: PlaybackQuality | null;
   className?: string;
   /** Icon-only — longer name for screen readers only (no native title tip). */
   compact?: boolean;
+  /** File is on Polarr but not necessarily playing. */
+  available?: boolean;
 }) {
   const quality =
     qualityProp ?? (track ? playbackQuality(track) : null);
   if (!quality) return null;
+
+  const description =
+    available && quality === "local"
+      ? "Available on Polarr"
+      : DESCRIPTIONS[quality];
 
   // lucide dropped brand icons — Radio = live/remote stream
   const Icon = quality === "local" ? HardDrive : Radio;
@@ -48,7 +56,7 @@ export function StreamQualityBadge({
         className,
       )}
       // No `title` / default aria-label — stacks on BarTooltip. Icon-only keeps aria.
-      {...(compact ? { "aria-label": DESCRIPTIONS[quality] } : {})}
+      {...(compact || available ? { "aria-label": description } : {})}
     >
       <Icon className="size-2.5 shrink-0" strokeWidth={2.5} aria-hidden />
       {compact ? null : <span>{label}</span>}

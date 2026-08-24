@@ -150,3 +150,106 @@ export function matchSearchQueries(artist: string, title: string): string[] {
   push(softTitle);
   return out;
 }
+
+export type SearchHitFields = {
+  title: string;
+  artist: string;
+  album?: string;
+};
+
+/**
+ * Title-first ranking so “Love me drake” beats popular Drake songs that
+ * don’t match the title. Artist/feat tokens still help break ties.
+ */
+export function scoreSearchHit(query: string, hit: SearchHitFields): number {
+  const q = query.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!q) return 0;
+
+  const title = hit.title.trim().toLowerCase();
+  const titleCore = title
+    .replace(/\s*[\(\[][^)\]]*feat[^)\]]*[\)\]]/gi, "")
+    .replace(/\s*[\(\[][^)\]]*ft\.?[^)\]]*[\)\]]/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const artist = hit.artist.trim().toLowerCase();
+  const album = (hit.album || "").trim().toLowerCase();
+  const hay = `${title} ${artist} ${album}`;
+
+  if (titleCore === q || title === q) return 10_000;
+  if (`${artist} - ${titleCore}` === q || `${titleCore} - ${artist}` === q) {
+    return 9_800;
+  }
+
+  const tokens = q.split(" ").filter((t) => t.length > 0);
+  if (tokens.length === 0) return 0;
+
+  let phraseBonus = 0;
+  for (let n = tokens.length; n >= 1; n--) {
+    const phrase = tokens.slice(0, n).join(" ");
+    if (titleCore === phrase || title === phrase) {
+      phraseBonus = 5_000 + n * 200;
+      break;
+    }
+    if (titleCore.startsWith(phrase) || title.includes(phrase)) {
+      phraseBonus = Math.max(phraseBonus, 2_500 + n * 150);
+    }
+  }
+
+  let titleHits = 0;
+  let artistHits = 0;
+  let otherHits = 0;
+  let missing = 0;
+  for (const tok of tokens) {
+    if (titleCore.includes(tok) || title.includes(tok)) titleHits += 1;
+    else if (artist.includes(tok)) artistHits += 1;
+    else if (album.includes(tok) || hay.includes(tok)) otherHits += 1;
+    else missing += 1;
+  }
+
+  if (titleHits === 0 && phraseBonus === 0) {
+    return artistHits * 25 + otherHits * 5 - missing * 40;
+  }
+
+  return (
+    phraseBonus +
+    titleHits * 400 +
+    artistHits * 120 +
+    otherHits * 20 -
+    missing * 30 +
+    (titleHits === tokens.length ? 800 : 0)
+  );
+}
+
+/** On-disk copies beat an equal stream/catalog hit. */
+export function scoreLibrarySearchHit(
+  query: string,
+  hit: SearchHitFields,
+  onPolarr = false,
+): number {
+  return scoreSearchHit(query, hit) + (onPolarr ? 2_500 : 0);
+}
+
+/**
+ * Query tokens for library search. Drops punctuation so “don't” still
+ * hits match_key rows stored as “dont”.
+ */
+export function tokenizeSearchQuery(q: string): string[] {
+  const s = q
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[‘’´`]/g, "'");
+  const tokens = s
+    .split(/[^a-z0-9']+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of tokens) {
+    if (seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+    if (out.length >= 8) break;
+  }
+  return out;
+}

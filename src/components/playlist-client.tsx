@@ -1056,7 +1056,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                           album={t.album}
                           coverPath={t.coverPath}
                           duration={t.duration}
-                          inLibrary={Boolean(t.path)}
+                          onPolarr={Boolean(t.path)}
                         />
                       </td>
                       <td

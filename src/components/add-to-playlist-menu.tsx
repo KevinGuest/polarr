@@ -54,6 +54,7 @@ export function AddToPlaylistMenu({
   coverPath,
   duration,
   inLibrary,
+  onPolarr,
   onDownload,
   children,
 }: {
@@ -64,6 +65,8 @@ export function AddToPlaylistMenu({
   coverPath?: string | null;
   duration?: number;
   inLibrary?: boolean;
+  /** Already playable from this Polarr server — don’t treat as “save to library”. */
+  onPolarr?: boolean;
   /** Acquire / download into the library when the track isn’t local yet. */
   onDownload?: () => void;
   children: ReactNode;
@@ -77,7 +80,7 @@ export function AddToPlaylistMenu({
   const [namePromptOpen, setNamePromptOpen] = useState(false);
 
   const libraryTrack =
-    Boolean(inLibrary) &&
+    (Boolean(inLibrary) || Boolean(onPolarr)) &&
     Boolean(trackId) &&
     !trackId.startsWith("stream:") &&
     !trackId.startsWith("live:") &&
@@ -279,7 +282,8 @@ export function AddToPlaylistMenu({
 
   const libraryQueryOk =
     !query.trim() || "your library".includes(query.trim().toLowerCase());
-  const showLibraryRow = Boolean(onDownload || inLibrary) && libraryQueryOk;
+  const showLibraryRow =
+    !onPolarr && Boolean(onDownload || inLibrary) && libraryQueryOk;
 
   return (
     <>

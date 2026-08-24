@@ -9,6 +9,7 @@ import {
   toggleTrackLiked,
   type LikeMeta,
 } from "@/lib/db";
+import { albumCoverKey, getAlbumCoverMap } from "@/lib/lidarr";
 import { getLiveSession } from "@/lib/live-stream";
 
 export const runtime = "nodejs";
@@ -70,18 +71,28 @@ export async function GET(req: Request) {
     });
   }
 
-  const items = listLikedTracks(user.id, 500).map((t) => ({
-    id: t.id,
-    title: t.title,
-    artist: t.artist,
-    album: t.album,
-    duration: t.duration,
-    path: t.path,
-    coverPath: t.coverPath,
-    source: t.source,
-    likedAt: t.likedAt,
-    streamOnly: !t.path || t.source === "stream" || t.id.startsWith("stream:"),
-  }));
+  const covers = await getAlbumCoverMap();
+  const items = listLikedTracks(user.id, 500).map((t) => {
+    const fromDb =
+      t.coverPath && /^https?:\/\//i.test(t.coverPath) ? t.coverPath : null;
+    const album = (t.album || t.title || "").trim();
+    const fromLidarr = album
+      ? covers.get(albumCoverKey(t.artist, album)) || null
+      : null;
+    const coverPath = fromDb || fromLidarr || t.coverPath;
+    return {
+      id: t.id,
+      title: t.title,
+      artist: t.artist,
+      album: t.album,
+      duration: t.duration,
+      path: t.path,
+      coverPath,
+      source: t.source,
+      likedAt: t.likedAt,
+      streamOnly: !t.path || t.source === "stream" || t.id.startsWith("stream:"),
+    };
+  });
 
   return json({
     count: countLikedTracks(user.id),

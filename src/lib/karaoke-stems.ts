@@ -1,6 +1,7 @@
 /**
  * High-quality karaoke instrumentals via HT-Demucs (ONNX).
- * Works on library files and live/stream plays (download → separate → cache).
+ * Library / Lidarr / downloaded files only — streamed YouTube audio is not
+ * a stable demucs source (wrong file, drift vs the live mix).
  * Cache: data/karaoke/{key}/instrumental.m4a
  */
 import { spawn } from "node:child_process";
@@ -8,11 +9,9 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { getTrack } from "./db";
-import { createLiveSession, getLiveSession } from "./live-stream";
+import { findTrack, getTrack, type TrackRow } from "./db";
 import { dataDir } from "./paths";
-import { ensureYtDlp, ffmpegAvailable } from "./tools";
-import { matchYtmAudio, YTM_AUDIO_FORMAT } from "./ytm-match";
+import { ffmpegAvailable } from "./tools";
 
 export type KaraokeStatus =
   | "ready"
@@ -45,20 +44,12 @@ type JobState = {
   promise?: Promise<void>;
 };
 
-type ResolvedSource =
-  | {
-      kind: "file";
-      key: string;
-      filePath: string;
-    }
-  | {
-      kind: "remote";
-      key: string;
-      /** Prefer direct download URL when live session is warm. */
-      remoteUrl?: string;
-      /** yt-dlp search when no warm URL. */
-      searchQuery: string;
-    };
+type ResolvedSource = {
+  kind: "file";
+  key: string;
+  filePath: string;
+  libraryId: string;
+};
 
 const jobs = new Map<string, JobState>();
 /** trackId / live id → stable cache key */
@@ -116,12 +107,6 @@ function libraryKey(trackId: string, filePath: string): string {
   );
 }
 
-function liveKey(artist: string, title: string): string {
-  return hashKey(
-    `live|${artist.trim().toLowerCase()}|${title.trim().toLowerCase()}`,
-  );
-}
-
 function trackWorkDir(key: string): string {
   const dir = path.join(karaokeRoot(), key);
   fs.mkdirSync(dir, { recursive: true });
@@ -151,6 +136,7 @@ function run(
       env: process.env,
       windowsHide: true,
       cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
@@ -241,209 +227,82 @@ function isStreamPath(p: string | null | undefined): boolean {
   );
 }
 
-function normalizeLiveId(trackId: string): string {
-  return trackId.startsWith("live:") ? trackId.slice(5) : trackId;
+function fileOnDisk(track: TrackRow | null | undefined): string | null {
+  const p = track?.path?.trim() || "";
+  if (!p || isStreamPath(p)) return null;
+  try {
+    const st = fs.statSync(p);
+    if (!st.isFile() || st.size < 1024) return null;
+    return p;
+  } catch {
+    return null;
+  }
+}
+
+function artistTitleFromRequest(
+  trackId: string,
+  meta?: KaraokeRequestMeta,
+  track?: TrackRow | null,
+): { artist: string; title: string } {
+  let artist = (meta?.artist || track?.artist || "").trim();
+  let title = (meta?.title || track?.title || "").trim();
+  if ((!artist || !title) && trackId.startsWith("stream:")) {
+    const [a, t] = trackId.slice(7).split("|");
+    if (!artist) {
+      try {
+        artist = decodeURIComponent(a || "").trim();
+      } catch {
+        artist = (a || "").trim();
+      }
+    }
+    if (!title) {
+      try {
+        title = decodeURIComponent(t || "").trim();
+      } catch {
+        title = (t || "").trim();
+      }
+    }
+  }
+  return { artist, title };
 }
 
 /**
- * Resolve a demucs input: local file, or remote (live/session / yt-dlp search).
+ * Library / Lidarr / fallback-download row with a real audio file.
+ * Stream and live ids can still resolve when the same song is on disk.
  */
-async function resolveSource(
+export function resolveKaraokeLibraryTrack(
   trackId: string,
   meta?: KaraokeRequestMeta,
-): Promise<ResolvedSource | { error: string }> {
-  const artist = (meta?.artist || "").trim();
-  const title = (meta?.title || "").trim();
+): TrackRow | null {
+  const id = (trackId || "").trim();
+  const byId = id ? getTrack(id) : null;
+  if (fileOnDisk(byId)) return byId;
 
-  // 1) Library track with a real file on disk
-  const track = getTrack(trackId);
-  if (track?.path && !isStreamPath(track.path) && fs.existsSync(track.path)) {
-    const key = libraryKey(trackId, track.path);
-    rememberKey(trackId, key);
-    return { kind: "file", key, filePath: track.path };
-  }
-
-  // 2) Active live session (warm remote URL)
-  if (trackId.startsWith("live:") || getLiveSession(normalizeLiveId(trackId))) {
-    const sid = normalizeLiveId(trackId);
-    const session = getLiveSession(sid);
-    if (session) {
-      const a = session.artist || artist;
-      const t = session.title || title;
-      if (a && t) {
-        const key = liveKey(a, t);
-        rememberKey(trackId, key);
-        return {
-          kind: "remote",
-          key,
-          remoteUrl: session.remoteUrl,
-          searchQuery: `${a} ${t}`.trim(),
-        };
-      }
-    }
-  }
-
-  // 3) Metadata fallthrough: live id expired, catalog, or stream stub
-  const a =
-    artist ||
-    track?.artist ||
-    (trackId.startsWith("stream:")
-      ? decodeURIComponent(trackId.slice(7).split("|")[0] || "")
-      : "");
-  const t =
-    title ||
-    track?.title ||
-    (trackId.startsWith("stream:")
-      ? decodeURIComponent(trackId.slice(7).split("|")[1] || "")
-      : "");
-
-  if (!a || !t) {
-    return {
-      error:
-        "Need artist + title to prepare karaoke for a stream. Play the track first, then try again.",
-    };
-  }
-
-  const key = liveKey(a, t);
-  rememberKey(trackId, key);
-
-  // Prefer a fresh live remote so we reuse the same CDN URL when possible
-  const live = await createLiveSession({
-    artist: a,
-    title: t,
-    album: meta?.album || track?.album,
-  });
-  if (live) {
-    const sid = live.id.startsWith("live:") ? live.id.slice(5) : live.id;
-    const session = getLiveSession(sid);
-    if (session?.remoteUrl) {
-      rememberKey(live.id, key);
-      return {
-        kind: "remote",
-        key,
-        remoteUrl: session.remoteUrl,
-        searchQuery: `${a} ${t}`.trim(),
-      };
-    }
-  }
-
-  return {
-    kind: "remote",
-    key,
-    searchQuery: `${a} ${t}`.trim(),
-  };
+  const { artist, title } = artistTitleFromRequest(id, meta, byId);
+  if (!artist || !title) return null;
+  const hit = findTrack(artist, title);
+  return fileOnDisk(hit) ? hit : null;
 }
 
-/** Download remote/live audio into workDir/source.* then return wav path. */
-async function acquireRemoteWav(
-  source: Extract<ResolvedSource, { kind: "remote" }>,
-  work: string,
-  job: JobState,
-): Promise<string | null> {
-  const ytDlp = await ensureYtDlp();
-  const ff = findFfmpeg();
-  const rawOut = path.join(work, "source_dl.%(ext)s");
-  const rawPattern = path.join(work, "source_dl.");
+const NO_LIBRARY_FILE =
+  "Karaoke is only available for tracks saved on this server.";
 
-  job.progress = 0.04;
-  writeStatus(source.key, job);
-
-  if (ytDlp) {
-    // Prefer exact remote (live session), else ranked YTM match
-    let sourceArg = source.remoteUrl;
-    if (!sourceArg) {
-      const parts = source.searchQuery.trim().split(/\s+/);
-      const artistHint = parts.length > 1 ? parts[0]! : "";
-      const titleHint =
-        parts.length > 1 ? parts.slice(1).join(" ") : source.searchQuery;
-      const match = await matchYtmAudio({
-        artist: artistHint,
-        title: titleHint,
-        query: source.searchQuery,
-      });
-      sourceArg = match?.url || "";
-      if (!sourceArg) {
-        job.error =
-          "Couldn’t match this track with enough confidence — won’t play the wrong song.";
-        return null;
-      }
-    }
-    const args = [
-      sourceArg,
-      "-f",
-      YTM_AUDIO_FORMAT,
-      "-o",
-      rawOut,
-      "--no-playlist",
-      "--no-warnings",
-    ];
-
-    const dl = await run(ytDlp, args);
-    if (dl.code !== 0) {
-      job.error = `Could not download audio for separation.\n${dl.stderr.slice(-400)}`;
-      return null;
-    }
-  } else if (source.remoteUrl && (await ffmpegAvailable())) {
-    // Fallback: ffmpeg only (works for some progressive URLs)
-    const tmp = path.join(work, "source_dl.bin");
-    const dl = await run(ff, ["-y", "-i", source.remoteUrl, "-c", "copy", tmp]);
-    if (dl.code !== 0 || !fs.existsSync(tmp)) {
-      job.error = "Could not download stream (yt-dlp/ffmpeg unavailable).";
-      return null;
-    }
-  } else {
-    job.error = "yt-dlp is required to prepare karaoke from live streams.";
-    return null;
+/**
+ * Demucs input: on-disk library file only (never yt-dlp / live CDN).
+ */
+function resolveSource(
+  trackId: string,
+  meta?: KaraokeRequestMeta,
+): ResolvedSource | { error: string } {
+  const track = resolveKaraokeLibraryTrack(trackId, meta);
+  const filePath = fileOnDisk(track);
+  if (!track || !filePath) {
+    return { error: NO_LIBRARY_FILE };
   }
-
-  const found = fs
-    .readdirSync(work)
-    .filter((n) => n.startsWith("source_dl."))
-    .map((n) => path.join(work, n))
-    .find((p) => fs.existsSync(p) && fs.statSync(p).size > 1024);
-
-  if (!found) {
-    // ffmpeg fallback path name
-    const bin = path.join(work, "source_dl.bin");
-    if (fs.existsSync(bin) && fs.statSync(bin).size > 1024) {
-      // continue with bin
-    } else {
-      job.error = "Download finished but no audio file was written.";
-      return null;
-    }
-  }
-
-  const input = found || path.join(work, "source_dl.bin");
-  const wavIn = path.join(work, "input.wav");
-  job.progress = 0.08;
-  writeStatus(source.key, job);
-
-  const dec = await run(ff, [
-    "-y",
-    "-i",
-    input,
-    "-ar",
-    "44100",
-    "-ac",
-    "2",
-    "-c:a",
-    "pcm_s16le",
-    wavIn,
-  ]);
-  if (dec.code !== 0 || !fs.existsSync(wavIn)) {
-    job.error = `Failed to decode stream audio.\n${dec.stderr.slice(-400)}`;
-    return null;
-  }
-
-  // Drop downloaded container (save space)
-  try {
-    fs.unlinkSync(input);
-  } catch {
-    /* ignore */
-  }
-
-  void rawPattern;
-  return wavIn;
+  const key = libraryKey(track.id, filePath);
+  rememberKey(trackId, key);
+  rememberKey(track.id, key);
+  return { kind: "file", key, filePath, libraryId: track.id };
 }
 
 async function renderInstrumental(
@@ -479,37 +338,28 @@ async function renderInstrumental(
   job.progress = 0.02;
   writeStatus(key, job);
 
-  let wavIn: string;
-  if (source.kind === "file") {
-    wavIn = path.join(work, "input.wav");
-    const ff = findFfmpeg();
-    job.progress = 0.05;
-    const dec = await run(ff, [
-      "-y",
-      "-i",
-      source.filePath,
-      "-ar",
-      "44100",
-      "-ac",
-      "2",
-      "-c:a",
-      "pcm_s16le",
-      wavIn,
-    ]);
-    if (dec.code !== 0 || !fs.existsSync(wavIn)) {
-      job.status = "error";
-      job.error = `Failed to decode audio for separation.\n${dec.stderr.slice(-400)}`;
-      writeStatus(key, job);
-      return;
-    }
-  } else {
-    const acquired = await acquireRemoteWav(source, work, job);
-    if (!acquired) {
-      job.status = "error";
-      writeStatus(key, job);
-      return;
-    }
-    wavIn = acquired;
+  const wavIn = path.join(work, "input.wav");
+  const ffDecode = findFfmpeg();
+  job.progress = 0.05;
+  const dec = await run(ffDecode, [
+    "-nostdin",
+    "-hide_banner",
+    "-y",
+    "-i",
+    source.filePath,
+    "-ar",
+    "44100",
+    "-ac",
+    "2",
+    "-c:a",
+    "pcm_s16le",
+    wavIn,
+  ]);
+  if (dec.code !== 0 || !fs.existsSync(wavIn)) {
+    job.status = "error";
+    job.error = `Failed to decode audio for separation.\n${dec.stderr.slice(-400)}`;
+    writeStatus(key, job);
+    return;
   }
 
   job.progress = 0.1;
@@ -557,6 +407,8 @@ async function renderInstrumental(
 
   const ff = findFfmpeg();
   const mix = await run(ff, [
+    "-nostdin",
+    "-hide_banner",
     "-y",
     "-i",
     drums,
@@ -703,17 +555,10 @@ export function getKaraokeInfo(
     if (hit) return hit;
   }
 
-  // Stable live key preview when we already have artist/title
-  if (meta?.artist && meta?.title) {
-    const key = liveKey(meta.artist, meta.title);
-    const hit = infoFromKey(trackId, key);
-    if (hit) return hit;
-  }
-
-  // Library file ready without prior alias
-  const track = getTrack(trackId);
-  if (track?.path && !isStreamPath(track.path) && fs.existsSync(track.path)) {
-    const key = libraryKey(trackId, track.path);
+  const track = resolveKaraokeLibraryTrack(trackId, meta);
+  const filePath = fileOnDisk(track);
+  if (track && filePath) {
+    const key = libraryKey(track.id, filePath);
     const hit = infoFromKey(trackId, key);
     if (hit) return hit;
   }
@@ -721,21 +566,28 @@ export function getKaraokeInfo(
   return { status: "idle", quality: "none", progress: 0 };
 }
 
-function karaokeKeysForTrack(trackId: string): string[] {
+function karaokeKeysForTrack(
+  trackId: string,
+  meta?: KaraokeRequestMeta,
+): string[] {
   const keys = [
     lookupKey(trackId),
     jobs.get(trackId)?.key,
   ].filter(Boolean) as string[];
 
-  const track = getTrack(trackId);
-  if (track?.path && !isStreamPath(track.path) && fs.existsSync(track.path)) {
-    keys.push(libraryKey(trackId, track.path));
+  const track = resolveKaraokeLibraryTrack(trackId, meta);
+  const filePath = fileOnDisk(track);
+  if (track && filePath) {
+    keys.push(libraryKey(track.id, filePath));
   }
   return keys;
 }
 
-export function getInstrumentalFile(trackId: string): string | null {
-  for (const key of karaokeKeysForTrack(trackId)) {
+export function getInstrumentalFile(
+  trackId: string,
+  meta?: KaraokeRequestMeta,
+): string | null {
+  for (const key of karaokeKeysForTrack(trackId, meta)) {
     const inst = instrumentalPathForKey(key);
     if (fs.existsSync(inst) && fs.statSync(inst).size > 1024) return inst;
   }
@@ -743,8 +595,11 @@ export function getInstrumentalFile(trackId: string): string | null {
 }
 
 /** Isolated vocal stem when karaoke Demucs has already run for this track. */
-export function getVocalsFile(trackId: string): string | null {
-  for (const key of karaokeKeysForTrack(trackId)) {
+export function getVocalsFile(
+  trackId: string,
+  meta?: KaraokeRequestMeta,
+): string | null {
+  for (const key of karaokeKeysForTrack(trackId, meta)) {
     const vocals = vocalsPathForKey(key);
     if (fs.existsSync(vocals) && fs.statSync(vocals).size > 1024) return vocals;
   }
@@ -752,7 +607,7 @@ export function getVocalsFile(trackId: string): string | null {
 }
 
 /**
- * Ensure instrumental exists (queues Demucs for library or live/stream).
+ * Ensure instrumental exists (queues Demucs for an on-disk library file).
  */
 export function ensureKaraokeInstrumental(
   trackId: string,
@@ -771,6 +626,15 @@ export function ensureKaraokeInstrumental(
     };
   }
 
+  const source = resolveSource(trackId, meta);
+  if ("error" in source) {
+    return {
+      status: "unavailable",
+      quality: "none",
+      error: source.error,
+    };
+  }
+
   const existing = jobs.get(trackId);
   if (existing?.promise) {
     return {
@@ -781,25 +645,18 @@ export function ensureKaraokeInstrumental(
     };
   }
 
-  // Placeholder until resolveSource fills in key
   const job: JobState = {
     status: "queued",
     progress: 0,
-    key: lookupKey(trackId) || hashKey(trackId),
+    key: source.key,
   };
   jobs.set(trackId, job);
+  rememberKey(trackId, source.key);
+  rememberKey(source.libraryId, source.key);
 
   job.promise = chain = chain
     .then(async () => {
       job.status = "processing";
-      const source = await resolveSource(trackId, meta);
-      if ("error" in source) {
-        job.status = "unavailable";
-        job.error = source.error;
-        return;
-      }
-      job.key = source.key;
-      rememberKey(trackId, source.key);
       writeStatus(source.key, job);
       await renderInstrumental(trackId, source, job);
     })

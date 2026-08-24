@@ -206,6 +206,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         streamUrl: t.streamUrl || null,
         explicit: t.explicit,
         duration: t.duration || undefined,
+        quality: t.localTrackId ? "local" : "youtube",
       })),
     [tracks, album, artist, title],
   );
@@ -223,6 +224,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         coverPath,
         explicit: track.explicit,
         duration: track.duration || undefined,
+        quality: "local",
       };
       play(pt, [pt]);
       return;
@@ -270,6 +272,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         streamUrl: live.streamUrl || live.track.streamUrl,
         explicit: track.explicit,
         duration: track.duration || undefined,
+        quality: live.mode === "library" ? "local" : "youtube",
       };
       play(pt, [pt]);
     } catch (err) {
@@ -635,7 +638,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                           album={album?.title || title}
                           coverPath={album?.image || null}
                           duration={t.duration}
-                          inLibrary={t.available}
+                          onPolarr={t.available}
                           downloading={busy}
                           onDownload={
                             t.available

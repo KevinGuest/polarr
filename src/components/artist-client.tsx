@@ -375,7 +375,7 @@ export function ArtistClient() {
                           album={t.album}
                           coverPath={t.coverPath}
                           duration={t.duration}
-                          inLibrary
+                          onPolarr
                         />
                         <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">
                           {formatDuration(t.duration || 0)}

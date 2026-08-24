@@ -2,13 +2,20 @@
 
 import { Check, CirclePlus, Loader2 } from "lucide-react";
 import { AddToPlaylistMenu } from "@/components/add-to-playlist-menu";
+import { StreamQualityBadge } from "@/components/stream-quality-badge";
 import { TrackLikeButton } from "@/components/track-like-button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 /**
  * Like + add-to-playlist controls for a track row.
- * Plus (not in library) or check (in library) opens the same menu — no tooltips.
- * Parent row should use `group/row` for hover emphasis.
+ * Polarr badge (left of heart) = file is on this server.
+ * Plus opens playlists; check is only for tracks saved to Your Library.
  */
 export function TrackRowActions({
   trackId,
@@ -19,6 +26,7 @@ export function TrackRowActions({
   duration,
   liked,
   inLibrary,
+  onPolarr,
   downloading,
   onDownload,
   onLikedChange,
@@ -31,8 +39,10 @@ export function TrackRowActions({
   coverPath?: string | null;
   duration?: number;
   liked?: boolean;
-  /** Already saved / available in the library. */
+  /** Saved to a user playlist / Your Library — not “file exists on disk”. */
   inLibrary?: boolean;
+  /** Indexed on this Polarr server (Lidarr or Polarr download). */
+  onPolarr?: boolean;
   downloading?: boolean;
   onDownload?: () => void;
   onLikedChange?: (liked: boolean) => void;
@@ -41,10 +51,22 @@ export function TrackRowActions({
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center justify-end gap-0.5",
+        "flex shrink-0 items-center justify-end gap-1",
         className,
       )}
     >
+      {onPolarr ? (
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex shrink-0">
+                <StreamQualityBadge quality="local" available />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Available on Polarr</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : null}
       <TrackLikeButton
         trackId={trackId}
         artist={artist}
@@ -64,6 +86,7 @@ export function TrackRowActions({
         coverPath={coverPath}
         duration={duration}
         inLibrary={Boolean(inLibrary)}
+        onPolarr={Boolean(onPolarr)}
         onDownload={onDownload}
       >
         <button

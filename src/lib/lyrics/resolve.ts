@@ -1,12 +1,12 @@
 import { trackMatchKey } from "../track-match";
 import {
   getLyricsCache,
-  getTrack,
   setLyricsCache,
   setLyricsCacheAligned,
   setLyricsCacheOffset,
   type LyricsCacheRow,
 } from "../db";
+import { resolveKaraokeLibraryTrack } from "../karaoke-stems";
 import {
   suggestLyricsOffsetSec,
   clampLyricsOffset,
@@ -156,11 +156,14 @@ function parseStoredAligned(
 
 async function measureMediaBounds(
   trackId: string | null | undefined,
+  meta?: { artist?: string; title?: string },
 ): Promise<{ onsetSec: number | null; trailingSec: number | null }> {
   const empty = { onsetSec: null, trailingSec: null };
   const id = (trackId || "").trim();
-  if (!id) return empty;
-  const track = getTrack(id);
+  if (!id || id.startsWith("live:") || id.startsWith("stream:") || id.startsWith("catalog:")) {
+    return empty;
+  }
+  const track = resolveKaraokeLibraryTrack(id, meta);
   if (!track?.path) return empty;
   try {
     return await detectMediaContentBounds(track.path);
@@ -216,6 +219,7 @@ async function buildSession(
   mediaDurationSec: number | null,
   stored: LyricsCacheRow | null | undefined,
   trackId: string | null | undefined,
+  meta?: { artist?: string; title?: string },
 ): Promise<LyricSession> {
   const durationOffset = suggestLyricsOffsetSec({
     mediaDurationSec,
@@ -269,7 +273,7 @@ async function buildSession(
     );
   }
 
-  const audio = resolveAlignAudio(trackId);
+  const audio = resolveAlignAudio(trackId, meta);
   if (audio) {
     const fingerprint = alignCacheFingerprint(audio, doc.lines);
     const cachedAligned = parseStoredAligned(stored, fingerprint, doc.lines);
@@ -343,7 +347,7 @@ async function buildSession(
 
   let mediaOnsetSec: number | null = null;
   let mediaTrailingSec: number | null = null;
-  const bounds = await measureMediaBounds(trackId);
+  const bounds = await measureMediaBounds(trackId, meta);
   mediaOnsetSec = bounds.onsetSec;
   mediaTrailingSec = bounds.trailingSec;
 
@@ -390,8 +394,17 @@ export async function resolveLyrics(
     durationSec: mediaDurationSec,
   });
 
+  const alignMeta = { artist, title };
+
   if (!artist || !title) {
-    return buildSession(EMPTY, cacheKey, mediaDurationSec, null, input.trackId);
+    return buildSession(
+      EMPTY,
+      cacheKey,
+      mediaDurationSec,
+      null,
+      input.trackId,
+      alignMeta,
+    );
   }
 
   const cached = getLyricsCache(cacheKey);
@@ -402,6 +415,7 @@ export async function resolveLyrics(
       mediaDurationSec,
       cached,
       input.trackId,
+      alignMeta,
     );
   }
 
@@ -440,5 +454,12 @@ export async function resolveLyrics(
 
   // Re-read so user offset survives a content refresh
   const after = getLyricsCache(cacheKey);
-  return buildSession(doc, cacheKey, mediaDurationSec, after, input.trackId);
+  return buildSession(
+    doc,
+    cacheKey,
+    mediaDurationSec,
+    after,
+    input.trackId,
+    alignMeta,
+  );
 }

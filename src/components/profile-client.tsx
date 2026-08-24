@@ -450,7 +450,7 @@ export function ProfileClient({
                             album={t.album}
                             coverPath={t.coverPath}
                             duration={t.duration ?? undefined}
-                            inLibrary
+                            onPolarr
                           />
                         </td>
                         <td

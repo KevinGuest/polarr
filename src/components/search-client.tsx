@@ -22,11 +22,6 @@ import { toastSavingToLibrary } from "@/lib/toast";
 
 const TOP_PREVIEW = 8;
 
-type LocalTrack = PlayerTrack & {
-  duration: number;
-  source: string;
-};
-
 type CatalogTrack = {
   id: string;
   title: string;
@@ -34,6 +29,8 @@ type CatalogTrack = {
   album: string;
   image?: string;
   duration?: number;
+  localTrackId?: string;
+  onPolarr?: boolean;
 };
 
 type CatalogAlbum = {
@@ -81,7 +78,6 @@ export function SearchClient() {
   const { play } = usePlayer();
   const q = searchParams.get("q") || "";
   const view = searchParams.get("view");
-  const [local, setLocal] = useState<LocalTrack[]>([]);
   const [tracks, setTracks] = useState<CatalogTrack[]>([]);
   const [albums, setAlbums] = useState<CatalogAlbum[]>([]);
   const [artists, setArtists] = useState<CatalogArtist[]>([]);
@@ -93,7 +89,6 @@ export function SearchClient() {
   useEffect(() => {
     const term = q.trim();
     if (!term) {
-      setLocal([]);
       setTracks([]);
       setAlbums([]);
       setArtists([]);
@@ -102,8 +97,52 @@ export function SearchClient() {
       return;
     }
     let cancelled = false;
+    let gotFull = false;
     setLoading(true);
+
+    function applySearch(
+      data: {
+        tracks?: CatalogTrack[];
+        albums?: CatalogAlbum[];
+        artists?: CatalogArtist[];
+        lidarrError?: string | null;
+      },
+      isFull: boolean,
+    ) {
+      if (cancelled) return;
+      if (!isFull && gotFull) return;
+      if (isFull) gotFull = true;
+      setTracks(data.tracks || []);
+      setAlbums(data.albums || []);
+      setArtists(data.artists || []);
+      const hasHits =
+        (data.tracks?.length || 0) +
+          (data.albums?.length || 0) +
+          (data.artists?.length || 0) >
+        0;
+      setCatalogError(
+        hasHits
+          ? null
+          : isFull
+            ? data.lidarrError || "No matches — try another spelling."
+            : null,
+      );
+      if (hasHits || isFull) setLoading(false);
+    }
+
     const handle = setTimeout(() => {
+      void fetch(
+        `/api/search?q=${encodeURIComponent(term)}&library=1`,
+        { cache: "no-store" },
+      )
+        .then(async (r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data) applySearch(data, false);
+        })
+        .catch(() => {
+          /* full search still coming */
+        });
+
       void fetch(`/api/search?q=${encodeURIComponent(term)}`, {
         cache: "no-store",
       })
@@ -111,36 +150,13 @@ export function SearchClient() {
           if (!r.ok) throw new Error(`Search failed (${r.status})`);
           return r.json();
         })
-        .then((data) => {
-          if (cancelled) return;
-          setLocal(data.local || []);
-          setTracks(data.tracks || []);
-          setAlbums(data.albums || []);
-          setArtists(data.artists || []);
-          const hasCatalog =
-            (data.tracks?.length || 0) +
-              (data.albums?.length || 0) +
-              (data.artists?.length || 0) >
-            0;
-          setCatalogError(
-            hasCatalog
-              ? null
-              : data.lidarrError ||
-                  "No catalog matches — try another spelling.",
-          );
-        })
+        .then((data) => applySearch(data, true))
         .catch((err) => {
-          if (cancelled) return;
-          setLocal([]);
-          setTracks([]);
-          setAlbums([]);
-          setArtists([]);
+          if (cancelled || gotFull) return;
           setCatalogError(
             err instanceof Error ? err.message : "Search failed",
           );
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
+          setLoading(false);
         });
     }, 200);
     return () => {
@@ -150,13 +166,33 @@ export function SearchClient() {
   }, [q]);
 
   const catalogRows = useMemo((): CatalogRow[] => {
+    const inLib = albums.filter((a) => a.alreadyInLibrary);
+    const rest = albums.filter((a) => !a.alreadyInLibrary);
     return [
+      ...inLib.slice(0, 2).map((hit) => ({ kind: "album" as const, hit })),
       ...tracks.map((hit) => ({ kind: "track" as const, hit })),
-      ...albums.map((hit) => ({ kind: "album" as const, hit })),
+      ...[...inLib.slice(2), ...rest].map((hit) => ({
+        kind: "album" as const,
+        hit,
+      })),
     ];
   }, [tracks, albums]);
 
   async function playCatalogTrack(hit: CatalogTrack) {
+    if (hit.localTrackId) {
+      const pt: PlayerTrack = {
+        id: hit.localTrackId,
+        title: hit.title,
+        artist: formatTrackArtistLine(hit.artist, hit.title),
+        resolveArtist: hit.artist,
+        album: hit.album,
+        coverPath: hit.image || null,
+        duration: hit.duration,
+        quality: "local",
+      };
+      play(pt, [pt]);
+      return;
+    }
     setBusy(`track:${hit.id}`);
     setMessage(null);
     try {
@@ -191,6 +227,7 @@ export function SearchClient() {
         album: live.track.album || hit.album,
         coverPath: hit.image || live.track.coverPath || null,
         streamUrl: live.streamUrl || live.track.streamUrl,
+        quality: live.mode === "library" ? "local" : "youtube",
       };
       play(pt, [pt]);
     } catch (err) {
@@ -241,6 +278,7 @@ export function SearchClient() {
           album: albumTitle,
           coverPath: cover,
           duration: t.duration || undefined,
+          quality: t.localTrackId ? "local" : "youtube",
         }),
       );
       const first = queue[0]!;
@@ -256,7 +294,6 @@ export function SearchClient() {
   const empty =
     !loading &&
     term &&
-    local.length === 0 &&
     catalogRows.length === 0 &&
     artists.length === 0;
 
@@ -386,12 +423,13 @@ export function SearchClient() {
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <TrackRowActions
-              trackId={t.id}
+              trackId={t.localTrackId || t.id}
               artist={t.artist}
               title={t.title}
               album={t.album}
               coverPath={t.image}
               duration={t.duration}
+              onPolarr={Boolean(t.onPolarr)}
             />
             <Button
               size="sm"
@@ -517,75 +555,6 @@ export function SearchClient() {
           />
           <ul className="min-w-0 divide-y divide-border/60 overflow-hidden rounded-xl border border-border">
             {topPreview.map((row) => renderCatalogRow(row))}
-          </ul>
-        </section>
-      ) : null}
-
-      {local.length > 0 ? (
-        <section className="min-w-0 space-y-3">
-          <h2 className="text-sm font-medium text-muted-foreground">
-            On this server
-          </h2>
-          <ul className="min-w-0 divide-y divide-border/60 overflow-hidden rounded-xl border border-border">
-            {local.map((t) => (
-              <TrackContextMenu key={t.id} track={t}>
-                <li className="group/row flex min-w-0 items-center gap-3 px-4 py-3.5">
-                  <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
-                    {t.album ? (
-                      <button
-                        type="button"
-                        aria-label={`Open album ${t.album}`}
-                        onClick={() =>
-                          router.push(
-                            albumHref({
-                              title: t.album,
-                              artist: t.artist,
-                            }),
-                          )
-                        }
-                        className="shrink-0 rounded-md transition-opacity hover:opacity-90"
-                      >
-                        <CoverArt
-                          seed={t.title}
-                          image={t.coverPath}
-                          className="size-10 rounded-md"
-                        />
-                      </button>
-                    ) : (
-                      <CoverArt
-                        seed={t.title}
-                        image={t.coverPath}
-                        className="size-10 shrink-0 rounded-md"
-                      />
-                    )}
-                    <div className="min-w-0 flex-1 overflow-hidden">
-                      <div className="truncate font-medium">{t.title}</div>
-                      <div className="truncate text-sm text-muted-foreground">
-                        {formatTrackArtistLine(t.artist, t.title)} · {t.album}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <TrackRowActions
-                      trackId={t.id}
-                      artist={t.artist}
-                      title={t.title}
-                      album={t.album}
-                      coverPath={t.coverPath}
-                      duration={t.duration}
-                      inLibrary
-                    />
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => play(t, [t])}
-                    >
-                      <Play className="size-4" /> Play
-                    </Button>
-                  </div>
-                </li>
-              </TrackContextMenu>
-            ))}
           </ul>
         </section>
       ) : null}

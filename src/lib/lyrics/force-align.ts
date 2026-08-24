@@ -12,8 +12,7 @@
  */
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import { getTrack } from "../db";
-import { getVocalsFile } from "../karaoke-stems";
+import { resolveKaraokeLibraryTrack, getVocalsFile } from "../karaoke-stems";
 import type { LyricLine } from "./types";
 import {
   clampWarpScale,
@@ -303,12 +302,23 @@ function isStreamPath(p: string | null | undefined): boolean {
   );
 }
 
-/** Prefer a cached Demucs vocals stem; else the library mix. */
-export function resolveAlignAudio(trackId: string | null | undefined): AlignAudioRef | null {
-  const id = (trackId || "").trim();
-  if (!id) return null;
+function isEphemeralTrackId(id: string): boolean {
+  return (
+    id.startsWith("live:") ||
+    id.startsWith("stream:") ||
+    id.startsWith("catalog:")
+  );
+}
 
-  const vocals = getVocalsFile(id);
+/** Prefer a cached Demucs vocals stem; else the library mix. */
+export function resolveAlignAudio(
+  trackId: string | null | undefined,
+  meta?: { artist?: string; title?: string },
+): AlignAudioRef | null {
+  const id = (trackId || "").trim();
+  if (!id || isEphemeralTrackId(id)) return null;
+
+  const vocals = getVocalsFile(id, meta);
   if (vocals) {
     try {
       const st = fs.statSync(vocals);
@@ -324,7 +334,7 @@ export function resolveAlignAudio(trackId: string | null | undefined): AlignAudi
     }
   }
 
-  const track = getTrack(id);
+  const track = resolveKaraokeLibraryTrack(id, meta);
   const mix = track?.path?.trim() || "";
   if (!mix || isStreamPath(mix)) return null;
   try {
@@ -451,6 +461,8 @@ export function alignLinesToEnvelope(
 export async function forceAlignLyricLines(input: {
   lines: LyricLine[];
   trackId: string | null | undefined;
+  artist?: string;
+  title?: string;
   sourceDurationSec?: number | null;
   mediaDurationSec?: number | null;
   autoOffsetSec: number;
@@ -458,7 +470,10 @@ export async function forceAlignLyricLines(input: {
   mediaTrailingSec?: number | null;
 }): Promise<ForceAlignResult | null> {
   if (input.lines.length < 4) return null;
-  const audio = resolveAlignAudio(input.trackId);
+  const audio = resolveAlignAudio(input.trackId, {
+    artist: input.artist,
+    title: input.title,
+  });
   if (!audio) return null;
 
   const envelope = await extractMediaEnvelope(audio.path, audio.kind);

@@ -29,8 +29,10 @@ import {
   matchSearchQueries,
   namesMatch,
   primaryArtistName,
+  scoreSearchHit,
   scoreTrackMatch,
   titlesMatch,
+  tokenizeSearchQuery,
   TRACK_MATCH_MIN_SCORE,
   trackMatchKey,
 } from "./track-match";
@@ -2594,18 +2596,83 @@ export function countTracks(): number {
   return row.c;
 }
 
+const SEARCH_STOP = new Set([
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "of",
+  "ft",
+  "feat",
+  "featuring",
+]);
+
+function queryLibraryByTokens(
+  tokens: string[],
+  limit: number,
+): Record<string, unknown>[] {
+  if (tokens.length === 0) return [];
+  const clauses: string[] = [];
+  const params: string[] = [];
+  for (const raw of tokens) {
+    const clean = raw.replace(/[%_]/g, "");
+    if (clean.length < 2) continue;
+    const stripped = clean.replace(/'/g, "");
+    const variants =
+      stripped && stripped !== clean ? [clean, stripped] : [clean];
+    const parts: string[] = [];
+    for (const v of variants) {
+      const like = `%${v}%`;
+      parts.push(
+        `title LIKE ? OR artist LIKE ? OR album LIKE ? OR ifnull(match_key,'') LIKE ?`,
+      );
+      params.push(like, like, like, like);
+    }
+    if (parts.length) clauses.push(`(${parts.join(" OR ")})`);
+  }
+  if (!clauses.length) return [];
+  return getDb()
+    .prepare(
+      `${TRACK_SELECT}
+       WHERE (${LIBRARY_TRACK_FILTER})
+         AND ${clauses.join(" AND ")}
+       LIMIT ?`,
+    )
+    .all(...params, limit) as Record<string, unknown>[];
+}
+
+function scoreLocalSearchHit(query: string, t: TrackRow): number {
+  return scoreSearchHit(query, {
+    title: t.title,
+    artist: t.artist,
+    album: t.album,
+  });
+}
+
+/**
+ * Library files matching a free-text query. Token AND across title/artist/album
+ * + match_key, ranked by the same scorer as catalog search.
+ */
 export function searchTracksLocal(q: string, limit = 50): TrackRow[] {
-  const like = `%${q}%`;
-  return (
-    getDb()
-      .prepare(
-        `${TRACK_SELECT}
-         WHERE (${LIBRARY_TRACK_FILTER})
-           AND (title LIKE ? OR artist LIKE ? OR album LIKE ?)
-         ORDER BY title ASC LIMIT ?`,
-      )
-      .all(like, like, like, limit) as Record<string, unknown>[]
-  ).map(mapTrack);
+  const term = q.trim().replace(/\s+/g, " ");
+  if (!term) return [];
+  const tokens = tokenizeSearchQuery(term);
+  if (tokens.length === 0) return [];
+
+  const fetchN = Math.min(Math.max(limit * 8, 80), 400);
+  let rows = queryLibraryByTokens(tokens, fetchN);
+  if (rows.length === 0 && tokens.length > 1) {
+    const core = tokens.filter((t) => t.length >= 3 && !SEARCH_STOP.has(t));
+    if (core.length > 0 && core.length < tokens.length) {
+      rows = queryLibraryByTokens(core, fetchN);
+    }
+  }
+
+  return rows
+    .map(mapTrack)
+    .sort((a, b) => scoreLocalSearchHit(term, b) - scoreLocalSearchHit(term, a))
+    .slice(0, limit);
 }
 
 export function getTrack(id: string): TrackRow | null {
@@ -4514,9 +4581,31 @@ export function listRecentPlays(
   }));
 }
 
+function listeningRowOnDisk(t: TrackRow): boolean {
+  if (t.source === "stream") return false;
+  const p = (t.path || "").trim();
+  return Boolean(p) && !p.startsWith("stream://") && !p.startsWith("live://");
+}
+
+/** Prefer a library/Lidarr file (and its cover) when the same song has a stream row. */
+function promoteListeningRow(entry: TrackRow, next: TrackRow) {
+  if (!listeningRowOnDisk(entry) && listeningRowOnDisk(next)) {
+    entry.id = next.id;
+    entry.path = next.path;
+    entry.source = next.source;
+    entry.externalId = next.externalId;
+    entry.fileSize = next.fileSize;
+    entry.duration = next.duration || entry.duration;
+    entry.album = next.album || entry.album;
+    if (next.coverPath) entry.coverPath = next.coverPath;
+    return;
+  }
+  if (!entry.coverPath && next.coverPath) entry.coverPath = next.coverPath;
+}
+
 /**
- * Recent listens from everyone on this homeserver (unique tracks by
- * artist+title). Collects every listener for each track (≥15s), newest first.
+ * Recent listens from everyone on this homeserver (unique songs via
+ * trackMatchKey). Collects every listener for each track (≥15s), newest first.
  */
 export function listOthersListening(
   _viewerUserId: string,
@@ -4571,7 +4660,11 @@ export function listOthersListening(
 
   for (const row of rows) {
     const track = mapTrack(row);
-    const key = `${track.artist.trim().toLowerCase()}|${track.title.trim().toLowerCase()}`;
+    // Same song identity as library matching — not raw artist|title.
+    // Stream rows often keep feat. / curly quotes that Lidarr files drop.
+    const key =
+      trackMatchKey(track.artist, track.title) ||
+      `${track.artist.trim().toLowerCase()}|${track.title.trim().toLowerCase()}`;
     const userId = String(row.listenedByUserId || "");
     const username = String(row.listenedBy || "").trim();
     if (!userId || !username) continue;
@@ -4579,11 +4672,7 @@ export function listOthersListening(
 
     let entry = byKey.get(key);
     if (!entry) {
-      if (order.length >= limit) {
-        // Still attach listeners to already-listed tracks (same key later in list
-        // can't happen with DESC order by key first hit = newest).
-        continue;
-      }
+      if (order.length >= limit) continue;
       entry = {
         ...track,
         playedAt: String(row.playedAt),
@@ -4595,6 +4684,8 @@ export function listOthersListening(
       };
       byKey.set(key, entry);
       order.push(key);
+    } else {
+      promoteListeningRow(entry, track);
     }
 
     if (entry.userSeen.has(userId)) continue;
@@ -4933,22 +5024,41 @@ export function listLikedTracks(
     )
     .all(userId, limit) as Record<string, unknown>[];
 
-  return rows.map((row) => ({
-    id: String(row.id),
-    title: String(row.title),
-    artist: String(row.artist),
-    album: String(row.album || row.title || ""),
-    duration: Number(row.duration) || 0,
-    path: String(row.path || ""),
-    coverPath: (row.coverPath as string | null) || null,
-    source: asTrackSource(row.source || "stream"),
-    externalId: (row.externalId as string | null) || null,
-    fileSize: Number(row.fileSize) || 0,
-    mtimeMs: Number(row.mtimeMs) || 0,
-    addedAt: String(row.addedAt),
-    updatedAt: String(row.updatedAt),
-    likedAt: String(row.likedAt),
-  }));
+  return rows.map((row) => {
+    const base = {
+      id: String(row.id),
+      title: String(row.title),
+      artist: String(row.artist),
+      album: String(row.album || row.title || ""),
+      duration: Number(row.duration) || 0,
+      path: String(row.path || ""),
+      coverPath: (row.coverPath as string | null) || null,
+      source: asTrackSource(row.source || "stream"),
+      externalId: (row.externalId as string | null) || null,
+      fileSize: Number(row.fileSize) || 0,
+      mtimeMs: Number(row.mtimeMs) || 0,
+      addedAt: String(row.addedAt),
+      updatedAt: String(row.updatedAt),
+      likedAt: String(row.likedAt),
+    };
+    if (base.path) return base;
+    const hit = findTrack(base.artist, base.title);
+    if (!hit?.path) return base;
+    return {
+      ...base,
+      id: hit.id,
+      title: hit.title || base.title,
+      artist: hit.artist || base.artist,
+      album: hit.album || base.album,
+      duration: hit.duration || base.duration,
+      path: hit.path,
+      coverPath: hit.coverPath || base.coverPath,
+      source: hit.source,
+      externalId: hit.externalId ?? base.externalId,
+      fileSize: hit.fileSize || base.fileSize,
+      mtimeMs: hit.mtimeMs || base.mtimeMs,
+    };
+  });
 }
 
 /** Accumulate played seconds for a signed-in user (3-hour UTC buckets). */

@@ -280,7 +280,7 @@ export function TopTracksClient({
                         album={t.album}
                         coverPath={t.coverPath}
                         duration={t.duration ?? undefined}
-                        inLibrary
+                        onPolarr
                       />
                     </td>
                     <td

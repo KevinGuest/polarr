@@ -64,6 +64,22 @@ export function playbackQuality(track: PlayerTrack): PlaybackQuality {
   return "local";
 }
 
+/** Karaoke only when the player is actually reading a file on this server. */
+export function isKaraokeEligible(track: PlayerTrack | null | undefined): boolean {
+  if (!track?.id) return false;
+  if (
+    track.id.startsWith("live:") ||
+    track.id.startsWith("stream:") ||
+    track.id.startsWith("catalog:")
+  ) {
+    return false;
+  }
+  if (track.streamUrl && /\/api\/live\//i.test(track.streamUrl)) {
+    return false;
+  }
+  return playbackQuality(track) === "local";
+}
+
 function withExplicit(track: PlayerTrack): PlayerTrack {
   if (track.explicit) return track;
   return titleLooksExplicit(track.title)
@@ -165,6 +181,8 @@ type PlayerContextValue = {
   karaokeStatus: KaraokeUiStatus;
   karaokeProgress: number;
   karaokeError: string | null;
+  /** True when the current track is a file on this server (not YouTube/live). */
+  karaokeEligible: boolean;
   shuffle: boolean;
   /** True when any overlay is open (legacy convenience). */
   panel: PlayerPanel;
@@ -1606,6 +1624,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             streamUrl?: string;
           };
           if (cancelled || trackRef.current?.id !== trackId) return;
+          if (!isKaraokeEligible(trackRef.current)) return;
           const status = data.status ?? "error";
           setKaraokeStatus(status);
           setKaraokeProgress(data.progress ?? 0);
@@ -1644,6 +1663,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const setVocalLevel = useCallback(
     (v: number) => {
+      if (!isKaraokeEligible(trackRef.current)) {
+        vocalLevelRef.current = 1;
+        setVocalLevelState(1);
+        applyMixVolumes();
+        return;
+      }
       const next = Math.max(0, Math.min(1, v));
       setVocalLevelState(next);
       vocalLevelRef.current = next;
@@ -1686,9 +1711,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(id);
   }, [playing]);
 
-  // Demucs instrumental for library + live/stream (download then separate)
+  // Demucs instrumental — library files only (YouTube/live mix is unsyncable)
   useEffect(() => {
     if (!track?.id) return;
+    if (!isKaraokeEligible(track)) return;
     if (vocalLevel >= 0.999) return;
     if (instReadyRef.current) return;
     return prepareKaraoke(
@@ -1702,9 +1728,35 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     track?.artist,
     track?.title,
     track?.album,
+    track?.quality,
+    track?.streamUrl,
     vocalLevel,
     prepareKaraoke,
   ]);
+
+  // Skip / play a stream while karaoke is open — dump the mix, don't yt-dlp
+  useEffect(() => {
+    if (!track) return;
+    if (isKaraokeEligible(track)) return;
+
+    vocalLevelRef.current = 1;
+    setVocalLevelState(1);
+    instReadyRef.current = false;
+    const inst = instAudioRef.current;
+    if (inst) {
+      inst.pause();
+      inst.removeAttribute("src");
+      try {
+        inst.load();
+      } catch {
+        /* ignore */
+      }
+    }
+    setKaraokeStatus("idle");
+    setKaraokeProgress(0);
+    setKaraokeError(null);
+    applyMixVolumes();
+  }, [track?.id, track?.quality, track?.streamUrl, applyMixVolumes]);
 
   const toggleShuffle = useCallback(() => {
     setShuffle((prev) => {
@@ -1855,6 +1907,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           ? "devices"
           : "none";
 
+  const karaokeEligible = isKaraokeEligible(track);
+
   const value = useMemo(
     () => ({
       track,
@@ -1867,6 +1921,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       karaokeStatus,
       karaokeProgress,
       karaokeError,
+      karaokeEligible,
       shuffle,
       panel,
       isPanelOpen,
@@ -1900,6 +1955,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       karaokeStatus,
       karaokeProgress,
       karaokeError,
+      karaokeEligible,
       shuffle,
       panel,
       isPanelOpen,

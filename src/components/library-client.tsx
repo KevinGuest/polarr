@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Clock,
@@ -13,6 +14,7 @@ import { CoverArt } from "@/components/cover-art";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
 import { TrackRowIndex } from "@/components/track-row-index";
+import { ExplicitBadge } from "@/components/explicit-badge";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
 import { albumHref } from "@/lib/album-ref";
 import {
@@ -27,7 +29,7 @@ import {
   trackRowMidCell,
   trackRowStartCell,
 } from "@/lib/player-row";
-import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine } from "@/lib/utils";
+import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine, titleLooksExplicit } from "@/lib/utils";
 
 type Track = PlayerTrack & {
   source: string;
@@ -37,6 +39,44 @@ type Track = PlayerTrack & {
   liked?: boolean;
   streamOnly?: boolean;
 };
+
+function toPlayable(t: Track): PlayerTrack {
+  const local =
+    Boolean(t.path) &&
+    !t.streamOnly &&
+    !t.id.startsWith("stream:") &&
+    !t.id.startsWith("live:") &&
+    !t.id.startsWith("catalog:");
+  const explicit = t.explicit ?? titleLooksExplicit(t.title);
+  if (local) {
+    return {
+      id: t.id,
+      title: t.title,
+      artist: t.artist,
+      album: t.album || t.title,
+      coverPath: t.coverPath,
+      duration: t.duration,
+      quality: "local",
+      explicit,
+    };
+  }
+  const id =
+    t.id.startsWith("live:") ||
+    t.id.startsWith("stream:") ||
+    t.id.startsWith("catalog:")
+      ? t.id
+      : `stream:${t.artist.trim().toLowerCase()}|${t.title.trim().toLowerCase()}`;
+  return {
+    id,
+    title: t.title,
+    artist: t.artist,
+    album: t.album || t.title,
+    coverPath: t.coverPath,
+    duration: t.duration,
+    quality: "youtube",
+    explicit,
+  };
+}
 
 export function LibraryClient({
   mode = "library",
@@ -198,6 +238,15 @@ export function LibraryClient({
     };
   }, [albums, filterAlbum, filterArtist, mode, filteredTracks]);
 
+  const playableQueue = useMemo(
+    () => filteredTracks.map(toPlayable),
+    [filteredTracks],
+  );
+
+  function playFrom(t: Track) {
+    play(toPlayable(t), playableQueue);
+  }
+
   const albumView = mode !== "liked" && Boolean(filterAlbum);
 
   const featured =
@@ -330,7 +379,7 @@ export function LibraryClient({
               {filteredTracks[0] && (
                 <button
                   type="button"
-                  onClick={() => play(filteredTracks[0], filteredTracks)}
+                  onClick={() => playFrom(filteredTracks[0])}
                   className={cn(
                     "flex items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-90",
                     albumView ? "size-14" : "h-10 gap-2 rounded-md px-4 text-sm font-medium",
@@ -399,14 +448,14 @@ export function LibraryClient({
                   return (
                     <TrackContextMenu
                       key={t.id}
-                      track={t}
+                      track={toPlayable(t)}
                       inLibrary={!t.streamOnly}
                     >
                       <tr
                         draggable
                         onDragStart={(e) => setDragTrack(e, t)}
                         className="group/row cursor-grab transition-colors active:cursor-grabbing"
-                        onClick={() => play(t, filteredTracks)}
+                        onClick={() => playFrom(t)}
                       >
                       <td
                         className={trackRowStartCell(
@@ -433,7 +482,7 @@ export function LibraryClient({
                           coverPath={t.coverPath}
                           duration={t.duration}
                           liked={likedIds.has(t.id) || Boolean(t.liked)}
-                          inLibrary={!t.streamOnly}
+                          onPolarr={!t.streamOnly}
                           onDownload={
                             t.streamOnly
                               ? () => void downloadTrack(t)
@@ -468,9 +517,6 @@ export function LibraryClient({
                   <th className="hidden pb-3 pr-4 font-medium md:table-cell">
                     Album
                   </th>
-                  <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
-                    Source
-                  </th>
                   <th className="w-[5.5rem] pb-3 font-medium" aria-label="Actions" />
                   <th className="w-16 pb-3 pr-2 text-right font-medium">
                     Duration
@@ -479,10 +525,11 @@ export function LibraryClient({
               </thead>
               <tbody>
                 {filteredTracks.map((t, i) => {
+                  const playable = toPlayable(t);
                   const isCurrent = isPlayerRowCurrent(
                     track,
                     {
-                      id: t.id,
+                      id: playable.id,
                       localTrackId: t.id,
                       title: t.title,
                       artist: t.artist,
@@ -492,14 +539,14 @@ export function LibraryClient({
                   return (
                     <TrackContextMenu
                       key={t.id}
-                      track={t}
+                      track={playable}
                       inLibrary={!t.streamOnly}
                     >
                       <tr
                         draggable
-                        onDragStart={(e) => setDragTrack(e, t)}
+                        onDragStart={(e) => setDragTrack(e, playable)}
                         className="group/row cursor-grab transition-colors active:cursor-grabbing"
-                        onClick={() => play(t, filteredTracks)}
+                        onClick={() => playFrom(t)}
                       >
                       <td
                         className={trackRowStartCell(
@@ -510,12 +557,25 @@ export function LibraryClient({
                         <TrackRowIndex n={i + 1} isCurrent={isCurrent} />
                       </td>
                       <td className={trackRowMidCell(isCurrent, "py-3 pr-4")}>
-                        <div className="flex items-center gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
                           <CoverArt
-                            seed={t.title}
-                            className="size-9 shrink-0 rounded-md"
+                            seed={`${t.artist}-${t.title}`}
+                            image={t.coverPath}
+                            className="size-10 shrink-0 rounded-sm"
                           />
-                          <span className="font-medium">{t.title}</span>
+                          <div className="min-w-0">
+                            <div className="truncate font-medium">{t.title}</div>
+                            {mode === "liked" ? (
+                              <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground md:hidden">
+                                {titleLooksExplicit(t.title) ? (
+                                  <ExplicitBadge />
+                                ) : null}
+                                <span className="truncate">
+                                  {formatTrackArtistLine(t.artist, t.title)}
+                                </span>
+                              </div>
+                            ) : null}
+                          </div>
                         </div>
                       </td>
                       <td
@@ -532,19 +592,20 @@ export function LibraryClient({
                           "hidden py-3 pr-4 text-muted-foreground md:table-cell",
                         )}
                       >
-                        {t.album}
-                      </td>
-                      <td
-                        className={trackRowMidCell(
-                          isCurrent,
-                          "hidden py-3 pr-4 text-xs text-muted-foreground sm:table-cell",
+                        {t.album && t.artist ? (
+                          <Link
+                            href={albumHref({
+                              title: t.album,
+                              artist: t.artist,
+                            })}
+                            onClick={(e) => e.stopPropagation()}
+                            className="block truncate hover:underline"
+                          >
+                            {t.album}
+                          </Link>
+                        ) : (
+                          t.album
                         )}
-                      >
-                        {t.streamOnly
-                          ? "stream"
-                          : t.source === "fallback"
-                            ? "download"
-                            : t.source}
                       </td>
                       <td className={trackRowMidCell(isCurrent, "py-3")}>
                         <TrackRowActions
@@ -559,7 +620,7 @@ export function LibraryClient({
                             likedIds.has(t.id) ||
                             Boolean(t.liked)
                           }
-                          inLibrary={!t.streamOnly}
+                          onPolarr={!t.streamOnly}
                           onDownload={
                             t.streamOnly
                               ? () => void downloadTrack(t)

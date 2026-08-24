@@ -5,6 +5,7 @@
  */
 
 import { namesMatch, normalizeArtistName } from "@/lib/artist-portrait";
+import { scoreSearchHit } from "@/lib/track-match";
 
 export type CatalogTrackHit = {
   id: string;
@@ -13,6 +14,10 @@ export type CatalogTrackHit = {
   album: string;
   image?: string;
   duration?: number;
+  /** Library file id when this song is already on the server. */
+  localTrackId?: string;
+  /** Indexed on this Polarr server (Lidarr or download). */
+  onPolarr?: boolean;
 };
 
 export type CatalogAlbumHit = {
@@ -384,7 +389,7 @@ function mergeTracks(
   const out = [...byKey.values()];
   if (query?.trim()) {
     out.sort(
-      (a, b) => scoreTrackHit(query, b) - scoreTrackHit(query, a),
+      (a, b) => scoreSearchHit(query, b) - scoreSearchHit(query, a),
     );
   }
   return out.slice(0, limit);
@@ -395,65 +400,7 @@ function mergeTracks(
  * don’t match the title. Artist/feat tokens still help break ties.
  */
 export function scoreTrackHit(query: string, hit: CatalogTrackHit): number {
-  const q = query.trim().toLowerCase().replace(/\s+/g, " ");
-  if (!q) return 0;
-
-  const title = hit.title.trim().toLowerCase();
-  // Strip featuring clutter for title equality checks
-  const titleCore = title
-    .replace(/\s*[\(\[][^)\]]*feat[^)\]]*[\)\]]/gi, "")
-    .replace(/\s*[\(\[][^)\]]*ft\.?[^)\]]*[\)\]]/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  const artist = hit.artist.trim().toLowerCase();
-  const album = (hit.album || "").trim().toLowerCase();
-  const hay = `${title} ${artist} ${album}`;
-
-  if (titleCore === q || title === q) return 10_000;
-  if (`${artist} - ${titleCore}` === q || `${titleCore} - ${artist}` === q) {
-    return 9_800;
-  }
-
-  const tokens = q.split(" ").filter((t) => t.length > 0);
-  if (tokens.length === 0) return 0;
-
-  // Longest query prefix that equals the title (“love me” from “love me drake”)
-  let phraseBonus = 0;
-  for (let n = tokens.length; n >= 1; n--) {
-    const phrase = tokens.slice(0, n).join(" ");
-    if (titleCore === phrase || title === phrase) {
-      phraseBonus = 5_000 + n * 200;
-      break;
-    }
-    if (titleCore.startsWith(phrase) || title.includes(phrase)) {
-      phraseBonus = Math.max(phraseBonus, 2_500 + n * 150);
-    }
-  }
-
-  let titleHits = 0;
-  let artistHits = 0;
-  let otherHits = 0;
-  let missing = 0;
-  for (const tok of tokens) {
-    if (titleCore.includes(tok) || title.includes(tok)) titleHits += 1;
-    else if (artist.includes(tok)) artistHits += 1;
-    else if (album.includes(tok) || hay.includes(tok)) otherHits += 1;
-    else missing += 1;
-  }
-
-  // Artist-only hits (God’s Plan for “love me drake”) stay near the bottom
-  if (titleHits === 0 && phraseBonus === 0) {
-    return artistHits * 25 + otherHits * 5 - missing * 40;
-  }
-
-  return (
-    phraseBonus +
-    titleHits * 400 +
-    artistHits * 120 +
-    otherHits * 20 -
-    missing * 30 +
-    (titleHits === tokens.length ? 800 : 0)
-  );
+  return scoreSearchHit(query, hit);
 }
 
 function mergeAlbums(

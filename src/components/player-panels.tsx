@@ -60,6 +60,7 @@ function LyricsPanel() {
     karaokeStatus,
     karaokeProgress,
     karaokeError,
+    karaokeEligible,
   } = usePlayer();
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const activeRef = useRef<HTMLButtonElement | null>(null);
@@ -70,7 +71,7 @@ function LyricsPanel() {
     artist: track?.artist,
     title: track?.title,
     album: track?.album,
-    trackId: track?.id,
+    trackId: karaokeEligible ? track?.id : undefined,
     mediaDurationSec: duration > 0 ? duration : undefined,
     progressSec: progress,
   });
@@ -244,7 +245,8 @@ function LyricsPanel() {
         </div>
       ) : null}
 
-      {/* Bottom-right: full mix ↔ Demucs instrumental */}
+      {/* Bottom-right: full mix ↔ Demucs instrumental (downloaded tracks only) */}
+      {karaokeEligible ? (
       <div className="absolute bottom-8 right-6 z-20 flex flex-col items-center gap-2 rounded-full bg-black/45 px-2.5 py-3.5 ring-1 ring-white/12 backdrop-blur-md">
         <button
           type="button"
@@ -314,6 +316,7 @@ function LyricsPanel() {
           </span>
         )}
       </div>
+      ) : null}
     </div>
   );
 }

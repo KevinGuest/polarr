@@ -10,7 +10,7 @@ import Database from "better-sqlite3";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { avatarsDir, dbPath, unlinkManagedAudioFile } from "./paths";
+import { avatarsDir, dbPath, playlistCoversDir, unlinkManagedAudioFile } from "./paths";
 import {
   parseNotifyEvents,
   serializeNotifyEvents,
@@ -27,8 +27,10 @@ import {
 } from "./download-quality";
 import {
   matchSearchQueries,
+  namesMatch,
   primaryArtistName,
   scoreTrackMatch,
+  titlesMatch,
   TRACK_MATCH_MIN_SCORE,
   trackMatchKey,
 } from "./track-match";
@@ -68,6 +70,8 @@ export type Settings = {
   /** Discord OAuth app (user linking + Rich Presence client id). */
   discordClientId: string;
   discordClientSecret: string;
+  /** When a catalog track is played live, also acquire it into the library. */
+  saveOnPlay: boolean;
 };
 
 export type MediaType = "artist" | "album" | "track";
@@ -590,6 +594,18 @@ function migrate(database: Database.Database) {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      cover_path TEXT,
+      folder_id TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS playlist_folders (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -700,6 +716,14 @@ function migrate(database: Database.Database) {
   );
   ensureColumn(database, "notifications", "image_url", "image_url TEXT");
   ensureColumn(database, "notifications", "media_type", "media_type TEXT");
+  ensureColumn(database, "playlists", "cover_path", "cover_path TEXT");
+  ensureColumn(database, "playlists", "folder_id", "folder_id TEXT");
+  ensureColumn(
+    database,
+    "playlists",
+    "description",
+    "description TEXT NOT NULL DEFAULT ''",
+  );
 
   // Bans table for existing installs (also in main CREATE for new DBs)
   database.exec(`
@@ -729,7 +753,17 @@ function migrate(database: Database.Database) {
       lines_json TEXT NOT NULL DEFAULT '[]',
       offset_sec REAL NOT NULL DEFAULT 0,
       offset_user_set INTEGER NOT NULL DEFAULT 0,
-      fetched_at TEXT NOT NULL
+      fetched_at TEXT NOT NULL,
+      aligned_json TEXT,
+      aligned_fingerprint TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS library_pins (
+      user_id TEXT NOT NULL,
+      item_key TEXT NOT NULL,
+      pinned_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, item_key),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
   `);
   ensureColumn(
@@ -737,6 +771,13 @@ function migrate(database: Database.Database) {
     "lyrics_cache",
     "offset_user_set",
     "offset_user_set INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(database, "lyrics_cache", "aligned_json", "aligned_json TEXT");
+  ensureColumn(
+    database,
+    "lyrics_cache",
+    "aligned_fingerprint",
+    "aligned_fingerprint TEXT",
   );
 
   // v3: likes may reference streamed tracks (no library file / no track FK)
@@ -802,6 +843,8 @@ function migrate(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_play_history_track ON play_history(track_id);
     CREATE INDEX IF NOT EXISTS idx_track_likes_user ON track_likes(user_id, liked_at DESC);
     CREATE INDEX IF NOT EXISTS idx_playlists_user ON playlists(user_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_playlists_folder ON playlists(folder_id);
+    CREATE INDEX IF NOT EXISTS idx_playlist_folders_user ON playlist_folders(user_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_playlist_tracks ON playlist_tracks(playlist_id, position);
     CREATE INDEX IF NOT EXISTS idx_taste_excludes_user ON taste_excludes(user_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at DESC);
@@ -879,6 +922,7 @@ export function getSettings(): Settings {
       getSetting("discordClientSecret", "") ||
       process.env.POLARR_DISCORD_CLIENT_SECRET ||
       "",
+    saveOnPlay: getSetting("saveOnPlay", "true") !== "false",
   };
 }
 
@@ -911,6 +955,7 @@ export function updateSettings(partial: Partial<Settings>): Settings {
   setSetting("spotifyClientSecret", next.spotifyClientSecret);
   setSetting("discordClientId", next.discordClientId);
   setSetting("discordClientSecret", next.discordClientSecret);
+  setSetting("saveOnPlay", String(next.saveOnPlay));
   return next;
 }
 
@@ -1957,6 +2002,8 @@ export type LyricsCacheRow = {
   offsetSec: number;
   offsetUserSet: boolean;
   fetchedAt: string;
+  alignedJson: string | null;
+  alignedFingerprint: string | null;
 };
 
 export function getLyricsCache(cacheKey: string): LyricsCacheRow | null {
@@ -1966,7 +2013,9 @@ export function getLyricsCache(cacheKey: string): LyricsCacheRow | null {
               external_id as externalId, source_duration_sec as sourceDurationSec,
               lines_json as linesJson, offset_sec as offsetSec,
               coalesce(offset_user_set, 0) as offsetUserSet,
-              fetched_at as fetchedAt
+              fetched_at as fetchedAt,
+              aligned_json as alignedJson,
+              aligned_fingerprint as alignedFingerprint
        FROM lyrics_cache WHERE cache_key = ?`,
     )
     .get(cacheKey) as
@@ -1978,6 +2027,8 @@ export function getLyricsCache(cacheKey: string): LyricsCacheRow | null {
   return {
     ...row,
     offsetUserSet: Boolean(row.offsetUserSet),
+    alignedJson: row.alignedJson ?? null,
+    alignedFingerprint: row.alignedFingerprint ?? null,
   };
 }
 
@@ -2007,7 +2058,9 @@ export function setLyricsCache(input: {
          external_id = excluded.external_id,
          source_duration_sec = excluded.source_duration_sec,
          lines_json = excluded.lines_json,
-         fetched_at = excluded.fetched_at`,
+         fetched_at = excluded.fetched_at,
+         aligned_json = NULL,
+         aligned_fingerprint = NULL`,
     )
     .run(
       input.cacheKey,
@@ -2032,6 +2085,21 @@ export function setLyricsCacheOffset(
       `UPDATE lyrics_cache SET offset_sec = ?, offset_user_set = ? WHERE cache_key = ?`,
     )
     .run(offsetSec, userSet ? 1 : 0, cacheKey);
+}
+
+/** Persist DTW-aligned line times. Does not touch the original LRC `lines_json`. */
+export function setLyricsCacheAligned(
+  cacheKey: string,
+  alignedJson: string,
+  fingerprint: string,
+): void {
+  getDb()
+    .prepare(
+      `UPDATE lyrics_cache
+       SET aligned_json = ?, aligned_fingerprint = ?
+       WHERE cache_key = ?`,
+    )
+    .run(alignedJson, fingerprint, cacheKey);
 }
 
 /** Public profile listing (no secrets) — visible to all homeserver users. */
@@ -2153,6 +2221,56 @@ export function listLibraryNavItems(limit = 40): {
   }));
 }
 
+/** Stable key for sidebar album pins. */
+export function libraryAlbumPinKey(artist: string, album: string): string {
+  return `album:${artist.trim().toLowerCase()}::${album.trim().toLowerCase()}`;
+}
+
+export const LIBRARY_LIKED_PIN_KEY = "liked";
+
+export function listLibraryPins(userId: string): {
+  itemKey: string;
+  pinnedAt: string;
+}[] {
+  if (!userId) return [];
+  return getDb()
+    .prepare(
+      `SELECT item_key as itemKey, pinned_at as pinnedAt
+       FROM library_pins WHERE user_id = ?
+       ORDER BY pinned_at DESC`,
+    )
+    .all(userId) as { itemKey: string; pinnedAt: string }[];
+}
+
+export function isLibraryPinned(userId: string, itemKey: string): boolean {
+  if (!userId || !itemKey) return false;
+  const row = getDb()
+    .prepare(
+      `SELECT 1 as ok FROM library_pins WHERE user_id = ? AND item_key = ?`,
+    )
+    .get(userId, itemKey) as { ok: number } | undefined;
+  return Boolean(row);
+}
+
+export function setLibraryPin(userId: string, itemKey: string): void {
+  const key = itemKey.trim().slice(0, 400);
+  if (!userId || !key) return;
+  getDb()
+    .prepare(
+      `INSERT INTO library_pins(user_id, item_key, pinned_at) VALUES (?, ?, ?)
+       ON CONFLICT(user_id, item_key) DO UPDATE SET pinned_at = excluded.pinned_at`,
+    )
+    .run(userId, key, nowIso());
+}
+
+export function clearLibraryPin(userId: string, itemKey: string): void {
+  const key = itemKey.trim();
+  if (!userId || !key) return;
+  getDb()
+    .prepare(`DELETE FROM library_pins WHERE user_id = ? AND item_key = ?`)
+    .run(userId, key);
+}
+
 /** Stamp cover URL onto local tracks for an album (sidebar / player reuse). */
 export function setAlbumCover(
   artist: string,
@@ -2233,6 +2351,15 @@ export function libraryStats(): {
 
 // ─── Tracks (library) ───────────────────────────────────────────────────────
 
+function asTrackSource(raw: unknown): TrackRow["source"] {
+  const s = String(raw || "");
+  if (s === "slskd") return "fallback";
+  if (s === "library" || s === "lidarr" || s === "fallback" || s === "stream") {
+    return s;
+  }
+  return "library";
+}
+
 function mapTrack(row: Record<string, unknown>): TrackRow {
   return {
     id: String(row.id),
@@ -2242,7 +2369,7 @@ function mapTrack(row: Record<string, unknown>): TrackRow {
     duration: Number(row.duration) || 0,
     path: String(row.path),
     coverPath: (row.coverPath as string | null) ?? null,
-    source: row.source as TrackRow["source"],
+    source: asTrackSource(row.source),
     externalId: (row.externalId as string | null) ?? null,
     fileSize: Number(row.fileSize) || 0,
     mtimeMs: Number(row.mtimeMs) || 0,
@@ -2276,7 +2403,7 @@ function findTrackExact(artist: string, title: string): TrackRow | null {
          AND source != 'stream'
          AND path NOT LIKE 'stream:%'
          AND path NOT LIKE 'stream://%'
-       ORDER BY CASE source WHEN 'fallback' THEN 0 WHEN 'library' THEN 1 ELSE 2 END
+       ORDER BY CASE source WHEN 'fallback' THEN 0 WHEN 'slskd' THEN 0 WHEN 'library' THEN 1 ELSE 2 END
        LIMIT 1`,
     )
     .get(a, t) as Record<string, unknown> | undefined;
@@ -2292,7 +2419,7 @@ function findTrackByMatchKey(key: string): TrackRow | null {
          AND source != 'stream'
          AND path NOT LIKE 'stream:%'
          AND path NOT LIKE 'stream://%'
-       ORDER BY CASE source WHEN 'fallback' THEN 0 WHEN 'library' THEN 1 ELSE 2 END
+       ORDER BY CASE source WHEN 'fallback' THEN 0 WHEN 'slskd' THEN 0 WHEN 'library' THEN 1 ELSE 2 END
        LIMIT 1`,
     )
     .get(key) as Record<string, unknown> | undefined;
@@ -2304,25 +2431,34 @@ function findTrackByMatchKey(key: string): TrackRow | null {
  * 1) exact artist+title
  * 2) indexed match_key (from scan / tag read)
  * 3) soft candidate score (last resort)
+ *
+ * Never attach another artist’s file, or a different title via prefix
+ * (“Love” must not become “Love Story”).
  */
+function libraryHitAgrees(hit: TrackRow, artist: string, title: string): boolean {
+  return namesMatch(hit.artist, artist) && titlesMatch(hit.title, title);
+}
+
 export function findTrack(artist: string, title: string): TrackRow | null {
   const rawArtist = artist.trim();
   const rawTitle = title.trim();
   if (!rawArtist || !rawTitle) return null;
 
   const exact = findTrackExact(rawArtist, rawTitle);
-  if (exact) return exact;
+  if (exact && libraryHitAgrees(exact, rawArtist, rawTitle)) return exact;
 
   const primary = primaryArtistName(rawArtist);
   if (primary && primary.toLowerCase() !== rawArtist.toLowerCase()) {
     const byPrimary = findTrackExact(primary, rawTitle);
-    if (byPrimary) return byPrimary;
+    if (byPrimary && libraryHitAgrees(byPrimary, primary, rawTitle)) {
+      return byPrimary;
+    }
   }
 
   const indexed =
     findTrackByMatchKey(trackMatchKey(rawArtist, rawTitle)) ||
     (primary ? findTrackByMatchKey(trackMatchKey(primary, rawTitle)) : null);
-  if (indexed) return indexed;
+  if (indexed && libraryHitAgrees(indexed, rawArtist, rawTitle)) return indexed;
 
   const candidates = new Map<string, TrackRow>();
   for (const q of matchSearchQueries(rawArtist, rawTitle)) {
@@ -2334,6 +2470,7 @@ export function findTrack(artist: string, title: string): TrackRow | null {
   let best: TrackRow | null = null;
   let bestScore = 0;
   for (const hit of candidates.values()) {
+    if (!libraryHitAgrees(hit, rawArtist, rawTitle)) continue;
     const score = Math.max(
       scoreTrackMatch(hit, rawArtist, rawTitle),
       primary ? scoreTrackMatch(hit, primary, rawTitle) : 0,
@@ -2529,7 +2666,7 @@ function mapRequest(row: Record<string, unknown>): RequestRow {
     artist: String(row.artist),
     album: String(row.album),
     status: row.status as RequestStatus,
-    source: row.source as RequestRow["source"],
+    source: String(row.source) === "lidarr" ? "lidarr" : "fallback",
     externalId: (row.externalId as string | null) ?? null,
     foreignArtistId: (row.foreignArtistId as string | null) ?? null,
     foreignAlbumId: (row.foreignAlbumId as string | null) ?? null,
@@ -3279,46 +3416,359 @@ export function listOfflineTrackIds(userId: string): string[] {
 
 // ─── Playlists ──────────────────────────────────────────────────────────────
 
+const PLAYLIST_COVER_EXTS = ["jpg", "jpeg", "png", "webp", "gif"] as const;
+
+const PLAYLIST_SELECT = `SELECT p.id, p.user_id as userId, p.name,
+        p.description as description,
+        p.created_at as createdAt, p.updated_at as updatedAt,
+        p.cover_path as coverPath, p.folder_id as folderId,
+        (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlist_id = p.id) as trackCount
+ FROM playlists p`;
+
+export const PLAYLIST_DESCRIPTION_MAX = 1000;
+
 export type PlaylistRow = {
+  id: string;
+  userId: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+  trackCount: number;
+  coverPath: string | null;
+  folderId: string | null;
+  coverUrl: string | null;
+};
+
+export type PlaylistDetail = PlaylistRow & {
+  ownerUsername: string;
+  ownerAvatarUrl: string | null;
+};
+
+export type PlaylistFolderRow = {
   id: string;
   userId: string;
   name: string;
   createdAt: string;
   updatedAt: string;
-  trackCount: number;
+  playlistCount: number;
 };
+
+export function playlistCoverPublicUrl(
+  id: string,
+  coverPath: string | null | undefined,
+  updatedAt?: string,
+): string | null {
+  if (!id || !coverPath?.trim()) return null;
+  const v = updatedAt ? `?v=${encodeURIComponent(updatedAt)}` : "";
+  return `/api/playlists/${encodeURIComponent(id)}/cover${v}`;
+}
+
+function mapPlaylistRow(row: Record<string, unknown>): PlaylistRow {
+  const id = String(row.id);
+  const coverPath = (row.coverPath as string | null) || null;
+  const updatedAt = String(row.updatedAt || "");
+  return {
+    id,
+    userId: String(row.userId),
+    name: String(row.name),
+    description: String(row.description || ""),
+    createdAt: String(row.createdAt || ""),
+    updatedAt,
+    trackCount: Number(row.trackCount) || 0,
+    coverPath,
+    folderId: (row.folderId as string | null) || null,
+    coverUrl: playlistCoverPublicUrl(id, coverPath, updatedAt),
+  };
+}
+
+export function nextPlaylistName(userId: string): string {
+  const names = new Set(
+    (
+      getDb()
+        .prepare(`SELECT name FROM playlists WHERE user_id = ?`)
+        .all(userId) as { name: string }[]
+    ).map((r) => r.name),
+  );
+  let n = 1;
+  while (names.has(`My Playlist #${n}`)) n += 1;
+  return `My Playlist #${n}`;
+}
+
+export function nextFolderName(userId: string): string {
+  const names = new Set(
+    (
+      getDb()
+        .prepare(`SELECT name FROM playlist_folders WHERE user_id = ?`)
+        .all(userId) as { name: string }[]
+    ).map((r) => r.name),
+  );
+  if (!names.has("New folder")) return "New folder";
+  let n = 2;
+  while (names.has(`New folder ${n}`)) n += 1;
+  return `New folder ${n}`;
+}
 
 export function listUserPlaylists(userId: string): PlaylistRow[] {
   if (!userId) return [];
-  return getDb()
-    .prepare(
-      `SELECT p.id, p.user_id as userId, p.name,
-              p.created_at as createdAt, p.updated_at as updatedAt,
-              (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlist_id = p.id) as trackCount
-       FROM playlists p
-       WHERE p.user_id = ?
-       ORDER BY p.updated_at DESC`,
-    )
-    .all(userId) as PlaylistRow[];
+  return (
+    getDb()
+      .prepare(
+        `${PLAYLIST_SELECT}
+         WHERE p.user_id = ?
+         ORDER BY p.updated_at DESC`,
+      )
+      .all(userId) as Record<string, unknown>[]
+  ).map(mapPlaylistRow);
 }
 
-export function createPlaylist(userId: string, name: string): PlaylistRow {
+export function listUserPlaylistsInFolder(
+  userId: string,
+  folderId: string | null,
+): PlaylistRow[] {
+  if (!userId) return [];
+  if (!folderId) {
+    return (
+      getDb()
+        .prepare(
+          `${PLAYLIST_SELECT}
+           WHERE p.user_id = ? AND (p.folder_id IS NULL OR trim(p.folder_id) = '')
+           ORDER BY p.updated_at DESC`,
+        )
+        .all(userId) as Record<string, unknown>[]
+    ).map(mapPlaylistRow);
+  }
+  return (
+    getDb()
+      .prepare(
+        `${PLAYLIST_SELECT}
+         WHERE p.user_id = ? AND p.folder_id = ?
+         ORDER BY p.updated_at DESC`,
+      )
+      .all(userId, folderId) as Record<string, unknown>[]
+  ).map(mapPlaylistRow);
+}
+
+/** Accept raw ids, URI-encoded ids, or sidebar keys like `playlist:{id}`. */
+export function normalizePlaylistId(raw: string | null | undefined): string {
+  let id = String(raw || "").trim();
+  if (!id) return "";
+  try {
+    id = decodeURIComponent(id);
+  } catch {
+    /* keep */
+  }
+  if (id.toLowerCase().startsWith("playlist:")) id = id.slice("playlist:".length);
+  return id.trim();
+}
+
+export function getUserPlaylist(
+  userId: string,
+  playlistId: string,
+): PlaylistDetail | null {
+  const id = normalizePlaylistId(playlistId);
+  if (!userId || !id) return null;
+  const row = getDb()
+    .prepare(
+      `${PLAYLIST_SELECT}
+       WHERE p.id = ? AND p.user_id = ?`,
+    )
+    .get(id, userId) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  const mapped = mapPlaylistRow(row);
+  const profile = getPublicProfileById(userId);
+  return {
+    ...mapped,
+    ownerUsername: profile?.username || "You",
+    ownerAvatarUrl: profile?.avatarUrl || null,
+  };
+}
+
+export function createPlaylist(userId: string, name?: string | null): PlaylistRow {
   const now = nowIso();
   const id = newId();
+  const trimmed = (name || "").trim();
+  const finalName = trimmed || nextPlaylistName(userId);
   getDb()
     .prepare(
-      `INSERT INTO playlists(id, user_id, name, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO playlists(id, user_id, name, created_at, updated_at, cover_path, folder_id)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL)`,
     )
-    .run(id, userId, name.trim() || "My Playlist", now, now);
+    .run(id, userId, finalName, now, now);
   return {
     id,
     userId,
-    name: name.trim() || "My Playlist",
+    name: finalName,
+    description: "",
     createdAt: now,
     updatedAt: now,
     trackCount: 0,
+    coverPath: null,
+    folderId: null,
+    coverUrl: null,
   };
+}
+
+export function updatePlaylistDetails(
+  userId: string,
+  playlistId: string,
+  patch: { name?: string; description?: string | null },
+): PlaylistRow | null {
+  const existing = getUserPlaylist(userId, playlistId);
+  if (!existing) return null;
+
+  let nextName = existing.name;
+  if (patch.name !== undefined) {
+    const trimmed = patch.name.trim().slice(0, 80);
+    if (!trimmed) return null;
+    nextName = trimmed;
+  }
+
+  let nextDescription = existing.description;
+  if (patch.description !== undefined) {
+    nextDescription = (patch.description || "")
+      .trim()
+      .slice(0, PLAYLIST_DESCRIPTION_MAX);
+  }
+
+  const now = nowIso();
+  getDb()
+    .prepare(
+      `UPDATE playlists SET name = ?, description = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+    )
+    .run(nextName, nextDescription, now, existing.id, userId);
+  return {
+    ...existing,
+    name: nextName,
+    description: nextDescription,
+    updatedAt: now,
+  };
+}
+
+export function renamePlaylist(
+  userId: string,
+  playlistId: string,
+  name: string,
+  description?: string | null,
+): PlaylistRow | null {
+  return updatePlaylistDetails(userId, playlistId, {
+    name,
+    ...(description !== undefined ? { description } : {}),
+  });
+}
+
+export function setPlaylistFolder(
+  userId: string,
+  playlistId: string,
+  folderId: string | null,
+): PlaylistRow | null {
+  const existing = getUserPlaylist(userId, playlistId);
+  if (!existing) return null;
+  if (folderId) {
+    const folder = getPlaylistFolder(userId, folderId);
+    if (!folder) return null;
+  }
+  const now = nowIso();
+  getDb()
+    .prepare(
+      `UPDATE playlists SET folder_id = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+    )
+    .run(folderId, now, existing.id, userId);
+  return { ...existing, folderId, updatedAt: now };
+}
+
+export function setPlaylistCoverPath(
+  userId: string,
+  playlistId: string,
+  coverPath: string | null,
+): PlaylistRow | null {
+  const existing = getUserPlaylist(userId, playlistId);
+  if (!existing) return null;
+  const now = nowIso();
+  const stored = coverPath ? path.basename(coverPath) : null;
+  getDb()
+    .prepare(
+      `UPDATE playlists SET cover_path = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+    )
+    .run(stored, now, existing.id, userId);
+  return {
+    ...existing,
+    coverPath: stored,
+    updatedAt: now,
+    coverUrl: playlistCoverPublicUrl(existing.id, stored, now),
+  };
+}
+
+/** Resolve playlist cover file on disk (portable relative names under playlist-covers). */
+export function getPlaylistCoverPath(
+  userId: string,
+  playlistId: string,
+): string | null {
+  const id = normalizePlaylistId(playlistId);
+  if (!userId || !id) return null;
+  const row = getDb()
+    .prepare(
+      `SELECT cover_path as coverPath FROM playlists WHERE id = ? AND user_id = ?`,
+    )
+    .get(id, userId) as { coverPath: string | null } | undefined;
+  if (!row) return null;
+
+  const dir = playlistCoversDir();
+  const tries: string[] = [];
+  const stored = row.coverPath?.trim();
+  if (stored) {
+    tries.push(stored);
+    tries.push(path.join(dir, path.basename(stored)));
+    if (!path.isAbsolute(stored)) tries.push(path.join(dir, stored));
+  }
+  for (const ext of PLAYLIST_COVER_EXTS) {
+    tries.push(path.join(dir, `${id}.${ext}`));
+  }
+
+  const seen = new Set<string>();
+  for (const candidate of tries) {
+    const abs = path.resolve(candidate);
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    try {
+      if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue;
+    } catch {
+      continue;
+    }
+    const healed = path.basename(abs);
+    if (stored !== healed && path.resolve(path.join(dir, healed)) === abs) {
+      try {
+        getDb()
+          .prepare(`UPDATE playlists SET cover_path = ? WHERE id = ? AND user_id = ?`)
+          .run(healed, id, userId);
+      } catch {
+        /* best-effort */
+      }
+    }
+    return abs;
+  }
+  return null;
+}
+
+export function deletePlaylist(
+  userId: string,
+  playlistId: string,
+): { ok: boolean; error?: string } {
+  const existing = getUserPlaylist(userId, playlistId);
+  if (!existing) return { ok: false, error: "Playlist not found" };
+  const cover = getPlaylistCoverPath(userId, existing.id);
+  getDb().prepare(`DELETE FROM playlists WHERE id = ? AND user_id = ?`).run(
+    existing.id,
+    userId,
+  );
+  if (cover) {
+    try {
+      fs.unlinkSync(cover);
+    } catch {
+      /* ignore */
+    }
+  }
+  return { ok: true };
 }
 
 export function addTrackToPlaylist(
@@ -3326,9 +3776,10 @@ export function addTrackToPlaylist(
   playlistId: string,
   trackId: string,
 ): { ok: boolean; error?: string } {
+  const id = normalizePlaylistId(playlistId);
   const pl = getDb()
     .prepare(`SELECT id FROM playlists WHERE id = ? AND user_id = ?`)
-    .get(playlistId, userId) as { id: string } | undefined;
+    .get(id, userId) as { id: string } | undefined;
   if (!pl) return { ok: false, error: "Playlist not found" };
   if (!getTrack(trackId)) return { ok: false, error: "Track not found" };
   const pos = (
@@ -3336,7 +3787,7 @@ export function addTrackToPlaylist(
       .prepare(
         `SELECT COALESCE(MAX(position), -1) + 1 as n FROM playlist_tracks WHERE playlist_id = ?`,
       )
-      .get(playlistId) as { n: number }
+      .get(id) as { n: number }
   ).n;
   getDb()
     .prepare(
@@ -3344,10 +3795,10 @@ export function addTrackToPlaylist(
        VALUES (?, ?, ?, ?)
        ON CONFLICT(playlist_id, track_id) DO NOTHING`,
     )
-    .run(playlistId, trackId, pos, nowIso());
+    .run(id, trackId, pos, nowIso());
   getDb()
     .prepare(`UPDATE playlists SET updated_at = ? WHERE id = ?`)
-    .run(nowIso(), playlistId);
+    .run(nowIso(), id);
   return { ok: true };
 }
 
@@ -3356,19 +3807,20 @@ export function removeTrackFromPlaylist(
   playlistId: string,
   trackId: string,
 ): { ok: boolean; error?: string } {
+  const id = normalizePlaylistId(playlistId);
   const pl = getDb()
     .prepare(`SELECT id FROM playlists WHERE id = ? AND user_id = ?`)
-    .get(playlistId, userId) as { id: string } | undefined;
+    .get(id, userId) as { id: string } | undefined;
   if (!pl) return { ok: false, error: "Playlist not found" };
   const result = getDb()
     .prepare(
       `DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?`,
     )
-    .run(playlistId, trackId);
+    .run(id, trackId);
   if (result.changes > 0) {
     getDb()
       .prepare(`UPDATE playlists SET updated_at = ? WHERE id = ?`)
-      .run(nowIso(), playlistId);
+      .run(nowIso(), id);
   }
   return { ok: true };
 }
@@ -3383,7 +3835,9 @@ export function listUserPlaylistsForTrack(
     getDb()
       .prepare(
         `SELECT p.id, p.user_id as userId, p.name,
+                p.description as description,
                 p.created_at as createdAt, p.updated_at as updatedAt,
+                p.cover_path as coverPath, p.folder_id as folderId,
                 (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlist_id = p.id) as trackCount,
                 EXISTS(
                   SELECT 1 FROM playlist_tracks pt
@@ -3393,9 +3847,9 @@ export function listUserPlaylistsForTrack(
          WHERE p.user_id = ?
          ORDER BY p.updated_at DESC`,
       )
-      .all(trackId, userId) as (PlaylistRow & { contains: number | boolean })[]
+      .all(trackId, userId) as Record<string, unknown>[]
   ).map((row) => ({
-    ...row,
+    ...mapPlaylistRow(row),
     contains: Boolean(row.contains),
   }));
 }
@@ -3404,20 +3858,140 @@ export function listPlaylistTracks(
   userId: string,
   playlistId: string,
 ): TrackRow[] {
+  const id = normalizePlaylistId(playlistId);
+  if (!userId || !id) return [];
   const pl = getDb()
     .prepare(`SELECT id FROM playlists WHERE id = ? AND user_id = ?`)
-    .get(playlistId, userId) as { id: string } | undefined;
+    .get(id, userId) as { id: string } | undefined;
   if (!pl) return [];
+  // playlist_tracks.added_at makes unqualified TRACK_SELECT ambiguous.
+  // addedAt is when the track was added to this playlist (pt.added_at).
   return (
     getDb()
       .prepare(
-        `${TRACK_SELECT}
-         INNER JOIN playlist_tracks pt ON pt.track_id = tracks.id
+        `SELECT tracks.id, tracks.title, tracks.artist, tracks.album, tracks.duration,
+                tracks.path, tracks.cover_path as coverPath, tracks.source,
+                tracks.external_id as externalId, tracks.file_size as fileSize,
+                tracks.mtime_ms as mtimeMs, pt.added_at as addedAt,
+                tracks.updated_at as updatedAt
+         FROM playlist_tracks pt
+         INNER JOIN tracks ON tracks.id = pt.track_id
          WHERE pt.playlist_id = ?
          ORDER BY pt.position ASC`,
       )
-      .all(playlistId) as Record<string, unknown>[]
+      .all(id) as Record<string, unknown>[]
   ).map(mapTrack);
+}
+
+export function libraryPlaylistPinKey(playlistId: string): string {
+  return `playlist:${playlistId}`;
+}
+
+export function libraryFolderPinKey(folderId: string): string {
+  return `folder:${folderId}`;
+}
+
+function mapFolderRow(row: Record<string, unknown>): PlaylistFolderRow {
+  return {
+    id: String(row.id),
+    userId: String(row.userId),
+    name: String(row.name),
+    createdAt: String(row.createdAt || ""),
+    updatedAt: String(row.updatedAt || ""),
+    playlistCount: Number(row.playlistCount) || 0,
+  };
+}
+
+const FOLDER_SELECT = `SELECT f.id, f.user_id as userId, f.name,
+        f.created_at as createdAt, f.updated_at as updatedAt,
+        (SELECT COUNT(*) FROM playlists p WHERE p.folder_id = f.id) as playlistCount
+ FROM playlist_folders f`;
+
+export function listPlaylistFolders(userId: string): PlaylistFolderRow[] {
+  if (!userId) return [];
+  return (
+    getDb()
+      .prepare(
+        `${FOLDER_SELECT}
+         WHERE f.user_id = ?
+         ORDER BY f.updated_at DESC`,
+      )
+      .all(userId) as Record<string, unknown>[]
+  ).map(mapFolderRow);
+}
+
+export function getPlaylistFolder(
+  userId: string,
+  folderId: string,
+): PlaylistFolderRow | null {
+  if (!userId || !folderId) return null;
+  const row = getDb()
+    .prepare(
+      `${FOLDER_SELECT}
+       WHERE f.id = ? AND f.user_id = ?`,
+    )
+    .get(folderId, userId) as Record<string, unknown> | undefined;
+  return row ? mapFolderRow(row) : null;
+}
+
+export function createPlaylistFolder(
+  userId: string,
+  name?: string | null,
+): PlaylistFolderRow {
+  const now = nowIso();
+  const id = newId();
+  const trimmed = (name || "").trim();
+  const finalName = trimmed || nextFolderName(userId);
+  getDb()
+    .prepare(
+      `INSERT INTO playlist_folders(id, user_id, name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(id, userId, finalName, now, now);
+  return {
+    id,
+    userId,
+    name: finalName,
+    createdAt: now,
+    updatedAt: now,
+    playlistCount: 0,
+  };
+}
+
+export function renamePlaylistFolder(
+  userId: string,
+  folderId: string,
+  name: string,
+): PlaylistFolderRow | null {
+  const next = name.trim().slice(0, 80);
+  if (!next) return null;
+  const existing = getPlaylistFolder(userId, folderId);
+  if (!existing) return null;
+  const now = nowIso();
+  getDb()
+    .prepare(
+      `UPDATE playlist_folders SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+    )
+    .run(next, now, folderId, userId);
+  return { ...existing, name: next, updatedAt: now };
+}
+
+export function deletePlaylistFolder(
+  userId: string,
+  folderId: string,
+): { ok: boolean; error?: string } {
+  const existing = getPlaylistFolder(userId, folderId);
+  if (!existing) return { ok: false, error: "Folder not found" };
+  const now = nowIso();
+  getDb()
+    .prepare(
+      `UPDATE playlists SET folder_id = NULL, updated_at = ? WHERE folder_id = ? AND user_id = ?`,
+    )
+    .run(now, folderId, userId);
+  getDb()
+    .prepare(`DELETE FROM playlist_folders WHERE id = ? AND user_id = ?`)
+    .run(folderId, userId);
+  return { ok: true };
 }
 
 // ─── Taste excludes ─────────────────────────────────────────────────────────
@@ -3485,6 +4059,34 @@ export function listTracksForAlbum(
          WHERE lower(artist) = ? AND lower(album) = ?
            AND ${LIBRARY_TRACK_FILTER}
          ORDER BY title ASC
+         LIMIT ?`,
+      )
+      .all(a, al, limit) as Record<string, unknown>[]
+  ).map(mapTrack);
+}
+
+/**
+ * Same as listTracksForAlbum but also includes stream/history stubs.
+ * Used when catalog tracklists are missing so album pages aren't empty
+ * after someone listened via live stream.
+ */
+export function listTracksForAlbumIncludingStream(
+  artist: string,
+  album: string,
+  limit = 200,
+): TrackRow[] {
+  const a = artist.trim().toLowerCase();
+  const al = album.trim().toLowerCase();
+  if (!a || !al) return [];
+  return (
+    getDb()
+      .prepare(
+        `${TRACK_SELECT}
+         WHERE lower(artist) = ? AND lower(album) = ?
+         ORDER BY
+           CASE WHEN source = 'stream' OR path LIKE 'stream:%' OR path LIKE 'stream://%'
+             THEN 1 ELSE 0 END,
+           title ASC
          LIMIT ?`,
       )
       .all(a, al, limit) as Record<string, unknown>[]
@@ -4242,7 +4844,7 @@ export function listLikedTracks(
     duration: Number(row.duration) || 0,
     path: String(row.path || ""),
     coverPath: (row.coverPath as string | null) || null,
-    source: (String(row.source || "stream") as TrackRow["source"]),
+    source: asTrackSource(row.source || "stream"),
     externalId: (row.externalId as string | null) || null,
     fileSize: Number(row.fileSize) || 0,
     mtimeMs: Number(row.mtimeMs) || 0,

@@ -155,13 +155,16 @@ export function HomeClient() {
     };
   }, [load, loadOthers]);
 
-  function openOthersAlbum(item: OthersItem) {
-    router.push(
-      albumHref({
-        title: (item.album || item.title).trim() || item.title,
-        artist: item.artist,
-      }),
-    );
+  function playOthersTrack(item: OthersItem) {
+    const pt: PlayerTrack = {
+      id: item.id,
+      title: item.title,
+      artist: item.artist,
+      resolveArtist: item.artist,
+      album: item.album || item.title,
+      coverPath: item.coverPath || null,
+    };
+    play(pt, [pt]);
   }
 
   function playShelfTrack(item: Extract<MoreFromItem, { trackId: string }>) {
@@ -224,8 +227,8 @@ export function HomeClient() {
                 <MediaTileShell
                   title={item.title}
                   subtitle={formatTrackArtistLine(item.artist, item.title)}
-                  ariaLabel={`Open album for ${item.title}`}
-                  onOpen={() => openOthersAlbum(item)}
+                  ariaLabel={`Play ${item.title}`}
+                  onOpen={() => playOthersTrack(item)}
                   cover={
                     <ListeningCover
                       title={item.title}

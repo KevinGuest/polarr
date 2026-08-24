@@ -4,6 +4,7 @@ import {
   getSettings,
   listOfflineTrackIds,
   listTracksForAlbum,
+  listTracksForAlbumIncludingStream,
   setAlbumCover,
 } from "@/lib/db";
 import {
@@ -20,6 +21,7 @@ import {
 } from "@/lib/musicbrainz";
 import { ytDlpAvailable } from "@/lib/fallback-download";
 import { resolveArtistPortrait } from "@/lib/artist-portrait";
+import { namesMatch, primaryArtistName } from "@/lib/track-match";
 import { titleLooksExplicit, formatTrackArtistLine } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -74,20 +76,33 @@ function caaCover(foreignAlbumId: string): string {
   return `https://coverartarchive.org/release-group/${encodeURIComponent(foreignAlbumId)}/front-500`;
 }
 
-function mapLocalFallback(artist: string, albumTitle: string): AlbumTrackDto[] {
-  return listTracksForAlbum(artist, albumTitle).map((t, i) => ({
-    key: `local-${t.id}`,
-    title: t.title,
-    trackNumber: i + 1,
-    duration: t.duration || 0,
-    available: true,
-    downloaded: false,
-    hasFile: true,
-    localTrackId: t.id,
-    streamUrl: `/api/stream/${t.id}`,
-    explicit: titleLooksExplicit(t.title),
-    artists: formatTrackArtistLine(artist, t.title),
-  }));
+function mapLocalFallback(
+  artist: string,
+  albumTitle: string,
+  includeStream = false,
+): AlbumTrackDto[] {
+  const rows = includeStream
+    ? listTracksForAlbumIncludingStream(artist, albumTitle)
+    : listTracksForAlbum(artist, albumTitle);
+  return rows.map((t, i) => {
+    const isStream =
+      t.source === "stream" ||
+      t.path.startsWith("stream:") ||
+      t.path.startsWith("stream://");
+    return {
+      key: `local-${t.id}`,
+      title: t.title,
+      trackNumber: i + 1,
+      duration: t.duration || 0,
+      available: true,
+      downloaded: false,
+      hasFile: !isStream,
+      localTrackId: isStream ? null : t.id,
+      streamUrl: isStream ? null : `/api/stream/${t.id}`,
+      explicit: titleLooksExplicit(t.title),
+      artists: formatTrackArtistLine(artist, t.title),
+    };
+  });
 }
 
 function mergeAvailability(
@@ -153,6 +168,8 @@ export async function GET(req: Request) {
 
   let title = (searchParams.get("title") || "").trim();
   let artist = (searchParams.get("artist") || "").trim();
+  // Catalog lookups use primary credit (drop feat. noise from listening tags)
+  artist = primaryArtistName(artist) || artist;
   let foreignAlbumId = (searchParams.get("foreignAlbumId") || "").trim();
   const image = (searchParams.get("image") || "").trim() || undefined;
   const lidarrAlbumIdRaw = searchParams.get("lidarrAlbumId");
@@ -241,15 +258,21 @@ export async function GET(req: Request) {
           .sort((a, b) => b.score - a.score);
 
         const best =
-          ranked.find(
-            (x) =>
-              (x.album.title || "").trim().toLowerCase() ===
-                title.toLowerCase() &&
-              (x.album.artist?.artistName || "")
-                .trim()
-                .toLowerCase()
-                .includes(artist.toLowerCase().slice(0, 12)),
-          ) || ranked[0];
+          ranked.find((x) => {
+            const aName = (x.album.artist?.artistName || "").trim();
+            const aTitle = (x.album.title || "").trim().toLowerCase();
+            return (
+              aTitle === title.toLowerCase() && namesMatch(aName, artist)
+            );
+          }) ||
+          // Soft artist check on top hit — never take an unrelated album
+          (ranked[0] &&
+          namesMatch(
+            ranked[0].album.artist?.artistName || "",
+            artist,
+          )
+            ? ranked[0]
+            : undefined);
 
         if (best?.album) {
           albumMetaLoaded = best.album;
@@ -399,9 +422,9 @@ export async function GET(req: Request) {
     tracks = mergeAvailability(tracks, artist);
   }
 
-  // Always surface local files for this album (partial downloads)
+  // Always surface local + stream-history rows for this album (partial / listened)
   if (tracks.length === 0) {
-    const local = mapLocalFallback(artist, title);
+    const local = mapLocalFallback(artist, title, true);
     if (local.length) {
       source = "library";
       tracks = local;
@@ -481,12 +504,16 @@ export async function GET(req: Request) {
     error,
   };
 
-  albumResponseCache.set(key, { at: Date.now(), payload });
-  if (albumResponseCache.size > 80) {
-    const oldest = [...albumResponseCache.entries()].sort(
-      (a, b) => a[1].at - b[1].at,
-    );
-    for (const [k] of oldest.slice(0, 20)) albumResponseCache.delete(k);
+  // Don't stick empty tracklists in cache — first failed MB lookup shouldn't
+  // blank the page for everyone for 2 minutes.
+  if (tracks.length > 0) {
+    albumResponseCache.set(key, { at: Date.now(), payload });
+    if (albumResponseCache.size > 80) {
+      const oldest = [...albumResponseCache.entries()].sort(
+        (a, b) => a[1].at - b[1].at,
+      );
+      for (const [k] of oldest.slice(0, 20)) albumResponseCache.delete(k);
+    }
   }
 
   return json(withUserDownloads(payload, offline), {

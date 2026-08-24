@@ -1,0 +1,1109 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  Camera,
+  Clock,
+  Copy,
+  Ellipsis,
+  Music2,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  Search,
+  Shuffle,
+  Trash2,
+} from "lucide-react";
+import { CoverArt } from "@/components/cover-art";
+import { ExplicitBadge } from "@/components/explicit-badge";
+import { TrackContextMenu } from "@/components/track-context-menu";
+import { TrackRowActions } from "@/components/track-row-actions";
+import { TrackRowIndex } from "@/components/track-row-index";
+import { UserAvatar } from "@/components/user-avatar";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { usePlayer, type PlayerTrack } from "@/components/player-provider";
+import { albumHref } from "@/lib/album-ref";
+import { setDragTrack } from "@/lib/drag-track";
+import {
+  isPlayerRowCurrent,
+  trackRowEndCell,
+  trackRowMidCell,
+  trackRowStartCell,
+} from "@/lib/player-row";
+import { emitLibraryChanged, LIBRARY_CHANGED_EVENT } from "@/lib/ui-events";
+import {
+  cn,
+  formatAlbumLength,
+  formatDuration,
+  titleLooksExplicit,
+} from "@/lib/utils";
+import { toastError, toastSuccess } from "@/lib/toast";
+
+const PLAYLIST_DESCRIPTION_MAX = 1000;
+
+type PlaylistMeta = {
+  id: string;
+  name: string;
+  description?: string;
+  ownerUsername: string;
+  ownerAvatarUrl?: string | null;
+  trackCount: number;
+  coverUrl: string | null;
+};
+
+type PlaylistTrack = {
+  id: string;
+  localTrackId?: string;
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  coverPath: string | null;
+  path: string;
+  source: string;
+  explicit?: boolean;
+  addedAt?: string;
+};
+
+type AddCandidate = {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  coverPath: string | null;
+};
+
+function shuffleCopy<T>(items: T[]): T[] {
+  const a = items.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = a[i]!;
+    a[i] = a[j]!;
+    a[j] = tmp;
+  }
+  return a;
+}
+
+function formatDateAdded(iso: string | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const diff = Date.now() - d.getTime();
+  const day = 86_400_000;
+  if (diff < day && diff >= 0) return "Today";
+  if (diff < 2 * day && diff >= 0) return "Yesterday";
+  if (diff < 7 * day && diff >= 0) {
+    const n = Math.floor(diff / day);
+    return `${n} day${n === 1 ? "" : "s"} ago`;
+  }
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function toPlayerTrack(
+  t: PlaylistTrack,
+  playlistName: string,
+  playlistCover: string | null,
+): PlayerTrack {
+  return {
+    id: t.localTrackId || t.id,
+    title: t.title,
+    artist: t.artist,
+    resolveArtist: t.artist,
+    album: t.album || playlistName,
+    coverPath: t.coverPath || playlistCover,
+    explicit: t.explicit ?? titleLooksExplicit(t.title),
+  };
+}
+
+function AddTracksDialog({
+  open,
+  onOpenChange,
+  playlistId,
+  existingIds,
+  onAdded,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  playlistId: string;
+  existingIds: Set<string>;
+  onAdded: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<AddCandidate[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [addingId, setAddingId] = useState<string | null>(null);
+  const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery("");
+    setAddedIds(new Set());
+    const t = window.setTimeout(() => inputRef.current?.focus(), 50);
+    return () => window.clearTimeout(t);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const term = query.trim();
+    setLoading(true);
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        try {
+          if (!term) {
+            const res = await fetch("/api/library", { cache: "no-store" });
+            const data = await res.json().catch(() => null);
+            if (cancelled) return;
+            const list = Array.isArray(data?.tracks) ? data.tracks : [];
+            setHits(
+              list.map((t: AddCandidate) => ({
+                id: t.id,
+                title: t.title,
+                artist: t.artist,
+                album: t.album || "",
+                duration: t.duration || 0,
+                coverPath: t.coverPath || null,
+              })),
+            );
+            return;
+          }
+          const res = await fetch(
+            `/api/search?q=${encodeURIComponent(term)}`,
+            { cache: "no-store" },
+          );
+          const data = await res.json().catch(() => null);
+          if (cancelled) return;
+          const local = Array.isArray(data?.local) ? data.local : [];
+          setHits(
+            local.map((t: AddCandidate) => ({
+              id: t.id,
+              title: t.title,
+              artist: t.artist,
+              album: t.album || "",
+              duration: t.duration || 0,
+              coverPath: t.coverPath || null,
+            })),
+          );
+        } catch {
+          if (!cancelled) setHits([]);
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+    }, term ? 200 : 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [open, query]);
+
+  const visible = useMemo(
+    () => hits.filter((h) => !existingIds.has(h.id) && !addedIds.has(h.id)),
+    [hits, existingIds, addedIds],
+  );
+
+  async function addTrack(hit: AddCandidate) {
+    setAddingId(hit.id);
+    try {
+      const res = await fetch("/api/playlists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playlistId, trackId: hit.id }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        toastError(data?.error || "Couldn’t add to playlist");
+        return;
+      }
+      setAddedIds((prev) => new Set(prev).add(hit.id));
+      onAdded();
+      toastSuccess(`Added “${hit.title}”`);
+    } catch {
+      toastError("Couldn’t add to playlist");
+    } finally {
+      setAddingId(null);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg gap-3 p-5 sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Add songs</DialogTitle>
+          <DialogDescription>
+            Search your library and add tracks to this playlist.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search songs"
+            className="pl-9"
+            aria-label="Search songs to add"
+          />
+        </div>
+        <div className="max-h-[min(24rem,50vh)] overflow-y-auto pr-1">
+          {loading ? (
+            <div className="space-y-2 py-2" aria-busy="true">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 px-1 py-1.5">
+                  <Skeleton className="size-10 shrink-0 rounded-sm" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Skeleton className="h-4 w-2/5" />
+                    <Skeleton className="h-3 w-1/4" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : visible.length === 0 ? (
+            <p className="px-1 py-8 text-center text-sm text-muted-foreground">
+              {query.trim()
+                ? "No library matches. Try another search, or find it in Search first."
+                : "Your library is empty — search the catalog to add songs."}
+            </p>
+          ) : (
+            <ul className="space-y-0.5">
+              {visible.map((hit) => (
+                <li key={hit.id}>
+                  <div className="flex items-center gap-3 rounded-md px-1 py-1.5 hover:bg-muted/40">
+                    <CoverArt
+                      seed={`${hit.artist}-${hit.title}`}
+                      image={hit.coverPath}
+                      className="size-10 shrink-0 rounded-sm"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{hit.title}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {hit.artist}
+                        {hit.album ? ` · ${hit.album}` : ""}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void addTrack(hit)}
+                      disabled={addingId === hit.id}
+                      className="shrink-0 rounded-full border border-border px-3 py-1 text-xs font-semibold hover:border-foreground disabled:opacity-50"
+                    >
+                      {addingId === hit.id ? "Adding…" : "Add"}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditDetailsDialog({
+  open,
+  onOpenChange,
+  playlist,
+  coverImage,
+  coverBusy,
+  onPickCover,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  playlist: PlaylistMeta;
+  coverImage?: string;
+  coverBusy: boolean;
+  onPickCover: () => void;
+  onSaved: (next: { name: string; description: string }) => void;
+}) {
+  const [name, setName] = useState(playlist.name);
+  const [description, setDescription] = useState(playlist.description || "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setName(playlist.name);
+    setDescription(playlist.description || "");
+  }, [open, playlist.id, playlist.name, playlist.description]);
+
+  async function save() {
+    const nextName = name.trim();
+    if (!nextName) {
+      toastError("Give this playlist a name");
+      return;
+    }
+    const nextDescription = description.trim().slice(0, PLAYLIST_DESCRIPTION_MAX);
+    setSaving(true);
+    try {
+      const res = await fetch("/api/playlists", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          playlistId: playlist.id,
+          name: nextName,
+          description: nextDescription,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.playlist) {
+        toastError(data?.error || "Couldn’t save playlist details");
+        return;
+      }
+      onSaved({
+        name: data.playlist.name,
+        description: String(data.playlist.description || ""),
+      });
+      onOpenChange(false);
+      emitLibraryChanged();
+    } catch {
+      toastError("Couldn’t save playlist details");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl gap-5 p-6">
+        <DialogHeader>
+          <DialogTitle>Edit details</DialogTitle>
+          <DialogDescription className="sr-only">
+            Update this playlist’s name, description, and cover image.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+          <button
+            type="button"
+            onClick={() => onPickCover()}
+            disabled={coverBusy || saving}
+            aria-label="Change playlist cover"
+            className="group relative size-44 shrink-0 overflow-hidden rounded-lg shadow-lg sm:size-48"
+          >
+            {coverImage ? (
+              <CoverArt
+                seed={playlist.id || playlist.name}
+                image={coverImage}
+                className="size-full"
+              />
+            ) : (
+              <div
+                className="flex size-full items-center justify-center bg-[#282828] text-[#7f7f7f]"
+                aria-hidden
+              >
+                <Music2 className="size-16" strokeWidth={1.25} />
+              </div>
+            )}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/55 opacity-0 transition-opacity group-hover:opacity-100">
+              <Camera className="size-8 text-white" strokeWidth={1.5} />
+              <span className="text-sm font-medium text-white">
+                Choose photo
+              </span>
+            </div>
+          </button>
+          <div className="flex min-w-0 flex-1 flex-col gap-3">
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void save();
+                }
+              }}
+              maxLength={80}
+              placeholder="Add a name"
+              aria-label="Playlist name"
+              autoFocus
+              className="h-11 border-transparent bg-muted/70"
+            />
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              maxLength={PLAYLIST_DESCRIPTION_MAX}
+              placeholder="Add an optional description"
+              aria-label="Playlist description"
+              rows={6}
+              className="min-h-[8.5rem] w-full resize-none rounded-md border border-transparent bg-muted/70 px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+        </div>
+        <DialogFooter className="flex-col items-end gap-2 sm:flex-col sm:items-end sm:justify-end">
+          <Button
+            type="button"
+            disabled={saving || coverBusy || !name.trim()}
+            onClick={() => void save()}
+            className="rounded-full px-8"
+          >
+            {saving ? "Saving…" : "Save"}
+          </Button>
+          <p className="max-w-sm text-right text-xs text-muted-foreground">
+            You should own the image you upload.
+          </p>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function PlaylistClient({ playlistId }: { playlistId: string }) {
+  const { play, toggle, track, queue: playerQueue, playing, shuffle, toggleShuffle } =
+    usePlayer();
+  const router = useRouter();
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const [playlist, setPlaylist] = useState<PlaylistMeta | null>(null);
+  const [tracks, setTracks] = useState<PlaylistTrack[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [coverBusy, setCoverBusy] = useState(false);
+  const [localCover, setLocalCover] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/playlists?id=${encodeURIComponent(playlistId)}`,
+        { cache: "no-store", credentials: "same-origin" },
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.playlist) {
+        setError(data?.error || "Failed to load playlist");
+        setPlaylist(null);
+        setTracks([]);
+        setLoading(false);
+        return;
+      }
+      setPlaylist(data.playlist);
+      setTracks(Array.isArray(data.tracks) ? data.tracks : []);
+      setError(null);
+      setLoading(false);
+    } catch {
+      setError("Failed to load playlist");
+      setPlaylist(null);
+      setTracks([]);
+      setLoading(false);
+    }
+  }, [playlistId]);
+
+  useEffect(() => {
+    setLoading(true);
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    const onChanged = () => {
+      void load();
+    };
+    window.addEventListener(LIBRARY_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(LIBRARY_CHANGED_EVENT, onChanged);
+  }, [load]);
+
+  useEffect(() => {
+    return () => {
+      if (localCover) URL.revokeObjectURL(localCover);
+    };
+  }, [localCover]);
+
+  const totalSeconds = useMemo(
+    () => tracks.reduce((s, t) => s + (t.duration || 0), 0),
+    [tracks],
+  );
+
+  const existingIds = useMemo(
+    () => new Set(tracks.map((t) => t.localTrackId || t.id)),
+    [tracks],
+  );
+
+  const queue: PlayerTrack[] = useMemo(
+    () =>
+      tracks.map((t) =>
+        toPlayerTrack(t, playlist?.name || "", playlist?.coverUrl || null),
+      ),
+    [tracks, playlist],
+  );
+
+  const inThisPlaylist = Boolean(
+    track && tracks.some((t) => (t.localTrackId || t.id) === track.id),
+  );
+
+  function openDetails() {
+    setDetailsOpen(true);
+  }
+
+  function playTrack(row: PlaylistTrack) {
+    const pt = toPlayerTrack(
+      row,
+      playlist?.name || "",
+      playlist?.coverUrl || null,
+    );
+    if (shuffle) {
+      const rest = shuffleCopy(queue.filter((q) => q.id !== pt.id));
+      play(pt, [pt, ...rest]);
+      return;
+    }
+    play(pt, queue);
+  }
+
+  function playAll() {
+    if (!queue[0]) return;
+    if (shuffle) {
+      const shuffled = shuffleCopy(queue);
+      const first = shuffled[0];
+      if (!first) return;
+      play(first, shuffled);
+      return;
+    }
+    play(queue[0], queue);
+  }
+
+  function onPlayClick() {
+    if (inThisPlaylist) {
+      toggle();
+      return;
+    }
+    playAll();
+  }
+
+  async function onCoverFile(file: File | undefined) {
+    if (!file) return;
+    const preview = URL.createObjectURL(file);
+    if (localCover) URL.revokeObjectURL(localCover);
+    setLocalCover(preview);
+    setCoverBusy(true);
+    try {
+      const form = new FormData();
+      form.set("cover", file);
+      const res = await fetch(
+        `/api/playlists/${encodeURIComponent(playlistId)}/cover`,
+        { method: "POST", body: form },
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.playlist) {
+        toastError(data?.error || "Couldn’t update cover");
+        setLocalCover(null);
+        URL.revokeObjectURL(preview);
+        return;
+      }
+      setPlaylist((p) =>
+        p
+          ? {
+              ...p,
+              coverUrl: data.playlist.coverUrl || p.coverUrl,
+            }
+          : p,
+      );
+      emitLibraryChanged();
+      toastSuccess("Cover updated");
+    } catch {
+      toastError("Couldn’t update cover");
+      setLocalCover(null);
+      URL.revokeObjectURL(preview);
+    } finally {
+      setCoverBusy(false);
+    }
+  }
+
+  async function removeFromPlaylist(trackId: string) {
+    try {
+      const res = await fetch("/api/playlists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "remove",
+          playlistId,
+          trackId,
+        }),
+      });
+      if (!res.ok) {
+        toastError("Couldn’t remove from playlist");
+        return;
+      }
+      setTracks((prev) =>
+        prev.filter((t) => (t.localTrackId || t.id) !== trackId),
+      );
+      setPlaylist((p) =>
+        p ? { ...p, trackCount: Math.max(0, p.trackCount - 1) } : p,
+      );
+      emitLibraryChanged();
+    } catch {
+      toastError("Couldn’t remove from playlist");
+    }
+  }
+
+  async function copyPlaylistLink() {
+    const url =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/playlist/${encodeURIComponent(playlistId)}`
+        : `/playlist/${encodeURIComponent(playlistId)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toastSuccess("Link copied");
+    } catch {
+      toastError("Couldn’t copy link");
+    }
+  }
+
+  async function deleteThisPlaylist() {
+    if (!playlist) return;
+    if (!confirm(`Delete playlist “${playlist.name}”? This can’t be undone.`)) {
+      return;
+    }
+    try {
+      const res = await fetch("/api/playlists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "delete",
+          playlistId,
+        }),
+      });
+      if (!res.ok) {
+        toastError("Couldn’t delete playlist");
+        return;
+      }
+      emitLibraryChanged();
+      toastSuccess("Playlist deleted");
+      router.push("/");
+    } catch {
+      toastError("Couldn’t delete playlist");
+    }
+  }
+
+  if (loading && !playlist) {
+    return (
+      <div className="flex min-h-full flex-col">
+        <section className="relative -mx-6 -mt-6 border-b border-border px-6 pb-10 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10">
+          <div className="relative flex flex-col gap-6 sm:flex-row sm:items-end">
+            <Skeleton className="size-44 shrink-0 rounded-lg sm:size-52 md:size-56" />
+            <div className="min-w-0 flex-1 space-y-3">
+              <Skeleton className="h-3 w-16" />
+              <Skeleton className="h-12 w-2/3 max-w-md" />
+              <Skeleton className="h-4 w-48" />
+            </div>
+          </div>
+        </section>
+        <div className="flex items-center gap-4 px-1 py-6">
+          <Skeleton className="size-14 rounded-full" />
+          <Skeleton className="size-8 rounded-full" />
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !playlist) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {error}{" "}
+        <button
+          type="button"
+          className="underline"
+          onClick={() => router.push("/")}
+        >
+          Go home
+        </button>
+      </p>
+    );
+  }
+
+  const displayTitle = playlist?.name || "Playlist";
+  const coverImage = localCover || playlist?.coverUrl || undefined;
+  const empty = tracks.length === 0;
+  const ownerName = playlist?.ownerUsername || "You";
+  const playLabel = inThisPlaylist && playing ? "Pause" : "Play";
+
+  return (
+    <div className="flex min-h-full flex-col">
+      <section className="relative -mx-6 -mt-6 border-b border-border px-6 pb-10 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-35"
+          style={{
+            background:
+              "linear-gradient(180deg, hsl(20 18% 22%) 0%, hsl(var(--background)) 100%)",
+          }}
+          aria-hidden
+        />
+        <div className="relative flex flex-col gap-6 sm:flex-row sm:items-end">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              void onCoverFile(file);
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={coverBusy}
+            aria-label="Change playlist cover"
+            className="group relative size-44 shrink-0 overflow-hidden rounded-lg shadow-lg sm:size-52 md:size-56"
+          >
+            {coverImage ? (
+              <CoverArt
+                seed={playlist?.id || displayTitle}
+                image={coverImage}
+                className="size-full"
+              />
+            ) : (
+              <div
+                className="flex size-full items-center justify-center bg-[#282828] text-[#7f7f7f]"
+                aria-hidden
+              >
+                <Music2 className="size-16 sm:size-20" strokeWidth={1.25} />
+              </div>
+            )}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/55 opacity-0 transition-opacity group-hover:opacity-100">
+              <Camera className="size-8 text-white" strokeWidth={1.5} />
+              <span className="text-sm font-medium text-white">
+                Choose photo
+              </span>
+            </div>
+          </button>
+          <div className="min-w-0 flex-1 space-y-2">
+            <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+              Playlist
+            </p>
+            <h1 className="max-w-full truncate text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
+              {displayTitle}
+            </h1>
+            {playlist?.description ? (
+              <p className="max-w-2xl text-sm text-muted-foreground line-clamp-3">
+                {playlist.description}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-muted-foreground">
+              <span className="inline-flex min-w-0 items-center gap-2">
+                <UserAvatar
+                  username={ownerName}
+                  avatarUrl={playlist?.ownerAvatarUrl}
+                  className="size-6 shrink-0 rounded-full"
+                  textClassName="text-[10px]"
+                />
+                <span className="truncate font-semibold text-foreground">
+                  {ownerName}
+                </span>
+              </span>
+              <span>
+                · {tracks.length} song{tracks.length === 1 ? "" : "s"}
+                {tracks.length > 0 ? `, ${formatAlbumLength(totalSeconds)}` : ""}
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="flex flex-col gap-4 pt-6">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => onPlayClick()}
+            disabled={empty}
+            className="flex size-14 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-40"
+            aria-label={playLabel}
+          >
+            {inThisPlaylist && playing ? (
+              <Pause className="size-6" fill="currentColor" />
+            ) : (
+              <Play className="size-6 translate-x-0.5" fill="currentColor" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleShuffle()}
+            className={cn(
+              "flex size-10 items-center justify-center rounded-full transition-colors",
+              shuffle
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            aria-label="Shuffle"
+            aria-pressed={shuffle}
+          >
+            <Shuffle className="size-5" />
+          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex size-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+                aria-label="More options"
+              >
+                <Ellipsis className="size-6" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-48">
+              <DropdownMenuItem
+                className="gap-2"
+                onSelect={() => setAddOpen(true)}
+              >
+                <Plus className="size-4" />
+                Add songs
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="gap-2"
+                onSelect={() => openDetails()}
+              >
+                <Pencil className="size-4" />
+                Name & details
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="gap-2"
+                onSelect={() => void copyPlaylistLink()}
+              >
+                <Copy className="size-4" />
+                Copy link
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
+                onSelect={() => void deleteThisPlaylist()}
+              >
+                <Trash2 className="size-4" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAddOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+          >
+            <Plus className="size-4" />
+            Add
+          </button>
+          <button
+            type="button"
+            onClick={() => openDetails()}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+          >
+            Name & details
+          </button>
+        </div>
+      </section>
+
+      <section className="pt-4">
+        {empty ? (
+          <div className="px-1 py-12">
+            <h2 className="text-2xl font-bold tracking-tight">
+              Let&apos;s find something for your playlist
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Search your library and add songs, or right-click a track anywhere
+              in Polarr.
+            </p>
+            <button
+              type="button"
+              onClick={() => setAddOpen(true)}
+              className="mt-6 inline-flex items-center gap-1.5 rounded-full bg-foreground px-5 py-2.5 text-sm font-semibold text-background hover:opacity-90"
+            >
+              Add songs
+            </button>
+          </div>
+        ) : (
+          <div className="w-full overflow-x-auto">
+            <table className="w-full min-w-[640px] border-separate border-spacing-y-1 text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs text-muted-foreground">
+                  <th className="w-10 pb-3 pl-3 font-medium">#</th>
+                  <th className="pb-3 pr-4 font-medium">Title</th>
+                  <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
+                    Album
+                  </th>
+                  <th className="hidden pb-3 pr-4 font-medium lg:table-cell">
+                    Date added
+                  </th>
+                  <th className="w-[5.5rem] pb-3 font-medium" aria-label="Actions" />
+                  <th className="w-16 pb-3 pr-3 text-right font-medium">
+                    <Clock className="ml-auto size-3.5" aria-label="Duration" />
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {tracks.map((t, i) => {
+                  const playerTrack = toPlayerTrack(
+                    t,
+                    playlist?.name || "",
+                    playlist?.coverUrl || null,
+                  );
+                  const trackId = t.localTrackId || t.id;
+                  const isCurrent = isPlayerRowCurrent(
+                    track,
+                    {
+                      id: playerTrack.id,
+                      localTrackId: t.localTrackId,
+                      streamId: t.id.startsWith("stream:") ? t.id : null,
+                      title: t.title,
+                      artist: t.artist,
+                    },
+                    playerQueue,
+                  );
+                  const explicit =
+                    t.explicit ?? titleLooksExplicit(t.title);
+                  const albumPath =
+                    t.album && t.artist
+                      ? albumHref({ title: t.album, artist: t.artist })
+                      : null;
+                  const row = (
+                    <tr
+                      draggable
+                      onDragStart={(e) => setDragTrack(e, playerTrack)}
+                      className="group/row cursor-grab transition-colors active:cursor-grabbing"
+                      onClick={() => playTrack(t)}
+                    >
+                      <td
+                        className={trackRowStartCell(
+                          isCurrent,
+                          "py-2.5 pl-3 tabular-nums text-muted-foreground",
+                        )}
+                      >
+                        <TrackRowIndex n={i + 1} isCurrent={isCurrent} />
+                      </td>
+                      <td className={trackRowMidCell(isCurrent, "py-2.5 pr-4")}>
+                        <div className="flex min-w-0 items-center gap-3">
+                          <CoverArt
+                            seed={`${t.artist}-${t.title}`}
+                            image={t.coverPath || playlist?.coverUrl}
+                            className="size-10 shrink-0 rounded-sm"
+                          />
+                          <div className="min-w-0">
+                            <div className="truncate font-medium text-foreground">
+                              {t.title}
+                            </div>
+                            <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+                              {explicit ? <ExplicitBadge /> : null}
+                              <span className="truncate">{t.artist}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td
+                        className={trackRowMidCell(
+                          isCurrent,
+                          "hidden max-w-[14rem] py-2.5 pr-4 sm:table-cell",
+                        )}
+                      >
+                        {albumPath && t.album ? (
+                          <Link
+                            href={albumPath}
+                            onClick={(e) => e.stopPropagation()}
+                            className="block truncate text-muted-foreground hover:underline"
+                          >
+                            {t.album}
+                          </Link>
+                        ) : (
+                          <span className="block truncate text-muted-foreground">
+                            {t.album || "—"}
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        className={trackRowMidCell(
+                          isCurrent,
+                          "hidden py-2.5 pr-4 tabular-nums text-muted-foreground lg:table-cell",
+                        )}
+                      >
+                        {formatDateAdded(t.addedAt)}
+                      </td>
+                      <td
+                        className={trackRowMidCell(isCurrent, "py-2.5")}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <TrackRowActions
+                          trackId={trackId}
+                          artist={t.artist}
+                          title={t.title}
+                          album={t.album}
+                          coverPath={t.coverPath}
+                          duration={t.duration}
+                          inLibrary={Boolean(t.path)}
+                        />
+                      </td>
+                      <td
+                        className={trackRowEndCell(
+                          isCurrent,
+                          "py-2.5 pr-3 text-right tabular-nums text-muted-foreground",
+                        )}
+                      >
+                        {t.duration ? formatDuration(t.duration) : "—"}
+                      </td>
+                    </tr>
+                  );
+
+                  return (
+                    <TrackContextMenu
+                      key={trackId}
+                      track={playerTrack}
+                      inLibrary={Boolean(t.path)}
+                      playlistId={playlistId}
+                      onRemovedFromPlaylist={() =>
+                        void removeFromPlaylist(trackId)
+                      }
+                    >
+                      {row}
+                    </TrackContextMenu>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <AddTracksDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        playlistId={playlistId}
+        existingIds={existingIds}
+        onAdded={() => void load()}
+      />
+      {playlist ? (
+        <EditDetailsDialog
+          open={detailsOpen}
+          onOpenChange={setDetailsOpen}
+          playlist={playlist}
+          coverImage={coverImage}
+          coverBusy={coverBusy}
+          onPickCover={() => fileRef.current?.click()}
+          onSaved={({ name, description }) => {
+            setPlaylist((p) => (p ? { ...p, name, description } : p));
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}

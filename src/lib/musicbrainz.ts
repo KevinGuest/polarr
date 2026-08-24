@@ -3,6 +3,12 @@
  * foreignAlbumId from Lidarr is typically a MusicBrainz release-group MBID.
  */
 
+import {
+  namesMatch,
+  normalizeTitle,
+  primaryArtistName,
+  titlesMatch,
+} from "@/lib/track-match";
 import { formatArtistCredit } from "@/lib/utils";
 
 export type MbTrack = {
@@ -34,7 +40,12 @@ type MbReleaseGroup = {
   title?: string;
   "first-release-date"?: string;
   "artist-credit"?: MbArtistCredit;
-  releases?: { id: string; title?: string; status?: string }[];
+  releases?: {
+    id: string;
+    title?: string;
+    status?: string;
+    disambiguation?: string;
+  }[];
 };
 
 type MbRelease = {
@@ -121,38 +132,52 @@ export async function tracksForReleaseGroup(
   const releases = group?.releases || [];
   if (releases.length === 0) return [];
 
-  // Prefer Official, then first release
-  const preferred =
-    releases.find((r) => (r.status || "").toLowerCase() === "official") ||
-    releases[0];
+  // Prefer Official digital releases; try several until one has a tracklist
+  const ordered = [
+    ...releases.filter((r) => (r.status || "").toLowerCase() === "official"),
+    ...releases.filter((r) => (r.status || "").toLowerCase() !== "official"),
+  ];
+  // Prefer explicit/non-clean when titles collide
+  ordered.sort((a, b) => {
+    const aClean = /clean/i.test(a.disambiguation || "") ? 1 : 0;
+    const bClean = /clean/i.test(b.disambiguation || "") ? 1 : 0;
+    return aClean - bClean;
+  });
 
-  const release = await mbFetch<MbRelease>(
-    `/release/${encodeURIComponent(preferred.id)}?inc=recordings+artist-credits&fmt=json`,
-  );
-  if (!release?.media?.length) return [];
+  for (const preferred of ordered) {
+    if (!preferred?.id) continue;
+    const release = await mbFetch<MbRelease>(
+      `/release/${encodeURIComponent(preferred.id)}?inc=recordings+artist-credits&fmt=json`,
+    );
+    if (!release?.media?.length) continue;
 
-  const tracks: MbTrack[] = [];
-  let fallbackNum = 1;
-  for (const medium of release.media) {
-    for (const t of medium.tracks || []) {
-      const title = (t.recording?.title || t.title || "").trim();
-      if (!title) continue;
-      const durationMs = t.length ?? t.recording?.length ?? 0;
-      const artists =
-        formatArtistCredit(t.recording?.["artist-credit"]) ||
-        formatArtistCredit(t["artist-credit"]) ||
-        undefined;
-      tracks.push({
-        title,
-        trackNumber: parseTrackNumber(t.number, fallbackNum),
-        durationMs: typeof durationMs === "number" ? durationMs : 0,
-        artists,
-      });
-      fallbackNum += 1;
+    const tracks: MbTrack[] = [];
+    let fallbackNum = 1;
+    for (const medium of release.media) {
+      for (const t of medium.tracks || []) {
+        const title = (t.recording?.title || t.title || "").trim();
+        if (!title) continue;
+        const durationMs = t.length ?? t.recording?.length ?? 0;
+        const artists =
+          formatArtistCredit(t.recording?.["artist-credit"]) ||
+          formatArtistCredit(t["artist-credit"]) ||
+          undefined;
+        tracks.push({
+          title,
+          trackNumber: parseTrackNumber(t.number, fallbackNum),
+          durationMs: typeof durationMs === "number" ? durationMs : 0,
+          artists,
+        });
+        fallbackNum += 1;
+      }
+    }
+    if (tracks.length > 0) {
+      cacheSet(trackCacheKey, tracks);
+      return tracks;
     }
   }
-  cacheSet(trackCacheKey, tracks);
-  return tracks;
+
+  return [];
 }
 
 type MbSearchHit = {
@@ -184,26 +209,47 @@ export async function findReleaseGroupId(
   artist: string,
   album: string,
 ): Promise<string | null> {
-  const a = artist.trim();
+  const a = primaryArtistName(artist).trim() || artist.trim();
   const t = album.trim();
   if (!a || !t) return null;
-  const query = `artist:"${a.replace(/"/g, "")}" AND releasegroup:"${t.replace(/"/g, "")}"`;
-  const data = await mbFetch<{ "release-groups"?: MbSearchHit[] }>(
-    `/release-group?query=${encodeURIComponent(query)}&fmt=json&limit=5`,
-  );
-  const hits = data?.["release-groups"] || [];
-  if (!hits.length) return null;
 
-  const aLower = a.toLowerCase();
-  const tLower = t.toLowerCase();
-  const exact =
-    hits.find((h) => {
+  const queries = [
+    `artist:"${a.replace(/"/g, "")}" AND releasegroup:"${t.replace(/"/g, "")}"`,
+    `artist:${a.replace(/"/g, "")} AND releasegroup:${t.replace(/"/g, "")}`,
+  ];
+
+  for (const query of queries) {
+    const data = await mbFetch<{ "release-groups"?: MbSearchHit[] }>(
+      `/release-group?query=${encodeURIComponent(query)}&fmt=json&limit=8`,
+    );
+    const hits = data?.["release-groups"] || [];
+    if (!hits.length) continue;
+
+    const aLower = a.toLowerCase();
+    const tNorm = normalizeTitle(t);
+    const tLower = t.toLowerCase();
+
+    const exact = hits.find((h) => {
       const title = (h.title || "").trim().toLowerCase();
       const credit = formatArtistCredit(h["artist-credit"]).toLowerCase();
       return title === tLower && credit === aLower;
-    }) || hits[0];
+    });
+    if (exact?.id) return exact.id;
 
-  return exact?.id || null;
+    const soft = hits.find((h) => {
+      const title = (h.title || "").trim();
+      const credit = formatArtistCredit(h["artist-credit"]);
+      const titleOk =
+        title.toLowerCase() === tLower ||
+        normalizeTitle(title) === tNorm ||
+        titlesMatch(title, t);
+      if (!titleOk) return false;
+      return namesMatch(credit, a);
+    });
+    if (soft?.id) return soft.id;
+  }
+
+  return null;
 }
 
 /** Browse recent / notable albums from MusicBrainz (home catalog shelves). */

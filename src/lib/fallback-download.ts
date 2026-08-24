@@ -4,6 +4,7 @@ import path from "node:path";
 import { randomBytes } from "node:crypto";
 import {
   createDownloadJob,
+  findTrack,
   getDownload,
   getRequest,
   getSettings,
@@ -16,6 +17,7 @@ import {
 } from "./db";
 import { ytDlpAudioArgs } from "./download-quality";
 import { downloadsDir } from "./paths";
+import { primaryArtistName } from "./track-match";
 import {
   ensureYtDlp,
   ffmpegAvailable,
@@ -48,6 +50,16 @@ export const ALBUM_NOT_FOUND = "Album not found";
 const activeProcs = new Map<string, ChildProcess>();
 const stopFlags = new Set<string>();
 const timeoutTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/** artist|title → job id — save-on-play and Download share this. */
+const inflightAcquire = new Map<string, string>();
+/** Optional album tag for jobs that have no linked request (save-on-play). */
+const jobAlbum = new Map<string, string>();
+
+export function acquireDedupeKey(artist: string, title: string): string {
+  const a = (primaryArtistName(artist) || artist).trim().toLowerCase();
+  const t = title.trim().toLowerCase();
+  return `${a}|${t}`;
+}
 
 function isStopped(jobId: string): boolean {
   return stopFlags.has(jobId);
@@ -269,17 +281,77 @@ export async function enqueueFallbackDownload(input: {
   query: string;
   title?: string;
   artist?: string;
+  album?: string;
   requestId?: string | null;
 }) {
+  const title = input.title || input.query;
+  const artist = input.artist || "Unknown Artist";
+  const key = acquireDedupeKey(artist, title);
+  const existingId = inflightAcquire.get(key);
+  if (existingId) {
+    const existing = getDownload(existingId);
+    if (
+      existing &&
+      (existing.status === "queued" || existing.status === "running")
+    ) {
+      return existing;
+    }
+  }
+
   const job = createDownloadJob({
     query: input.query,
-    title: input.title || input.query,
-    artist: input.artist || "Unknown Artist",
+    title,
+    artist,
     requestId: input.requestId ?? null,
   });
-
-  void processDownloadJob(job.id);
+  if (input.album?.trim()) jobAlbum.set(job.id, input.album.trim());
+  inflightAcquire.set(key, job.id);
+  void processDownloadJob(job.id).finally(() => {
+    if (inflightAcquire.get(key) === job.id) inflightAcquire.delete(key);
+    jobAlbum.delete(job.id);
+  });
   return job;
+}
+
+/**
+ * Background library acquire for a live play. Does not block streaming.
+ * Returns true when a save is in flight or was just started.
+ */
+export function kickSaveOnPlay(input: {
+  artist: string;
+  title: string;
+  album?: string;
+}): boolean {
+  const settings = getSettings();
+  if (!settings.saveOnPlay) return false;
+  const artist = input.artist.trim();
+  const title = input.title.trim();
+  if (!artist || !title) return false;
+  if (findTrack(artist, title)) return false;
+
+  const key = acquireDedupeKey(artist, title);
+  const existingId = inflightAcquire.get(key);
+  if (existingId) {
+    const existing = getDownload(existingId);
+    if (
+      existing &&
+      (existing.status === "queued" || existing.status === "running")
+    ) {
+      return true;
+    }
+  }
+
+  try {
+    void enqueueFallbackDownload({
+      query: `${artist} ${title}`.trim(),
+      title,
+      artist,
+      album: input.album,
+    });
+  } catch {
+    return false;
+  }
+  return true;
 }
 
 export async function processDownloadJob(id: string) {
@@ -299,6 +371,24 @@ export async function processDownloadJob(id: string) {
 
   updateDownloadJob(id, { status: "running", progress: 1 });
   scheduleJobTimeout(id, job.createdAt);
+
+  const already = findTrack(job.artist, job.title);
+  if (already?.path) {
+    clearTimeoutTimer(id);
+    updateDownloadJob(id, {
+      status: "completed",
+      progress: 100,
+      outputPath: already.path,
+      error: null,
+    });
+    return already;
+  }
+
+  const linkedEarly = job.requestId ? getRequest(job.requestId) : null;
+  const albumHint =
+    jobAlbum.get(id) ||
+    (linkedEarly?.album && linkedEarly.album.trim()) ||
+    "";
 
   const ytDlp = await ensureYtDlp();
   if (isStopped(id)) return;
@@ -343,16 +433,26 @@ export async function processDownloadJob(id: string) {
   try {
     const linked = job.requestId ? getRequest(job.requestId) : null;
     const albumName =
-      (linked?.album && linked.album.trim()) || "Fallback Downloads";
+      albumHint ||
+      (linked?.album && linked.album.trim()) ||
+      "Fallback Downloads";
 
-    // Rank YouTube Music / audio-first results; only then download that ID
+    // Rank YouTube Music / audio-first results; never ytsearch1 (wrong artist)
     const match = await matchYtmAudio({
       artist: job.artist,
       title: job.title,
       query: job.query,
     });
-    const sourceArg =
-      match?.url || `ytsearch1:${job.query.trim()} official audio`;
+    if (!match?.url) {
+      updateDownloadJob(id, {
+        status: "failed",
+        error:
+          "Couldn’t match this track with enough confidence — won’t download the wrong song.",
+        progress: 0,
+      });
+      return;
+    }
+    const sourceArg = match.url;
 
     const result = await run(
       id,

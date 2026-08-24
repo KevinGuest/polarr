@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { CoverArt } from "@/components/cover-art";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
+import { TrackRowIndex } from "@/components/track-row-index";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
 import { albumHref } from "@/lib/album-ref";
 import {
@@ -20,6 +21,12 @@ import {
   emitLibraryChanged,
 } from "@/lib/ui-events";
 import { setDragTrack } from "@/lib/drag-track";
+import {
+  isPlayerRowCurrent,
+  trackRowEndCell,
+  trackRowMidCell,
+  trackRowStartCell,
+} from "@/lib/player-row";
 import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine } from "@/lib/utils";
 import { toastError, toastSuccess } from "@/lib/toast";
 
@@ -38,7 +45,7 @@ export function LibraryClient({
   mode?: "library" | "liked";
 }) {
   const router = useRouter();
-  const { play } = usePlayer();
+  const { play, track, queue } = usePlayer();
   const searchParams = useSearchParams();
   const filterAlbum = searchParams.get("album");
   const filterArtist = searchParams.get("artist");
@@ -414,7 +421,7 @@ export function LibraryClient({
           </div>
         ) : albumView ? (
           <div className="w-full overflow-x-auto">
-            <table className="w-full min-w-[480px] border-separate border-spacing-y-0.5 text-left text-sm">
+            <table className="w-full min-w-[480px] border-separate border-spacing-y-1 text-left text-sm">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">
                   <th className="w-10 pb-3 pl-3 font-medium">#</th>
@@ -427,6 +434,16 @@ export function LibraryClient({
               </thead>
               <tbody>
                 {filteredTracks.map((t, i) => {
+                  const isCurrent = isPlayerRowCurrent(
+                    track,
+                    {
+                      id: t.id,
+                      localTrackId: t.id,
+                      title: t.title,
+                      artist: t.artist,
+                    },
+                    queue,
+                  );
                   return (
                     <TrackContextMenu
                       key={t.id}
@@ -439,14 +456,15 @@ export function LibraryClient({
                         className="group/row cursor-grab transition-colors active:cursor-grabbing"
                         onClick={() => play(t, filteredTracks)}
                       >
-                      <td className="rounded-l-md py-3 pl-3 tabular-nums text-muted-foreground group-hover/row:bg-muted/30">
-                        <span className="group-hover/row:hidden">{i + 1}</span>
-                        <Play
-                          className="hidden size-3.5 group-hover/row:inline"
-                          fill="currentColor"
-                        />
+                      <td
+                        className={trackRowStartCell(
+                          isCurrent,
+                          "py-3 pl-3 tabular-nums text-muted-foreground",
+                        )}
+                      >
+                        <TrackRowIndex n={i + 1} isCurrent={isCurrent} />
                       </td>
-                      <td className="py-3 pr-4 group-hover/row:bg-muted/30">
+                      <td className={trackRowMidCell(isCurrent, "py-3 pr-4")}>
                         <div className="min-w-0">
                           <div className="truncate font-medium">{t.title}</div>
                           <div className="truncate text-sm text-muted-foreground">
@@ -454,7 +472,7 @@ export function LibraryClient({
                           </div>
                         </div>
                       </td>
-                      <td className="py-3 group-hover/row:bg-muted/30">
+                      <td className={trackRowMidCell(isCurrent, "py-3")}>
                         <TrackRowActions
                           trackId={t.id}
                           artist={t.artist}
@@ -477,7 +495,12 @@ export function LibraryClient({
                           onLikedChange={(liked) => onLikedChange(t.id, liked)}
                         />
                       </td>
-                      <td className="rounded-r-md py-3 pr-3 text-right tabular-nums text-muted-foreground group-hover/row:bg-muted/30">
+                      <td
+                        className={trackRowEndCell(
+                          isCurrent,
+                          "py-3 pr-3 text-right tabular-nums text-muted-foreground",
+                        )}
+                      >
                         {formatDuration(t.duration || 0)}
                       </td>
                     </tr>
@@ -489,7 +512,7 @@ export function LibraryClient({
           </div>
         ) : (
           <div className="w-full overflow-x-auto">
-            <table className="w-full min-w-[640px] border-separate border-spacing-y-0.5 text-left text-sm">
+            <table className="w-full min-w-[640px] border-separate border-spacing-y-1 text-left text-sm">
               <thead>
                 <tr className="text-xs text-muted-foreground">
                   <th className="w-10 pb-3 pl-2 font-medium">#</th>
@@ -509,6 +532,16 @@ export function LibraryClient({
               </thead>
               <tbody>
                 {filteredTracks.map((t, i) => {
+                  const isCurrent = isPlayerRowCurrent(
+                    track,
+                    {
+                      id: t.id,
+                      localTrackId: t.id,
+                      title: t.title,
+                      artist: t.artist,
+                    },
+                    queue,
+                  );
                   return (
                     <TrackContextMenu
                       key={t.id}
@@ -521,11 +554,15 @@ export function LibraryClient({
                         className="group/row cursor-grab transition-colors active:cursor-grabbing"
                         onClick={() => play(t, filteredTracks)}
                       >
-                      <td className="rounded-l-md py-3 pl-2 tabular-nums text-muted-foreground group-hover/row:bg-muted/30">
-                        <span className="group-hover/row:hidden">{i + 1}</span>
-                        <Play className="hidden size-3.5 group-hover/row:inline" />
+                      <td
+                        className={trackRowStartCell(
+                          isCurrent,
+                          "py-3 pl-2 tabular-nums text-muted-foreground",
+                        )}
+                      >
+                        <TrackRowIndex n={i + 1} isCurrent={isCurrent} />
                       </td>
-                      <td className="py-3 pr-4 group-hover/row:bg-muted/30">
+                      <td className={trackRowMidCell(isCurrent, "py-3 pr-4")}>
                         <div className="flex items-center gap-3">
                           <CoverArt
                             seed={t.title}
@@ -534,20 +571,35 @@ export function LibraryClient({
                           <span className="font-medium">{t.title}</span>
                         </div>
                       </td>
-                      <td className="py-3 pr-4 text-muted-foreground group-hover/row:bg-muted/30">
+                      <td
+                        className={trackRowMidCell(
+                          isCurrent,
+                          "py-3 pr-4 text-muted-foreground",
+                        )}
+                      >
                         {formatTrackArtistLine(t.artist, t.title)}
                       </td>
-                      <td className="hidden py-3 pr-4 text-muted-foreground group-hover/row:bg-muted/30 md:table-cell">
+                      <td
+                        className={trackRowMidCell(
+                          isCurrent,
+                          "hidden py-3 pr-4 text-muted-foreground md:table-cell",
+                        )}
+                      >
                         {t.album}
                       </td>
-                      <td className="hidden py-3 pr-4 text-xs text-muted-foreground group-hover/row:bg-muted/30 sm:table-cell">
+                      <td
+                        className={trackRowMidCell(
+                          isCurrent,
+                          "hidden py-3 pr-4 text-xs text-muted-foreground sm:table-cell",
+                        )}
+                      >
                         {t.streamOnly
                           ? "stream"
                           : t.source === "fallback"
                             ? "download"
                             : t.source}
                       </td>
-                      <td className="py-3 group-hover/row:bg-muted/30">
+                      <td className={trackRowMidCell(isCurrent, "py-3")}>
                         <TrackRowActions
                           trackId={t.id}
                           artist={t.artist}
@@ -574,7 +626,12 @@ export function LibraryClient({
                           onLikedChange={(liked) => onLikedChange(t.id, liked)}
                         />
                       </td>
-                      <td className="rounded-r-md py-3 pr-2 text-right tabular-nums text-muted-foreground group-hover/row:bg-muted/30">
+                      <td
+                        className={trackRowEndCell(
+                          isCurrent,
+                          "py-3 pr-2 text-right tabular-nums text-muted-foreground",
+                        )}
+                      >
                         {formatDuration(t.duration || 0)}
                       </td>
                     </tr>

@@ -18,6 +18,7 @@ import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
 import { formatTrackArtistLine } from "@/lib/utils";
+import { toastSavingToLibrary } from "@/lib/toast";
 
 const TOP_PREVIEW = 8;
 
@@ -173,6 +174,12 @@ export function SearchClient() {
         setMessage(live?.error || "Couldn’t start playback");
         return;
       }
+      if (live.savingToLibrary) {
+        toastSavingToLibrary(
+          live.track.artist || hit.artist,
+          live.track.title || hit.title,
+        );
+      }
       const pt: PlayerTrack = {
         id: live.track.id,
         title: live.track.title || hit.title,
@@ -180,6 +187,7 @@ export function SearchClient() {
           live.track.artist || hit.artist,
           live.track.title || hit.title,
         ),
+        resolveArtist: hit.artist,
         album: live.track.album || hit.album,
         coverPath: hit.image || live.track.coverPath || null,
         streamUrl: live.streamUrl || live.track.streamUrl,
@@ -222,14 +230,17 @@ export function SearchClient() {
           title: string;
           artists?: string;
           localTrackId?: string | null;
+          duration?: number;
         }) => ({
           id:
             t.localTrackId ||
             `stream:${albumArtist.trim().toLowerCase()}|${t.title.trim().toLowerCase()}`,
           title: t.title,
-          artist: t.artists || albumArtist,
+          artist: formatTrackArtistLine(albumArtist, t.title, t.artists),
+          resolveArtist: albumArtist,
           album: albumTitle,
           coverPath: cover,
+          duration: t.duration || undefined,
         }),
       );
       const first = queue[0]!;

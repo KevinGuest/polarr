@@ -7,9 +7,11 @@ import {
   toastSuccess,
 } from "@/lib/toast";
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   CirclePlus,
   Copy,
+  Disc3,
   Link2,
   ListEnd,
   ListMusic,
@@ -69,14 +71,20 @@ export function TrackContextMenu({
   children,
   initialLiked,
   inLibrary,
+  playlistId,
+  onRemovedFromPlaylist,
 }: {
   track: PlayerTrack;
   children: React.ReactNode;
   initialLiked?: boolean;
   /** When true, show admin hard-delete for indexed library tracks. */
   inLibrary?: boolean;
+  /** When set, offer “Remove from this playlist”. */
+  playlistId?: string;
+  onRemovedFromPlaylist?: () => void;
 }) {
   const { addToQueue } = usePlayer();
+  const router = useRouter();
   const [liked, setLiked] = useState(Boolean(initialLiked));
   const [isAdmin, setIsAdmin] = useState(false);
   const [playlists, setPlaylists] = useState<PlaylistRow[]>([]);
@@ -172,6 +180,7 @@ export function TrackContextMenu({
     }
     toastSuccess(`Added to ${name}`);
     void loadPlaylists();
+    emitLibraryChanged();
   }
 
   async function createPlaylistAndAdd() {
@@ -191,6 +200,7 @@ export function TrackContextMenu({
     }
     toastSuccess(`Added to ${name.trim()}`);
     void loadPlaylists();
+    emitLibraryChanged();
   }
 
   async function excludeFromTaste() {
@@ -342,6 +352,15 @@ export function TrackContextMenu({
             </ContextMenuItem>
           ) : null}
 
+          {playlistId ? (
+            <ContextMenuItem
+              onSelect={() => onRemovedFromPlaylist?.()}
+            >
+              <Trash2 className="size-4 shrink-0 text-muted-foreground" />
+              Remove from this playlist
+            </ContextMenuItem>
+          ) : null}
+
           <ContextMenuItem
             onSelect={() => {
               addToQueue(track);
@@ -350,6 +369,20 @@ export function TrackContextMenu({
           >
             <ListEnd className="size-4 shrink-0 text-muted-foreground" />
             Add to queue
+          </ContextMenuItem>
+
+          <ContextMenuItem
+            onSelect={() => {
+              router.push(
+                albumHref({
+                  title: (track.album || track.title).trim() || track.title,
+                  artist: track.resolveArtist || track.artist,
+                }),
+              );
+            }}
+          >
+            <Disc3 className="size-4 shrink-0 text-muted-foreground" />
+            Go to album
           </ContextMenuItem>
 
           <ContextMenuItem onSelect={() => void excludeFromTaste()}>

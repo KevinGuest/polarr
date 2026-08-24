@@ -16,13 +16,13 @@ services:
     environment:
       - POLARR_DATA_DIR=/data
       - POLARR_MUSIC_DIR=/music
-      - POLARR_DOWNLOADS_DIR=/music/downloads
+      - POLARR_DOWNLOADS_DIR=/data/downloads
       - PORT=3000
       - HOSTNAME=0.0.0.0
-      - POLARR_APP_VERSION=0.5.1
+      - POLARR_APP_VERSION=0.6.0
     volumes:
       - ${APP_DATA_DIR}/data:/data
-      - ${UMBREL_ROOT}/data/storage/downloads/music:/music
+      - ${UMBREL_ROOT}/data/storage/downloads/complete/music:/music
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/v1/status"]
       interval: 15s

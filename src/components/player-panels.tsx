@@ -31,6 +31,7 @@ import { albumHref } from "@/lib/album-ref";
 import { getDragTrack, POLARR_TRACK_MIME } from "@/lib/drag-track";
 import { LISTEN_CREDITED_EVENT } from "@/lib/ui-events";
 import { cn, formatDuration } from "@/lib/utils";
+import { KaraokeLyricLine } from "@/components/karaoke-lyric-line";
 import { useKaraokeSession } from "@/components/use-karaoke-session";
 
 /** Dark saturated backdrop from track seed — always readable with white text. */
@@ -48,6 +49,7 @@ function lyricsBackdrop(seed: string): string {
 function LyricsPanel() {
   const {
     track,
+    playing,
     progress,
     duration,
     seek,
@@ -77,12 +79,10 @@ function LyricsPanel() {
     const scroller = scrollerRef.current;
     const active = activeRef.current;
     if (!scroller || !active || !session.synced) return;
-    const offset =
-      active.offsetTop -
-      scroller.clientHeight / 2 +
-      active.clientHeight / 2;
+    // Pin the singing line near the top (Apple Music karaoke), not centered.
+    const topPin = 80;
     scroller.scrollTo({
-      top: Math.max(0, offset),
+      top: Math.max(0, active.offsetTop - topPin),
       behavior: "smooth",
     });
   }, [session.activeIndex, session.synced]);
@@ -108,7 +108,7 @@ function LyricsPanel() {
 
       <div
         ref={scrollerRef}
-        className="min-h-0 flex-1 overflow-y-auto px-8 py-[28vh] md:px-16 lg:px-24 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+        className="min-h-0 flex-1 overflow-y-auto px-8 pb-[70vh] pt-20 md:px-16 lg:px-24 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
       >
         {session.status === "loading" && (
           <p className="text-lg font-bold text-white/50">Loading lyrics…</p>
@@ -140,24 +140,47 @@ function LyricsPanel() {
                 disabled={!canSeek}
                 onClick={() => {
                   if (!canSeek) return;
-                  const t = Math.max(0, line.time - (session.offsetSec || 0));
+                  const t = session.seekSecForLine(line);
                   seek(Math.min(1, Math.max(0, t / duration)));
                 }}
                 className={cn(
-                  "block max-w-3xl py-3 text-left text-2xl font-semibold leading-snug tracking-tight transition-all duration-300 md:text-3xl md:leading-snug",
-                  canSeek && "cursor-pointer hover:text-white",
+                  "block max-w-3xl py-3 text-left leading-snug tracking-tight transition-[color,filter,font-size,opacity] duration-300",
+                  canSeek && "cursor-pointer hover:text-white hover:blur-none",
                   !canSeek && "cursor-default",
                   // Plain session: all lines readable, equal weight (no fake sync)
-                  !session.synced && "text-white/75",
+                  !session.synced &&
+                    "text-2xl font-semibold text-white/75 md:text-3xl",
                   session.synced &&
                     active &&
-                    "scale-[1.01] text-white underline decoration-white decoration-2 underline-offset-[10px]",
-                  session.synced && near && !active && "text-white/40",
-                  session.synced && !near && !active && "text-white/22",
+                    "relative z-[1] text-3xl font-bold text-white blur-none md:text-4xl",
+                  session.synced &&
+                    !active &&
+                    i < session.activeIndex &&
+                    "text-2xl font-semibold text-white/32 blur-[2px] md:text-3xl",
+                  session.synced &&
+                    near &&
+                    !active &&
+                    i > session.activeIndex &&
+                    "text-2xl font-semibold text-white/42 blur-[1.5px] md:text-3xl",
+                  session.synced &&
+                    !near &&
+                    !active &&
+                    i > session.activeIndex &&
+                    "text-2xl font-semibold text-white/20 blur-[2.5px] md:text-3xl",
                   isGap && "tracking-widest",
                 )}
               >
-                {line.text}
+                {active ? (
+                  <KaraokeLyricLine
+                    line={line}
+                    lines={session.lines}
+                    index={i}
+                    clockSec={session.clockSec}
+                    playing={playing}
+                  />
+                ) : (
+                  line.text
+                )}
               </button>
             );
           })}
@@ -173,8 +196,8 @@ function LyricsPanel() {
         <div className="absolute bottom-8 left-6 z-20 flex items-center gap-1.5 rounded-full bg-black/45 px-2 py-1.5 ring-1 ring-white/12 backdrop-blur-md">
           <button
             type="button"
-            aria-label="Lyrics earlier"
-            title="Lyrics earlier (−0.5s)"
+            aria-label="Delay lyrics"
+            title="Lyrics later (−0.5s) — wait for the vocal"
             onClick={() => session.nudgeOffset(-0.5)}
             className="rounded-full p-1.5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
           >
@@ -183,7 +206,11 @@ function LyricsPanel() {
           <button
             type="button"
             title={
-              session.offsetUserSet
+              session.alignSource === "dtw"
+                ? session.offsetUserSet
+                  ? "Back to vocal-aligned timing (0s)"
+                  : "Aligned to this vocal — click to re-apply"
+                : session.offsetUserSet
                 ? session.offsetSuggested !== 0
                   ? `Back to auto (${session.offsetSuggested > 0 ? "+" : ""}${session.offsetSuggested.toFixed(1)}s${session.offsetSource === "audio" ? ", from track" : ""})`
                   : "Back to auto (0s)"
@@ -196,16 +223,19 @@ function LyricsPanel() {
             onClick={() => session.resetOffsetToSuggested()}
             className="min-w-[3.25rem] px-1 text-center text-[11px] font-semibold tabular-nums text-white/80"
           >
-            {!session.offsetUserSet && session.offsetSource === "audio" ? (
-              <span className="text-white/55">auto </span>
+            {!session.offsetUserSet &&
+            (session.alignSource === "dtw" || session.offsetSource === "audio") ? (
+              <span className="text-white/55">
+                {session.alignSource === "dtw" ? "aligned " : "auto "}
+              </span>
             ) : null}
             {session.offsetSec > 0 ? "+" : ""}
             {session.offsetSec.toFixed(1)}s
           </button>
           <button
             type="button"
-            aria-label="Lyrics later"
-            title="Lyrics later (+0.5s)"
+            aria-label="Advance lyrics"
+            title="Lyrics earlier (+0.5s) — fire before the vocal"
             onClick={() => session.nudgeOffset(0.5)}
             className="rounded-full p-1.5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
           >

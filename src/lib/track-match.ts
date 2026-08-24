@@ -61,17 +61,25 @@ export function normalizeTitle(title: string): string {
     .trim();
 }
 
+/** Extra tokens allowed after a shared title stem (not a different song). */
+const TITLE_VERSION_TOKEN =
+  /^(remix|remaster(?:ed)?|reprise|edit|version|mix|instrumental|acoustic|deluxe|extended|radio|mono|stereo|live|demo|bonus|interlude|intro|outro|official|audio|lyric|lyrics|video|visualizer|hq|hd|4k|topic)$/i;
+
 export function titlesMatch(a: string, b: string): boolean {
   const na = normalizeTitle(a);
   const nb = normalizeTitle(b);
   if (!na || !nb) return false;
   if (na === nb) return true;
-  if (na.startsWith(nb) || nb.startsWith(na)) {
-    const longer = na.length >= nb.length ? na : nb;
-    const shorter = na.length < nb.length ? na : nb;
-    return longer.length - shorter.length <= 12;
-  }
-  return false;
+  // Prefix only at a word boundary, and only when the remainder is a
+  // version/qualifier — never "Love" ≈ "Love Story".
+  const [longer, shorter] = na.length >= nb.length ? [na, nb] : [nb, na];
+  if (!longer.startsWith(`${shorter} `)) return false;
+  const extra = longer
+    .slice(shorter.length)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return extra.length > 0 && extra.every((t) => TITLE_VERSION_TOKEN.test(t));
 }
 
 export type TrackMatchHit = {

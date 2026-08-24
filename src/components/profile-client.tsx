@@ -7,6 +7,7 @@ import { Camera } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
+import { TrackRowIndex } from "@/components/track-row-index";
 import { UserAvatar } from "@/components/user-avatar";
 import { usePlayer } from "@/components/player-provider";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,12 @@ import {
 } from "@/lib/banner-colors";
 import { AVATAR_UPDATED_EVENT } from "@/lib/ui-events";
 import { toastError, toastSaved } from "@/lib/toast";
+import {
+  isPlayerRowCurrent,
+  trackRowEndCell,
+  trackRowMidCell,
+  trackRowStartCell,
+} from "@/lib/player-row";
 
 type Profile = {
   publicId: string;
@@ -87,7 +94,7 @@ export function ProfileClient({
   username?: string;
 }) {
   const router = useRouter();
-  const { play, track: playing } = usePlayer();
+  const { play, track: playing, queue: playerQueue } = usePlayer();
   const fileRef = useRef<HTMLInputElement>(null);
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -355,13 +362,9 @@ export function ProfileClient({
             </p>
           ) : (
             <div>
-              <table className="w-full border-separate border-spacing-y-0.5 text-left text-sm">
+              <table className="w-full border-separate border-spacing-y-1 text-left text-sm">
                 <tbody>
                   {topTracks.map((t, i) => {
-                    const isPlaying = playing?.id === t.id;
-                    const rowBg = isPlaying
-                      ? "bg-muted/50"
-                      : "group-hover/row:bg-muted/40";
                     const playerTrack = {
                       id: t.id,
                       title: t.title,
@@ -369,13 +372,26 @@ export function ProfileClient({
                       album: t.album,
                       coverPath: t.coverPath,
                     };
+                    const isCurrent = isPlayerRowCurrent(
+                      playing,
+                      {
+                        id: t.id,
+                        localTrackId: t.id,
+                        title: t.title,
+                        artist: t.artist,
+                      },
+                      playerQueue,
+                    );
                     return (
                       <TrackContextMenu key={t.id} track={playerTrack}>
                       <tr
                         className="group/row transition-colors"
                       >
                         <td
-                          className={`w-12 rounded-l-md py-2 pl-2 pr-1 text-center align-middle ${rowBg}`}
+                          className={trackRowStartCell(
+                            isCurrent,
+                            "w-12 py-2 pl-2 pr-1 text-center align-middle",
+                          )}
                         >
                           <button
                             type="button"
@@ -383,45 +399,28 @@ export function ProfileClient({
                             className="relative mx-auto flex h-8 w-8 items-center justify-center text-muted-foreground"
                             aria-label={`Play ${t.title}`}
                           >
-                            <span
-                              className={`tabular-nums text-sm group-hover/row:opacity-0 ${
-                                isPlaying ? "opacity-0" : ""
-                              }`}
-                            >
-                              {i + 1}
-                            </span>
-                            <span
-                              className={`absolute inset-0 flex items-center justify-center text-foreground ${
-                                isPlaying
-                                  ? "opacity-100"
-                                  : "opacity-0 group-hover/row:opacity-100"
-                              }`}
-                            >
-                              <svg
-                                viewBox="0 0 24 24"
-                                className="h-4 w-4 fill-current"
-                                aria-hidden
-                              >
-                                <path d="M8 5v14l11-7z" />
-                              </svg>
-                            </span>
+                            <TrackRowIndex n={i + 1} isCurrent={isCurrent} />
                           </button>
                         </td>
-                        <td className={`w-12 py-2 pr-3 align-middle ${rowBg}`}>
+                        <td
+                          className={trackRowMidCell(
+                            isCurrent,
+                            "w-12 py-2 pr-3 align-middle",
+                          )}
+                        >
                           <CoverArt
                             seed={`${t.artist}-${t.title}`}
                             image={t.coverPath}
                             className="size-10 rounded-sm"
                           />
                         </td>
-                        <td className={`min-w-0 py-2 pr-4 align-middle ${rowBg}`}>
-                          <p
-                            className={`truncate font-medium ${
-                              isPlaying
-                                ? "text-[var(--primary)]"
-                                : "text-foreground"
-                            }`}
-                          >
+                        <td
+                          className={trackRowMidCell(
+                            isCurrent,
+                            "min-w-0 py-2 pr-4 align-middle",
+                          )}
+                        >
+                          <p className="truncate font-medium text-foreground">
                             {t.title}
                           </p>
                           <p className="truncate text-[13px] text-muted-foreground">
@@ -429,13 +428,21 @@ export function ProfileClient({
                           </p>
                         </td>
                         <td
-                          className={`hidden max-w-[12rem] py-2 pr-4 align-middle text-muted-foreground md:table-cell ${rowBg}`}
+                          className={trackRowMidCell(
+                            isCurrent,
+                            "hidden max-w-[12rem] py-2 pr-4 align-middle text-muted-foreground md:table-cell",
+                          )}
                         >
                           <span className="block truncate">
                             {t.album || "—"}
                           </span>
                         </td>
-                        <td className={`py-2 align-middle ${rowBg}`}>
+                        <td
+                          className={trackRowMidCell(
+                            isCurrent,
+                            "py-2 align-middle",
+                          )}
+                        >
                           <TrackRowActions
                             trackId={t.id}
                             artist={t.artist}
@@ -447,7 +454,10 @@ export function ProfileClient({
                           />
                         </td>
                         <td
-                          className={`w-16 rounded-r-md py-2 pr-3 text-right align-middle tabular-nums text-muted-foreground ${rowBg}`}
+                          className={trackRowEndCell(
+                            isCurrent,
+                            "w-16 py-2 pr-3 text-right align-middle tabular-nums text-muted-foreground",
+                          )}
                         >
                           {formatDuration(t.duration)}
                         </td>

@@ -12,6 +12,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { getDb } from "./db";
+import { primaryArtistName } from "./track-match";
 import { resolveYtmStreamRemote } from "./ytm-match";
 
 const LIVE_UA =
@@ -44,7 +45,10 @@ const queryIndex = new Map<string, string>();
 const inFlight = new Map<string, Promise<{ id: string; streamUrl: string } | null>>();
 
 function liveQueryKey(artist: string, title: string): string {
-  return `${artist.trim().toLowerCase()}|${title.trim().toLowerCase()}`;
+  // v3: primary artist + title. v2 keys may still hold pre-gate wrong-artist URLs.
+  const a = (primaryArtistName(artist) || artist).trim().toLowerCase();
+  const t = title.trim().toLowerCase();
+  return `v3|${a}|${t}`;
 }
 
 function cleanupLiveCache() {
@@ -72,6 +76,13 @@ function ensureRemoteTable() {
       expires_at INTEGER NOT NULL
     );
   `);
+  try {
+    getDb()
+      .prepare(`DELETE FROM live_remote_cache WHERE query_key NOT LIKE 'v3|%'`)
+      .run();
+  } catch {
+    /* ignore */
+  }
   remoteTableReady = true;
 }
 
@@ -456,11 +467,18 @@ function registerSession(input: {
   return entry;
 }
 
+function samePrimaryArtist(a: string, b: string): boolean {
+  const pa = (primaryArtistName(a) || a).trim().toLowerCase();
+  const pb = (primaryArtistName(b) || b).trim().toLowerCase();
+  return Boolean(pa && pb && pa === pb);
+}
+
 /** Create a short-lived live play session; returns id for /api/live/[id]. */
 export async function createLiveSession(input: {
   artist: string;
   title: string;
   album?: string;
+  expectedDurationSec?: number | null;
 }): Promise<{ id: string; streamUrl: string } | null> {
   const query = `${input.artist} ${input.title}`.trim();
   if (!query) return null;
@@ -471,7 +489,11 @@ export async function createLiveSession(input: {
   const existingId = queryIndex.get(qKey);
   if (existingId) {
     const entry = liveCache.get(existingId);
-    if (entry && entry.expiresAt > Date.now()) {
+    if (
+      entry &&
+      entry.expiresAt > Date.now() &&
+      samePrimaryArtist(entry.artist, input.artist)
+    ) {
       // Warm in the background — never make the caller wait for it.
       void warmLiveHead(entry);
       return {
@@ -507,6 +529,7 @@ export async function createLiveSession(input: {
     const remoteUrl = await resolveLiveRemoteForTrack({
       artist: input.artist,
       title: input.title,
+      expectedDurationSec: input.expectedDurationSec,
     });
     if (!remoteUrl) return null;
 

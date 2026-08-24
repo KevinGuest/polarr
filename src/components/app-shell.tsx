@@ -62,7 +62,7 @@ const adminNavGroups = [
     label: "Settings",
     staff: false as const,
     items: [
-      { href: "/admin/lidarr", label: "Lidarr", icon: Radio },
+      { href: "/admin/lidarr", label: "Sources", icon: Radio },
       { href: "/admin/quality", label: "Quality", icon: Gauge },
       { href: "/admin/import", label: "Import", icon: Download },
       { href: "/admin/email", label: "SMTP", icon: AtSign },

@@ -132,6 +132,10 @@ export function instrumentalPathForKey(key: string): string {
   return path.join(trackWorkDir(key), "instrumental.m4a");
 }
 
+export function vocalsPathForKey(key: string): string {
+  return path.join(trackWorkDir(key), "vocals.mp3");
+}
+
 function statusPathForKey(key: string): string {
   return path.join(trackWorkDir(key), "status.json");
 }
@@ -357,9 +361,12 @@ async function acquireRemoteWav(
         title: titleHint,
         query: source.searchQuery,
       });
-      sourceArg =
-        match?.url ||
-        `ytsearch1:${source.searchQuery.trim()} official audio`;
+      sourceArg = match?.url || "";
+      if (!sourceArg) {
+        job.error =
+          "Couldn’t match this track with enough confidence — won’t play the wrong song.";
+        return null;
+      }
     }
     const args = [
       sourceArg,
@@ -535,6 +542,7 @@ async function renderInstrumental(
   const drums = path.join(stemDir, "drums.mp3");
   const bass = path.join(stemDir, "bass.mp3");
   const other = path.join(stemDir, "other.mp3");
+  const vocalsSrc = path.join(stemDir, "vocals.mp3");
   for (const p of [drums, bass, other]) {
     if (!fs.existsSync(p)) {
       job.status = "error";
@@ -572,6 +580,15 @@ async function renderInstrumental(
     job.error = `Failed to mix instrumental stems.\n${mix.stderr.slice(-400)}`;
     writeStatus(key, job);
     return;
+  }
+
+  // Keep vocals for the local lyrics aligner (envelope DTW)
+  if (fs.existsSync(vocalsSrc) && fs.statSync(vocalsSrc).size > 1024) {
+    try {
+      fs.copyFileSync(vocalsSrc, vocalsPathForKey(key));
+    } catch {
+      /* aligner will fall back to the mix */
+    }
   }
 
   try {
@@ -704,7 +721,7 @@ export function getKaraokeInfo(
   return { status: "idle", quality: "none", progress: 0 };
 }
 
-export function getInstrumentalFile(trackId: string): string | null {
+function karaokeKeysForTrack(trackId: string): string[] {
   const keys = [
     lookupKey(trackId),
     jobs.get(trackId)?.key,
@@ -714,10 +731,22 @@ export function getInstrumentalFile(trackId: string): string | null {
   if (track?.path && !isStreamPath(track.path) && fs.existsSync(track.path)) {
     keys.push(libraryKey(trackId, track.path));
   }
+  return keys;
+}
 
-  for (const key of keys) {
+export function getInstrumentalFile(trackId: string): string | null {
+  for (const key of karaokeKeysForTrack(trackId)) {
     const inst = instrumentalPathForKey(key);
     if (fs.existsSync(inst) && fs.statSync(inst).size > 1024) return inst;
+  }
+  return null;
+}
+
+/** Isolated vocal stem when karaoke Demucs has already run for this track. */
+export function getVocalsFile(trackId: string): string | null {
+  for (const key of karaokeKeysForTrack(trackId)) {
+    const vocals = vocalsPathForKey(key);
+    if (fs.existsSync(vocals) && fs.statSync(vocals).size > 1024) return vocals;
   }
   return null;
 }

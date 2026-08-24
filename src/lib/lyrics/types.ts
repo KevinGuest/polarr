@@ -2,10 +2,22 @@
 
 export type LyricQuality = "synced" | "plain" | "instrumental" | "none";
 
-export type LyricLine = {
-  /** Seconds from start of the timed document (0 for plain lines). */
+/** Word timestamp from enhanced LRC (`[mm:ss.xx]word` or `<mm:ss.xx>word`). */
+export type LyricWord = {
   time: number;
   text: string;
+};
+
+export type LyricLine = {
+  /**
+   * Seconds from start of the timed document (0 for plain lines).
+   * On a karaoke session: warped (LRC × scale) or DTW media timestamps
+   * when the local aligner ran. Clock is `progress + offsetSec`.
+   */
+  time: number;
+  text: string;
+  /** Present only when the source had real per-word timestamps. */
+  words?: LyricWord[];
 };
 
 export type LyricDocument = {
@@ -37,6 +49,20 @@ export type LyricSession = LyricDocument & {
   cacheKey: string;
   /** Media duration used for matching (client pass-through). */
   mediaDurationSec: number | null;
+  /**
+   * Linear LRC→media scale already applied to `lines` times (1 = identity).
+   * When `alignSource` is `dtw`, line times are media timestamps instead
+   * (offset is only the user nudge).
+   * Clock is still `progress + offsetSec`.
+   */
+  warpScale: number;
+  /** Content onset used when computing the warp (informational). */
+  warpOnsetSec: number;
+  /**
+   * `dtw` = local envelope aligner wrote per-line media times.
+   * `warp` = linear LRC×scale fallback. `none` = unsynced / no map.
+   */
+  alignSource: "dtw" | "warp" | "none";
 };
 
 export type ResolveLyricsInput = {
@@ -45,6 +71,6 @@ export type ResolveLyricsInput = {
   album?: string;
   /** Playback length so we prefer LRC timed for this master */
   durationSec?: number | null;
-  /** Library / stream track id — enables ffmpeg onset alignment */
+  /** Library / stream track id — enables local vocal alignment */
   trackId?: string | null;
 };

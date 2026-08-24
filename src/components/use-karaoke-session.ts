@@ -6,6 +6,7 @@ import type {
   LyricQuality,
   OffsetSuggestSource,
 } from "@/lib/lyrics/types";
+import { lyricLineSeekSec } from "@/lib/lyrics/align";
 
 export type KaraokeSessionState = {
   status: "idle" | "loading" | "ready" | "empty" | "error";
@@ -17,6 +18,9 @@ export type KaraokeSessionState = {
   offsetSuggested: number;
   offsetUserSet: boolean;
   offsetSource: OffsetSuggestSource;
+  warpScale: number;
+  warpOnsetSec: number;
+  alignSource: "dtw" | "warp" | "none";
   cacheKey: string | null;
   source: string | null;
   error: string | null;
@@ -32,6 +36,9 @@ const IDLE: KaraokeSessionState = {
   offsetSuggested: 0,
   offsetUserSet: false,
   offsetSource: "none",
+  warpScale: 1,
+  warpOnsetSec: 0,
+  alignSource: "none",
   cacheKey: null,
   source: null,
   error: null,
@@ -90,6 +97,9 @@ export function useKaraokeSession(input: {
           offsetSuggested: number;
           offsetUserSet: boolean;
           offsetSource?: OffsetSuggestSource;
+          warpScale?: number;
+          warpOnsetSec?: number;
+          alignSource?: "dtw" | "warp" | "none";
           cacheKey: string;
           source: string;
         }>;
@@ -99,6 +109,19 @@ export function useKaraokeSession(input: {
         const offsetSource: OffsetSuggestSource =
           data.offsetSource === "audio" || data.offsetSource === "duration"
             ? data.offsetSource
+            : "none";
+        const warpScale =
+          typeof data.warpScale === "number" && Number.isFinite(data.warpScale)
+            ? data.warpScale
+            : 1;
+        const warpOnsetSec =
+          typeof data.warpOnsetSec === "number" &&
+          Number.isFinite(data.warpOnsetSec)
+            ? data.warpOnsetSec
+            : 0;
+        const alignSource =
+          data.alignSource === "dtw" || data.alignSource === "warp"
+            ? data.alignSource
             : "none";
         if (data.instrumental || data.quality === "instrumental") {
           setSession({
@@ -111,6 +134,9 @@ export function useKaraokeSession(input: {
             offsetSuggested: data.offsetSuggested || 0,
             offsetUserSet: Boolean(data.offsetUserSet),
             offsetSource,
+            warpScale,
+            warpOnsetSec,
+            alignSource,
             cacheKey: data.cacheKey || null,
             source: data.source || null,
             error: null,
@@ -129,6 +155,9 @@ export function useKaraokeSession(input: {
             offsetSuggested: 0,
             offsetUserSet: false,
             offsetSource: "none",
+            warpScale: 1,
+            warpOnsetSec: 0,
+            alignSource: "none",
             cacheKey: data.cacheKey || null,
             source: data.source || null,
             error: null,
@@ -148,6 +177,9 @@ export function useKaraokeSession(input: {
               : 0,
           offsetUserSet: Boolean(data.offsetUserSet),
           offsetSource,
+          warpScale,
+          warpOnsetSec,
+          alignSource,
           cacheKey: data.cacheKey || null,
           source: data.source || null,
           error: null,
@@ -177,13 +209,21 @@ export function useKaraokeSession(input: {
       : 0,
   ]);
 
+  // Line times are warped (LRC × scale) or DTW media timestamps.
+  // Offset is auto −onset (warp only) plus the user’s ±0.5s nudge.
   const clockSec = input.progressSec + (session.offsetSec || 0);
+
+  const seekSecForLine = useCallback(
+    (line: LyricLine) => lyricLineSeekSec(line.time, session.offsetSec || 0),
+    [session.offsetSec],
+  );
 
   const activeIndex = useMemo(() => {
     if (!session.synced || !session.lines.length) return -1;
     let idx = 0;
     for (let i = 0; i < session.lines.length; i++) {
-      if (session.lines[i]!.time <= clockSec + 0.12) idx = i;
+      // No lookahead — +0.12 made lines switch before the singer finished.
+      if (session.lines[i]!.time <= clockSec) idx = i;
       else break;
     }
     return idx;
@@ -248,6 +288,7 @@ export function useKaraokeSession(input: {
     ...session,
     clockSec,
     activeIndex,
+    seekSecForLine,
     setOffsetSec,
     nudgeOffset,
     resetOffsetToSuggested,

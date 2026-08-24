@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Card,
   CardContent,
@@ -18,6 +19,7 @@ export function AdminLidarrClient() {
   const [lidarrUrl, setLidarrUrl] = useState("");
   const [lidarrApiKey, setLidarrApiKey] = useState("");
   const [musicRoot, setMusicRoot] = useState("");
+  const [saveOnPlay, setSaveOnPlay] = useState(true);
   const [status, setStatus] = useState("…");
   const [forbidden, setForbidden] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -36,6 +38,7 @@ export function AdminLidarrClient() {
       setLidarrUrl(settings.lidarrUrl || "");
       setLidarrApiKey(settings.lidarrApiKey || "");
       setMusicRoot(settings.musicRoot || "");
+      setSaveOnPlay(settings.saveOnPlay !== false);
 
       const st = await fetch("/api/admin/stats")
         .then((r) => (r.ok ? r.json() : null))
@@ -48,7 +51,7 @@ export function AdminLidarrClient() {
     };
   }, []);
 
-  async function save(test = false) {
+  async function saveLidarr(test = false) {
     const res = await fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -88,12 +91,31 @@ export function AdminLidarrClient() {
     toastSaved();
   }
 
+  async function saveSaveOnPlay() {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ saveOnPlay }),
+    });
+    if (res.status === 403 || res.status === 401) {
+      setForbidden(true);
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      toastError(typeof data.error === "string" ? data.error : "Save failed");
+      return;
+    }
+    toastSaved();
+  }
+
   if (forbidden) {
     return (
       <div className="space-y-3">
-        <h1 className="text-xl font-semibold tracking-tight">Lidarr</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Sources</h1>
         <p className="text-sm text-muted-foreground">
-          Admin only. Sign in with an admin account to configure Lidarr.
+          Admin only. Sign in with an admin account to configure download
+          sources.
         </p>
         <Link
           href="/login"
@@ -108,15 +130,15 @@ export function AdminLidarrClient() {
   return (
     <div className="mx-auto max-w-2xl space-y-8">
       <div className="space-y-1">
-        <h1 className="text-xl font-semibold tracking-tight">Lidarr</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Sources</h1>
         <p className="text-sm text-muted-foreground">
-          Catalog and request connection for this homeserver.
+          Optional Lidarr catalog connection. Lidarr is not required.
         </p>
       </div>
 
       <div className="rounded-xl border border-border px-4 py-4">
         <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
-          Status
+          Lidarr
         </div>
         <div className="mt-2 text-sm font-semibold">{status}</div>
       </div>
@@ -124,48 +146,78 @@ export function AdminLidarrClient() {
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle>Connection</CardTitle>
-            <CardDescription>
-              Point Polarr at your Lidarr instance. Music is scanned from the
-              root path below when files land.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Lidarr URL</Label>
-              <Input
-                value={lidarrUrl}
-                onChange={(e) => setLidarrUrl(e.target.value)}
-                placeholder="http://localhost:8686"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Lidarr API key</Label>
-              <Input
-                value={lidarrApiKey}
-                onChange={(e) => setLidarrApiKey(e.target.value)}
-                placeholder="••••••••"
-                autoComplete="off"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Music root path</Label>
-              <Input
-                value={musicRoot}
-                onChange={(e) => setMusicRoot(e.target.value)}
-                placeholder="./music"
-              />
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={() => void save(false)}>Save</Button>
-              <Button variant="secondary" onClick={() => void save(true)}>
-                Test connection
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Lidarr</CardTitle>
+              <CardDescription>
+                Optional catalog and request connection. Music is scanned from
+                the root path below when files land.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label>Lidarr URL</Label>
+                <Input
+                  value={lidarrUrl}
+                  onChange={(e) => setLidarrUrl(e.target.value)}
+                  placeholder="http://localhost:8686"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Lidarr API key</Label>
+                <Input
+                  value={lidarrApiKey}
+                  onChange={(e) => setLidarrApiKey(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Music root path</Label>
+                <Input
+                  value={musicRoot}
+                  onChange={(e) => setMusicRoot(e.target.value)}
+                  placeholder="./music"
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => void saveLidarr(false)}>Save</Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => void saveLidarr(true)}
+                >
+                  Test connection
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Save on play</CardTitle>
+              <CardDescription>
+                When you play a catalog track that is not in the library, Polarr
+                starts the live stream immediately and also saves a copy in the
+                background via Lidarr or yt-dlp. The next play uses the local
+                file.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex h-10 items-center justify-between gap-3 rounded-md border border-border bg-background px-3">
+                <Label htmlFor="save-on-play" className="cursor-pointer">
+                  Save played tracks to library
+                </Label>
+                <Switch
+                  id="save-on-play"
+                  checked={saveOnPlay}
+                  onCheckedChange={setSaveOnPlay}
+                />
+              </div>
+              <Button onClick={() => void saveSaveOnPlay()}>Save</Button>
+            </CardContent>
+          </Card>
+        </>
       )}
     </div>
   );

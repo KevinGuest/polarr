@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { usePathname } from "next/navigation";
+import { primaryArtistName } from "@/lib/track-match";
 import { formatDuration, titleLooksExplicit } from "@/lib/utils";
 import { emitListenCredited } from "@/lib/ui-events";
 
@@ -36,6 +37,13 @@ export type PlayerTrack = {
   explicit?: boolean;
   /** Local library file vs YouTube (yt-dlp) live fallback. */
   quality?: PlaybackQuality | null;
+  /**
+   * Artist used for live/YTM resolve (album / primary credit).
+   * Display credit stays in `artist` (feat. lines, etc.).
+   */
+  resolveArtist?: string | null;
+  /** Catalog duration in seconds — passed to live/YTM match when resolving. */
+  duration?: number | null;
 };
 
 /** Infer Local vs YouTube from id / stream URL / explicit stamp. */
@@ -348,13 +356,18 @@ async function resolveIfNeeded(
   }
 
   try {
+    const resolveArtist =
+      (track.resolveArtist || "").trim() ||
+      primaryArtistName(track.artist) ||
+      track.artist;
     const res = await fetch("/api/live", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: track.title,
-        artist: track.artist,
+        artist: resolveArtist,
         album: track.album,
+        duration: track.duration || undefined,
       }),
     });
     const data = await res.json().catch(() => null);
@@ -372,6 +385,16 @@ async function resolveIfNeeded(
       return track;
     }
     if (!res.ok || !data) {
+      const msg =
+        typeof data?.error === "string"
+          ? data.error
+          : "Couldn’t match this track — won’t play the wrong song.";
+      try {
+        const { toastError } = await import("@/lib/toast");
+        toastError(msg);
+      } catch {
+        /* ignore */
+      }
       return track;
     }
     // Library OK path: only rewrite when server forces rickroll (or ephemeral)
@@ -386,6 +409,17 @@ async function resolveIfNeeded(
         streamUrl: data.streamUrl || track.streamUrl || null,
         quality: "local",
       };
+    }
+    if (data.savingToLibrary) {
+      try {
+        const { toastSavingToLibrary } = await import("@/lib/toast");
+        toastSavingToLibrary(
+          data.track?.artist || track.artist,
+          data.track?.title || track.title,
+        );
+      } catch {
+        /* ignore */
+      }
     }
     if (!ephemeral && !data.rickroll) {
       return track;
@@ -427,8 +461,12 @@ function prefetchStream(track: PlayerTrack | null | undefined) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: track.title,
-        artist: track.artist,
+        artist:
+          (track.resolveArtist || "").trim() ||
+          primaryArtistName(track.artist) ||
+          track.artist,
         album: track.album,
+        duration: track.duration || undefined,
       }),
       credentials: "same-origin",
     }).catch(() => {
@@ -898,6 +936,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const fromId = nextTrack.id;
         const ready = await resolveIfNeeded(nextTrack);
         if (trackRef.current?.id !== current.id) return;
+        if (isEphemeralTrack(ready) && !ready.streamUrl) return;
         const nextQ = replaceInQueue(queueRef.current, fromId, ready);
         queueRef.current = nextQ;
         setQueue(nextQ);
@@ -1297,6 +1336,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const fromId = next.id;
         const ready = await resolveIfNeeded(next);
         if (gen !== playGenRef.current) return;
+        if (isEphemeralTrack(ready) && !ready.streamUrl) return;
         let queue = nextQueue?.map(withExplicit);
         if (queue) {
           // Album / playlist / shelf play — clear add-to-queue restore snapshot

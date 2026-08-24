@@ -81,6 +81,7 @@ const bodySchema = z.object({
   serverName: z.string().min(1).max(80).optional(),
   lidarrUrl: z.string().url().or(z.literal("")).optional(),
   lidarrApiKey: z.string().optional(),
+  saveOnPlay: z.boolean().optional(),
   musicRoot: z.string().optional(),
   fallbackEnabled: z.boolean().optional(),
   downloadQuality: z
@@ -124,6 +125,7 @@ export async function POST(req: Request) {
     body.testLidarr ||
     body.lidarrUrl !== undefined ||
     body.lidarrApiKey !== undefined ||
+    body.saveOnPlay !== undefined ||
     body.musicRoot !== undefined ||
     body.spotifyClientId !== undefined ||
     body.spotifyClientSecret !== undefined ||
@@ -283,6 +285,7 @@ export async function POST(req: Request) {
       body.lidarrApiKey && body.lidarrApiKey !== "••••••••"
         ? body.lidarrApiKey
         : current.lidarrApiKey,
+    saveOnPlay: body.saveOnPlay ?? current.saveOnPlay,
     musicRoot: body.musicRoot ?? current.musicRoot,
     fallbackEnabled: true,
     downloadQuality:

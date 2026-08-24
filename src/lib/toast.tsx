@@ -84,6 +84,17 @@ export function toastInfo(
   });
 }
 
+const savingToLibraryKeys = new Set<string>();
+
+/** Once per artist|title — live play kicked a background library save. */
+export function toastSavingToLibrary(artist?: string, title?: string) {
+  const key = `${(artist || "").trim().toLowerCase()}|${(title || "").trim().toLowerCase()}`;
+  if (savingToLibraryKeys.has(key)) return;
+  savingToLibraryKeys.add(key);
+  if (savingToLibraryKeys.size > 200) savingToLibraryKeys.clear();
+  return toastInfo("Saving to library…");
+}
+
 /** Like / heart actions. */
 export function toastHeart(message: string, opts?: Omit<ToastOpts, "icon">) {
   return greyToast(message, {

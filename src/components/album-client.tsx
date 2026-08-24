@@ -2,13 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, Loader2, Play } from "lucide-react";
+import { Clock, Play } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
+import { TrackRowIndex } from "@/components/track-row-index";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
+import {
+  isPlayerRowCurrent,
+  trackRowEndCell,
+  trackRowMidCell,
+  trackRowStartCell,
+} from "@/lib/player-row";
 import { decodeAlbumId } from "@/lib/album-ref";
 import { setDragTrack } from "@/lib/drag-track";
 import {
@@ -16,7 +23,7 @@ import {
   emitLibraryChanged,
 } from "@/lib/ui-events";
 import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine } from "@/lib/utils";
-import { toastError, toastSuccess, toastInfo } from "@/lib/toast";
+import { toastError, toastSuccess, toastInfo, toastSavingToLibrary } from "@/lib/toast";
 
 type AlbumTrack = {
   key: string;
@@ -48,7 +55,7 @@ async function sleep(ms: number) {
 }
 
 export function AlbumClient({ albumId }: { albumId: string }) {
-  const { play } = usePlayer();
+  const { play, track, queue } = usePlayer();
   const router = useRouter();
   const ref = useMemo(() => decodeAlbumId(albumId), [albumId]);
 
@@ -169,10 +176,12 @@ export function AlbumClient({ albumId }: { albumId: string }) {
           t.title,
           t.artists,
         ),
+        resolveArtist: album?.artist || artist,
         album: album?.title || title,
         coverPath: album?.image || null,
         streamUrl: t.streamUrl || null,
         explicit: t.explicit,
+        duration: t.duration || undefined,
       })),
     [tracks, album, artist, title],
   );
@@ -185,9 +194,11 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         id: track.localTrackId,
         title: track.title,
         artist: trackArtists,
+        resolveArtist: album?.artist || artist,
         album: album?.title || title,
         coverPath,
         explicit: track.explicit,
+        duration: track.duration || undefined,
       };
       play(pt, [pt]);
       return;
@@ -196,7 +207,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
     setBusyKey(track.key);
 
     try {
-      // Stream only — never queue a library download from Play
+      // Live first byte now; server may also save a library copy in the background.
       const liveRes = await fetch("/api/live", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -204,6 +215,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
           title: track.title,
           artist: album?.artist || artist,
           album: album?.title || title,
+          duration: track.duration || undefined,
         }),
       });
       const live = await liveRes.json().catch(() => null);
@@ -214,6 +226,12 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         );
         return;
       }
+      if (live.savingToLibrary) {
+        toastSavingToLibrary(
+          live.track.artist || album?.artist || artist,
+          live.track.title || track.title,
+        );
+      }
       const pt: PlayerTrack = {
         id: live.track.id,
         title: live.track.title || track.title,
@@ -222,10 +240,12 @@ export function AlbumClient({ albumId }: { albumId: string }) {
           live.track.title || track.title,
           track.artists,
         ),
+        resolveArtist: album?.artist || artist,
         album: live.track.album || title,
         coverPath,
         streamUrl: live.streamUrl || live.track.streamUrl,
         explicit: track.explicit,
+        duration: track.duration || undefined,
       };
       play(pt, [pt]);
     } catch (err) {
@@ -499,11 +519,15 @@ export function AlbumClient({ albumId }: { albumId: string }) {
           </div>
         ) : tracks.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border px-6 py-16 text-center text-muted-foreground">
-            No tracklist found for this album yet.
+            <p>No tracklist found for this album yet.</p>
+            <p className="mt-2 text-sm text-muted-foreground/80">
+              Cover art can still show from listening history. Full tracklists
+              come from Lidarr or MusicBrainz once the release is catalogued.
+            </p>
           </div>
         ) : (
           <div className="w-full overflow-x-auto">
-            <table className="w-full min-w-[480px] border-separate border-spacing-y-0.5 text-left text-sm">
+            <table className="w-full min-w-[480px] border-separate border-spacing-y-1 text-left text-sm">
               <thead>
                 <tr className="text-xs text-muted-foreground">
                   <th className="w-10 pb-3 pl-3 font-medium">#</th>
@@ -522,15 +546,29 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                     t.title,
                     t.artists,
                   );
+                  const streamId = `stream:${t.key}`;
                   const playerTrack: PlayerTrack = {
-                    id: t.localTrackId || `stream:${t.key}`,
+                    id: t.localTrackId || streamId,
                     title: t.title,
                     artist: trackArtists,
+                    resolveArtist: album?.artist || artist,
                     album: album?.title || title,
                     coverPath: album?.image || null,
                     streamUrl: t.streamUrl || null,
                     explicit: t.explicit,
+                    duration: t.duration || undefined,
                   };
+                  const isCurrent = isPlayerRowCurrent(
+                    track,
+                    {
+                      id: playerTrack.id,
+                      localTrackId: t.localTrackId,
+                      streamId,
+                      title: t.title,
+                      artist: trackArtists,
+                    },
+                    queue,
+                  );
                   const row = (
                     <tr
                       draggable
@@ -538,22 +576,19 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                       className="group/row cursor-grab transition-colors active:cursor-grabbing"
                       onClick={() => void playTrack(t)}
                     >
-                      <td className="rounded-l-md py-3 pl-3 tabular-nums text-muted-foreground group-hover/row:bg-muted/30">
-                        {busy ? (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        ) : (
-                          <>
-                            <span className="group-hover/row:hidden">
-                              {t.trackNumber}
-                            </span>
-                            <Play
-                              className="hidden size-3.5 group-hover/row:inline"
-                              fill="currentColor"
-                            />
-                          </>
+                      <td
+                        className={trackRowStartCell(
+                          isCurrent,
+                          "py-3 pl-3 tabular-nums text-muted-foreground",
                         )}
+                      >
+                        <TrackRowIndex
+                          n={t.trackNumber}
+                          isCurrent={isCurrent}
+                          busy={busy}
+                        />
                       </td>
-                      <td className="py-3 pr-4 group-hover/row:bg-muted/30">
+                      <td className={trackRowMidCell(isCurrent, "py-3 pr-4")}>
                         <div className="min-w-0">
                           <div
                             className={cn(
@@ -571,7 +606,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                           </div>
                         </div>
                       </td>
-                      <td className="py-3 group-hover/row:bg-muted/30">
+                      <td className={trackRowMidCell(isCurrent, "py-3")}>
                         <TrackRowActions
                           trackId={t.localTrackId || `catalog:${t.key}`}
                           artist={trackArtists}
@@ -593,7 +628,12 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                           }
                         />
                       </td>
-                      <td className="rounded-r-md py-3 pr-3 text-right tabular-nums text-muted-foreground group-hover/row:bg-muted/30">
+                      <td
+                        className={trackRowEndCell(
+                          isCurrent,
+                          "py-3 pr-3 text-right tabular-nums text-muted-foreground",
+                        )}
+                      >
                         {t.duration ? formatDuration(t.duration) : "—"}
                       </td>
                     </tr>

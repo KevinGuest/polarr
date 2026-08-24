@@ -15,7 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { emitLikesChanged } from "@/lib/ui-events";
+import { emitLikesChanged, emitLibraryChanged } from "@/lib/ui-events";
 import { cn } from "@/lib/utils";
 import { toastError, toastInfo, toastHeart, toastSuccess } from "@/lib/toast";
 
@@ -186,6 +186,7 @@ export function AddToPlaylistMenu({
         ),
       );
       toastSuccess(p.contains ? `Removed from ${p.name}` : `Added to ${p.name}`);
+      emitLibraryChanged();
     } finally {
       setBusyId(null);
     }
@@ -260,6 +261,7 @@ export function AddToPlaylistMenu({
         return;
       }
       toastSuccess(`Added to ${name.trim()}`);
+      emitLibraryChanged();
       void load();
     } finally {
       setBusyId(null);

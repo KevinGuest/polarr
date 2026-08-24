@@ -6,8 +6,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Karaoke lyrics session — resolved document + quality + track-aligned offset.
- * Query: artist, title, album?, duration? (media seconds), trackId? (file onset)
+ * Karaoke lyrics session — resolved document + quality + track-aligned clock.
+ * Line times are warped (LRC × scale) or DTW-aligned to the vocal;
+ * offsetSec is onset shift + user nudge (nudge-only after DTW).
+ * Query: artist, title, album?, duration? (media seconds), trackId? (file bounds)
  */
 export async function GET(req: Request) {
   const user = getAuthUserFromRequest(req);
@@ -50,6 +52,9 @@ export async function GET(req: Request) {
       offsetSuggested: session.offsetSuggested,
       offsetUserSet: session.offsetUserSet,
       offsetSource: session.offsetSource,
+      warpScale: session.warpScale,
+      warpOnsetSec: session.warpOnsetSec,
+      alignSource: session.alignSource,
       cacheKey: session.cacheKey,
       mediaDurationSec: session.mediaDurationSec,
     });

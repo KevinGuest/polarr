@@ -37,10 +37,11 @@ export async function GET() {
     lidarr = "Offline";
   }
 
+  const settings = getSettings();
   const yt = await ytDlpAvailable();
   const ff = await ffmpegAvailable();
   const uptimeSec = Math.floor(process.uptime());
-  const email = smtpConfigured(getSettings()) ? "Configured" : "Not set up";
+  const email = smtpConfigured(settings) ? "Configured" : "Not set up";
   const listening = listenDashboard(14);
 
   return json({

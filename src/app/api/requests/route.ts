@@ -296,6 +296,7 @@ export async function POST(req: Request) {
     query,
     title: body.title,
     artist: body.artist,
+    album: body.album || body.title,
     requestId: request.id,
   });
 

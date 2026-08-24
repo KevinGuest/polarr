@@ -6,9 +6,16 @@ import { useRouter } from "next/navigation";
 import { CoverArt } from "@/components/cover-art";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
+import { TrackRowIndex } from "@/components/track-row-index";
 import { usePlayer } from "@/components/player-provider";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  isPlayerRowCurrent,
+  trackRowEndCell,
+  trackRowMidCell,
+  trackRowStartCell,
+} from "@/lib/player-row";
 
 type TopTrack = {
   id: string;
@@ -40,7 +47,7 @@ export function TopTracksClient({
   username?: string;
 }) {
   const router = useRouter();
-  const { play, track: playing } = usePlayer();
+  const { play, track: playing, queue: playerQueue } = usePlayer();
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -165,7 +172,7 @@ export function TopTracksClient({
         </p>
       ) : (
         <div className="w-full overflow-x-auto">
-          <table className="w-full min-w-[520px] border-separate border-spacing-y-0.5 text-left text-sm">
+          <table className="w-full min-w-[520px] border-separate border-spacing-y-1 text-left text-sm">
             <thead>
               <tr className="text-xs text-muted-foreground">
                 <th className="w-12 pb-3 pl-2 font-medium">#</th>
@@ -188,10 +195,6 @@ export function TopTracksClient({
             </thead>
             <tbody>
               {topTracks.map((t, i) => {
-                const isPlaying = playing?.id === t.id;
-                const rowBg = isPlaying
-                  ? "bg-muted/50"
-                  : "group-hover/row:bg-muted/40";
                 const playerTrack = {
                   id: t.id,
                   title: t.title,
@@ -206,11 +209,24 @@ export function TopTracksClient({
                   album: x.album,
                   coverPath: x.coverPath,
                 }));
+                const isCurrent = isPlayerRowCurrent(
+                  playing,
+                  {
+                    id: t.id,
+                    localTrackId: t.id,
+                    title: t.title,
+                    artist: t.artist,
+                  },
+                  playerQueue,
+                );
                 return (
                   <TrackContextMenu key={t.id} track={playerTrack}>
                   <tr className="group/row transition-colors">
                     <td
-                      className={`w-12 rounded-l-md py-2 pl-2 pr-1 text-center align-middle ${rowBg}`}
+                      className={trackRowStartCell(
+                        isCurrent,
+                        "w-12 py-2 pl-2 pr-1 text-center align-middle",
+                      )}
                     >
                       <button
                         type="button"
@@ -218,31 +234,15 @@ export function TopTracksClient({
                         className="relative mx-auto flex h-8 w-8 items-center justify-center text-muted-foreground"
                         aria-label={`Play ${t.title}`}
                       >
-                        <span
-                          className={`tabular-nums text-sm group-hover/row:opacity-0 ${
-                            isPlaying ? "opacity-0" : ""
-                          }`}
-                        >
-                          {i + 1}
-                        </span>
-                        <span
-                          className={`absolute inset-0 flex items-center justify-center text-foreground ${
-                            isPlaying
-                              ? "opacity-100"
-                              : "opacity-0 group-hover/row:opacity-100"
-                          }`}
-                        >
-                          <svg
-                            viewBox="0 0 24 24"
-                            className="h-4 w-4 fill-current"
-                            aria-hidden
-                          >
-                            <path d="M8 5v14l11-7z" />
-                          </svg>
-                        </span>
+                        <TrackRowIndex n={i + 1} isCurrent={isCurrent} />
                       </button>
                     </td>
-                    <td className={`py-2 pr-4 align-middle ${rowBg}`}>
+                    <td
+                      className={trackRowMidCell(
+                        isCurrent,
+                        "py-2 pr-4 align-middle",
+                      )}
+                    >
                       <div className="flex min-w-0 items-center gap-3">
                         <CoverArt
                           seed={`${t.artist}-${t.title}`}
@@ -250,13 +250,7 @@ export function TopTracksClient({
                           className="size-10 shrink-0 rounded-sm"
                         />
                         <div className="min-w-0">
-                          <p
-                            className={`truncate font-medium ${
-                              isPlaying
-                                ? "text-[var(--primary)]"
-                                : "text-foreground"
-                            }`}
-                          >
+                          <p className="truncate font-medium text-foreground">
                             {t.title}
                           </p>
                           <p className="truncate text-[13px] text-muted-foreground">
@@ -266,11 +260,19 @@ export function TopTracksClient({
                       </div>
                     </td>
                     <td
-                      className={`hidden max-w-[14rem] py-2 pr-4 align-middle text-muted-foreground md:table-cell ${rowBg}`}
+                      className={trackRowMidCell(
+                        isCurrent,
+                        "hidden max-w-[14rem] py-2 pr-4 align-middle text-muted-foreground md:table-cell",
+                      )}
                     >
                       <span className="block truncate">{t.album || "—"}</span>
                     </td>
-                    <td className={`py-2 align-middle ${rowBg}`}>
+                    <td
+                      className={trackRowMidCell(
+                        isCurrent,
+                        "py-2 align-middle",
+                      )}
+                    >
                       <TrackRowActions
                         trackId={t.id}
                         artist={t.artist}
@@ -282,7 +284,10 @@ export function TopTracksClient({
                       />
                     </td>
                     <td
-                      className={`w-16 rounded-r-md py-2 pr-3 text-right align-middle tabular-nums text-muted-foreground ${rowBg}`}
+                      className={trackRowEndCell(
+                        isCurrent,
+                        "w-16 py-2 pr-3 text-right align-middle tabular-nums text-muted-foreground",
+                      )}
                     >
                       {formatDuration(t.duration)}
                     </td>

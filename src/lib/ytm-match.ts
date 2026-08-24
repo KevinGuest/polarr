@@ -1,16 +1,22 @@
 /**
  * Polarr YTM audio resolver.
  *
- * Same product idea as many self-hosted downloaders (match catalog audio, then
- * download by id) — original ranking, not a port of any other project.
- *
- * Default path: Official Audio / Topic-style hits → YouTube Music → plain
- * YouTube only if nothing usable turned up.
+ * Prefer Official Audio / Topic hits that actually match the requested artist.
+ * Title-only Topic collisions (same song name, different artist) are rejected.
  */
 import { spawn } from "node:child_process";
+import {
+  namesMatch,
+  normalizeArtistName,
+  primaryArtistName,
+  titlesMatch,
+} from "./track-match";
 import { ensureYtDlp } from "./tools";
 
 const SEARCH_LIMIT = 10;
+
+/** Minimum artist token overlap (or namesMatch) to accept a hit. */
+const MIN_ARTIST_AGREE = 0.4;
 
 const JUNK_IN_TITLE =
   /\b(official\s*(music\s*)?video|music\s*video|\bm\/?v\b|lyric\s*video|\blyrics?\b|\blive\b|concert|performance|visualizer|vevo\s*visual|react(ion)?s?|cover|karaoke|instrumental|slowed|reverb|8d\s*audio|sped\s*up|nightcore|bass\s*boost|1\s*hour|hour\s*loop|full\s*album|mashup|bootleg)\b/i;
@@ -32,6 +38,8 @@ export type YtmCandidate = {
   score: number;
   /** Official Audio / Topic — preferred default surface */
   isOfficialAudio: boolean;
+  /** 0..1 how well channel/title agrees with requested artist */
+  artistAgree: number;
 };
 
 type FlatEntry = {
@@ -115,6 +123,10 @@ function isTopic(ch: string): boolean {
   return TOPIC_CHANNEL.test(ch) || /\btopic\b/i.test(ch);
 }
 
+function topicArtistName(channel: string): string {
+  return channel.replace(/\s-\s*topic$/i, "").trim();
+}
+
 function isOfficialAudioHit(title: string, channel: string): boolean {
   if (JUNK_IN_TITLE.test(title)) return false;
   if (OFFICIAL_AUDIO_TITLE.test(title)) return true;
@@ -124,8 +136,61 @@ function isOfficialAudioHit(title: string, channel: string): boolean {
 }
 
 /**
- * Score a hit. Official Audio / Topic heavily preferred; duration closeness
- * favored when expected length is known (catalog match pattern).
+ * How well this hit’s *channel* matches the catalog artist (0..1).
+ * Topic identity is the channel (“Artist - Topic”), never a title mention
+ * like “feat. Drake” on another artist’s Official Audio.
+ */
+export function artistAgreement(
+  artist: string,
+  channel: string,
+  videoTitle: string,
+): number {
+  const want = primaryArtistName(artist) || artist.trim();
+  if (!want) return 0;
+  const chBare = topicArtistName(channel);
+
+  if (isTopic(channel)) {
+    if (namesMatch(want, chBare) || namesMatch(artist, chBare)) return 1;
+    return tokenOverlap(want, chBare);
+  }
+
+  if (namesMatch(want, chBare) || namesMatch(artist, chBare)) return 1;
+
+  const nWant = normalizeArtistName(want).replace(/\s+/g, "");
+  const nCh = normalizeArtistName(chBare).replace(/\s+/g, "");
+  if (nWant.length >= 3 && nCh.includes(nWant)) return 0.85;
+  if (
+    nCh.length >= 3 &&
+    nWant.includes(nCh) &&
+    nCh.length / Math.max(nWant.length, 1) >= 0.5
+  ) {
+    return 0.85;
+  }
+
+  const byChannel = tokenOverlap(want, chBare);
+  if (byChannel >= MIN_ARTIST_AGREE) return byChannel;
+
+  // Title mention is not identity — cap below the artist gate.
+  const byTitle = tokenOverlap(want, videoTitle);
+  return Math.min(byTitle * 0.45, MIN_ARTIST_AGREE - 0.05);
+}
+
+/** Requested catalog title vs YouTube title — fail closed on different songs. */
+export function ytmTitlesAgree(wantTitle: string, videoTitle: string): boolean {
+  const want = (wantTitle || "").trim();
+  const got = (videoTitle || "").trim();
+  if (!want || !got) return false;
+  if (titlesMatch(want, got)) return true;
+  const w = bareTitle(want);
+  const v = bareTitle(got);
+  if (w && v && titlesMatch(w, v)) return true;
+  const afterDash = v.replace(/^.+?\s[-–—]\s+/, "").trim();
+  if (afterDash && titlesMatch(w, afterDash)) return true;
+  return false;
+}
+
+/**
+ * Score a hit. Official Audio / Topic preferred only when artist agrees.
  */
 export function scoreYtmCandidate(
   entry: {
@@ -139,12 +204,18 @@ export function scoreYtmCandidate(
 ): number {
   const t = entry.title.trim();
   const ch = entry.channel.trim();
+  const agree = artistAgreement(artist, ch, t);
   let score = 0;
 
-  // Default surface: official audio + Topic channels
-  if (isTopic(ch)) score += 70;
-  if (OFFICIAL_AUDIO_TITLE.test(t)) score += 75;
-  if (/provided\s*to\s*youtube/i.test(t)) score += 35;
+  // Default surface: official audio + Topic — gated by artist
+  if (agree >= MIN_ARTIST_AGREE) {
+    if (isTopic(ch)) score += 70;
+    if (OFFICIAL_AUDIO_TITLE.test(t)) score += 75;
+    if (/provided\s*to\s*youtube/i.test(t)) score += 35;
+  } else {
+    // Same-title Topic from another artist must not win
+    if (isTopic(ch) || OFFICIAL_AUDIO_TITLE.test(t)) score -= 40;
+  }
 
   // Music videos / live / junk — strongly deprioritize
   if (JUNK_IN_TITLE.test(t)) score -= 100;
@@ -152,8 +223,7 @@ export function scoreYtmCandidate(
     score -= 40;
   }
 
-  // Artist + title alignment (soft — never zero out a valid stream)
-  score += Math.round(tokenOverlap(artist, `${ch} ${t}`) * 48);
+  score += Math.round(agree * 90);
   score += Math.round(tokenOverlap(title, t) * 50);
 
   const titleLc = title.trim().toLowerCase();
@@ -161,7 +231,9 @@ export function scoreYtmCandidate(
   if (titleLc && bareTitle(tLc) === bareTitle(titleLc)) score += 14;
   else if (titleLc && tLc.includes(titleLc)) score += 10;
 
-  // Duration closeness (when known): single-length audio vs padded MVs
+  // Hard reject: essentially no artist signal
+  if (agree < 0.2) score -= 120;
+
   const expected = expectedDurationSec;
   const dur = entry.durationSec;
   if (typeof expected === "number" && expected > 25 && dur && dur > 0) {
@@ -205,6 +277,7 @@ function toCandidate(
     typeof e.duration === "number" && Number.isFinite(e.duration)
       ? e.duration
       : null;
+  const artistAgree = artistAgreement(artist, channel, name);
   const score = scoreYtmCandidate(
     { title: name, channel, durationSec },
     artist,
@@ -220,6 +293,7 @@ function toCandidate(
     url: `https://music.youtube.com/watch?v=${id}`,
     score,
     isOfficialAudio: isOfficialAudioHit(name, channel),
+    artistAgree,
   };
 }
 
@@ -244,27 +318,43 @@ async function dumpSearchList(
   }
 }
 
-function pickBest(hits: YtmCandidate[]): YtmCandidate | null {
+function pickBest(
+  hits: YtmCandidate[],
+  wantTitle: string,
+): YtmCandidate | null {
   if (!hits.length) return null;
 
-  // Prefer non-MV titles when available
-  const noJunk = hits.filter((h) => !JUNK_IN_TITLE.test(h.title));
-  let pool = noJunk.length ? noJunk : hits;
+  // Artist gate — never return another artist’s Official Audio / Topic
+  const agreed = hits.filter((h) => h.artistAgree >= MIN_ARTIST_AGREE);
+  if (!agreed.length) return null;
 
-  // Default: Official Audio / Topic when any such hit exists
+  // Title gate — never return a different song from the same artist
+  const titled = agreed.filter((h) => ytmTitlesAgree(wantTitle, h.title));
+  if (!titled.length) return null;
+
+  let pool = titled;
+  const noJunk = pool.filter((h) => !JUNK_IN_TITLE.test(h.title));
+  pool = noJunk.length ? noJunk : pool;
+
   const official = pool.filter((h) => h.isOfficialAudio && h.score >= 10);
   if (official.length) pool = official;
 
-  const ranked = pool.slice().sort((a, b) => b.score - a.score);
+  const ranked = pool.slice().sort((a, b) => {
+    if (b.artistAgree !== a.artistAgree) return b.artistAgree - a.artistAgree;
+    return b.score - a.score;
+  });
   const best = ranked[0]!;
   if (best.score < -35) return null;
-  return ranked.find((h) => h.score >= 15) || ranked.find((h) => h.score >= 0) || best;
+  return (
+    ranked.find((h) => h.score >= 15 && h.artistAgree >= MIN_ARTIST_AGREE) ||
+    ranked.find((h) => h.score >= 0 && h.artistAgree >= 0.55) ||
+    null
+  );
 }
 
 /**
- * Match Official Audio first (default), then YT Music catalog, then plain YT.
- * Always returns a ranked hit when something usable is found — does not
- * refuse playback on soft mismatches.
+ * Match Official Audio first, then YT Music, then plain YT.
+ * Returns null when no hit clears the artist gate (no wrong-artist fallback).
  */
 export async function matchYtmAudio(input: {
   artist: string;
@@ -275,18 +365,16 @@ export async function matchYtmAudio(input: {
   const ytDlp = await ensureYtDlp();
   if (!ytDlp) return null;
 
-  const artist = (input.artist || "").trim();
+  const artist = primaryArtistName(input.artist || "") || (input.artist || "").trim();
   const title = (input.title || "").trim();
-  // Prefer artist+title for search fidelity (catalog pattern)
   const base =
     `${artist} ${title}`.trim() ||
     (input.query || "").trim() ||
     `${artist} ${title}`.trim();
-  if (!base) return null;
+  if (!base || !artist || !title) return null;
 
   const musicQ = encodeURIComponent(base);
 
-  // Tier order = product default: official audio → YT Music → plain Search
   const tiers: {
     kind: "official" | "music" | "plain";
     spec: string;
@@ -309,7 +397,6 @@ export async function matchYtmAudio(input: {
     },
     {
       kind: "music",
-      // Music search often surfaces Topic / catalog before VEVO when titles are clean
       spec: `https://music.youtube.com/search?q=${encodeURIComponent(`${base} official audio`)}`,
       boost: 18,
     },
@@ -329,10 +416,14 @@ export async function matchYtmAudio(input: {
   const hits: YtmCandidate[] = [];
 
   for (const tier of tiers) {
-    // Skip plain YouTube once we have a solid Official Audio / Topic pick
     if (
       tier.kind === "plain" &&
-      hits.some((h) => h.isOfficialAudio && h.score >= 40)
+      hits.some(
+        (h) =>
+          h.isOfficialAudio &&
+          h.artistAgree >= MIN_ARTIST_AGREE &&
+          h.score >= 40,
+      )
     ) {
       break;
     }
@@ -342,17 +433,25 @@ export async function matchYtmAudio(input: {
       const c = toCandidate(e, artist, title, input.expectedDurationSec);
       if (!c || seen.has(c.videoId)) continue;
       c.score += tier.boost;
-      // Extra nudge when the official-audio tier found a non-MV hit
       if (tier.kind === "official" && c.isOfficialAudio) c.score += 15;
       seen.add(c.videoId);
       hits.push(c);
     }
 
-    // Strong Official Audio hit → stop early (default success path)
-    if (hits.some((h) => h.isOfficialAudio && h.score >= 85)) break;
+    // Strong Official Audio that also matches the artist
+    if (
+      hits.some(
+        (h) =>
+          h.isOfficialAudio &&
+          h.artistAgree >= 0.55 &&
+          h.score >= 85,
+      )
+    ) {
+      break;
+    }
   }
 
-  return pickBest(hits);
+  return pickBest(hits, title);
 }
 
 /** Progressive media URL for live streaming (may expire). */
@@ -388,7 +487,8 @@ export async function resolveYtmMediaUrl(
 }
 
 /**
- * Match → streamable media URL. Default last resort is official audio search.
+ * Match → streamable media URL.
+ * No blind ytsearch1 fallback — that was a common wrong-artist source.
  */
 export async function resolveYtmStreamRemote(input: {
   artist: string;
@@ -397,13 +497,8 @@ export async function resolveYtmStreamRemote(input: {
   expectedDurationSec?: number | null;
 }): Promise<string | null> {
   const match = await matchYtmAudio(input);
-  if (match) {
-    const url = await resolveYtmMediaUrl(match.url);
-    if (url) return url;
-  }
-  const q = `${input.artist} ${input.title}`.trim() || (input.query || "").trim();
-  if (!q) return null;
-  return resolveYtmMediaUrl(`ytsearch1:${q} official audio`);
+  if (!match) return null;
+  return resolveYtmMediaUrl(match.url);
 }
 
 /** Safe filesystem segment for known artist/title output names. */

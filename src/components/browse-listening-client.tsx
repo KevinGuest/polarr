@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { ListeningCover } from "@/components/listening-cover";
 import { TrackContextMenu } from "@/components/track-context-menu";
@@ -12,8 +11,7 @@ import {
   ShelfHeader,
 } from "@/components/media-shelf";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { PlayerTrack } from "@/components/player-provider";
-import { albumHref } from "@/lib/album-ref";
+import { usePlayer, type PlayerTrack } from "@/components/player-provider";
 import { setDragTrack } from "@/lib/drag-track";
 import { LISTEN_CREDITED_EVENT } from "@/lib/ui-events";
 
@@ -25,7 +23,7 @@ type OthersItem = PlayerTrack & {
 };
 
 export function BrowseListeningClient() {
-  const router = useRouter();
+  const { play } = usePlayer();
   const [items, setItems] = useState<OthersItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -56,13 +54,16 @@ export function BrowseListeningClient() {
     };
   }, [load]);
 
-  function openAlbum(item: OthersItem) {
-    router.push(
-      albumHref({
-        title: (item.album || item.title).trim() || item.title,
-        artist: item.artist,
-      }),
-    );
+  function playTrack(item: OthersItem) {
+    const pt: PlayerTrack = {
+      id: item.id,
+      title: item.title,
+      artist: item.artist,
+      resolveArtist: item.artist,
+      album: item.album || item.title,
+      coverPath: item.coverPath || null,
+    };
+    play(pt, [pt]);
   }
 
   return (
@@ -110,8 +111,8 @@ export function BrowseListeningClient() {
                 <MediaTileShell
                   title={item.title}
                   subtitle={item.artist}
-                  ariaLabel={`Open album for ${item.title}`}
-                  onOpen={() => openAlbum(item)}
+                  ariaLabel={`Play ${item.title}`}
+                  onOpen={() => playTrack(item)}
                   cover={
                     <ListeningCover
                       title={item.title}

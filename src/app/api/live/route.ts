@@ -1,11 +1,14 @@
 import { getAuthUserFromRequest, json } from "@/lib/api";
 import {
+  downloadPolicy,
   isRickrollTrack,
   RICKROLL,
   streamPolicy,
 } from "@/lib/bans";
 import { createLiveSession } from "@/lib/live-stream";
-import { findTrack } from "@/lib/db";
+import { findTrack, getSettings } from "@/lib/db";
+import { kickSaveOnPlay } from "@/lib/fallback-download";
+import { primaryArtistName } from "@/lib/track-match";
 import { ytDlpAvailable } from "@/lib/tools";
 
 export const runtime = "nodejs";
@@ -28,11 +31,20 @@ export async function POST(req: Request) {
     artist?: string;
     title?: string;
     album?: string;
+    duration?: number | null;
+    expectedDurationSec?: number | null;
   } | null;
 
   let artist = body?.artist?.trim() || "";
   let title = body?.title?.trim() || "";
   let album = body?.album?.trim() || "";
+  const durationRaw = body?.expectedDurationSec ?? body?.duration;
+  const expectedDurationSec =
+    typeof durationRaw === "number" &&
+    Number.isFinite(durationRaw) &&
+    durationRaw > 0
+      ? durationRaw
+      : null;
 
   if (policy.forceRickroll) {
     artist = RICKROLL.artist;
@@ -40,6 +52,11 @@ export async function POST(req: Request) {
     album = RICKROLL.album;
   } else if (!artist || !title) {
     return json({ error: "artist and title required" }, { status: 400 });
+  }
+
+  // Live / library match on primary credit (drop feat. noise)
+  if (!policy.forceRickroll) {
+    artist = primaryArtistName(artist) || artist;
   }
 
   const local = findTrack(artist, title);
@@ -76,6 +93,7 @@ export async function POST(req: Request) {
     artist,
     title,
     album: album || title,
+    expectedDurationSec,
   });
   if (!session) {
     return json(
@@ -86,6 +104,18 @@ export async function POST(req: Request) {
       },
       { status: 404 },
     );
+  }
+
+  let savingToLibrary = false;
+  if (!policy.forceRickroll) {
+    const dl = downloadPolicy(user.id);
+    if (dl.ok) {
+      savingToLibrary = kickSaveOnPlay({
+        artist,
+        title,
+        album: album || title,
+      });
+    }
   }
 
   return json({
@@ -99,5 +129,6 @@ export async function POST(req: Request) {
     },
     streamUrl: session.streamUrl,
     rickroll: policy.forceRickroll || undefined,
+    savingToLibrary: savingToLibrary || undefined,
   });
 }

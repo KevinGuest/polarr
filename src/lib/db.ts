@@ -2226,6 +2226,96 @@ export function libraryAlbumPinKey(artist: string, album: string): string {
   return `album:${artist.trim().toLowerCase()}::${album.trim().toLowerCase()}`;
 }
 
+function parseLibraryAlbumPinKey(
+  itemKey: string,
+): { artist: string; album: string } | null {
+  if (!itemKey.startsWith("album:")) return null;
+  const rest = itemKey.slice("album:".length);
+  const sep = rest.indexOf("::");
+  if (sep < 0) return null;
+  const artist = rest.slice(0, sep);
+  const album = rest.slice(sep + 2);
+  if (!artist || !album) return null;
+  return { artist, album };
+}
+
+/**
+ * Sidebar albums the user explicitly saved/pinned — not the full scanned catalog.
+ * Same item shape as listLibraryNavItems (title/artist/tracks/cover via the same GROUP BY).
+ */
+export function listPinnedAlbumNavItems(userId: string): {
+  type: "album" | "playlist";
+  key: string;
+  title: string;
+  artist: string;
+  tracks: number;
+  image: string | null;
+}[] {
+  const wanted: { artist: string; album: string }[] = [];
+  for (const pin of listLibraryPins(userId)) {
+    const parsed = parseLibraryAlbumPinKey(pin.itemKey);
+    if (parsed) wanted.push(parsed);
+  }
+  if (!wanted.length) return [];
+
+  const clause = wanted
+    .map(() => `(lower(artist) = ? AND lower(album) = ?)`)
+    .join(" OR ");
+  const albums = getDb()
+    .prepare(
+      `SELECT album as title,
+              artist as artist,
+              COUNT(*) as tracks,
+              MAX(mtime_ms) as mtime,
+              MAX(CASE
+                WHEN cover_path IS NOT NULL AND trim(cover_path) != ''
+                THEN cover_path END) as image
+       FROM tracks
+       WHERE album IS NOT NULL AND trim(album) != ''
+         AND ${LIBRARY_TRACK_FILTER}
+         AND (${clause})
+       GROUP BY lower(artist), lower(album)`,
+    )
+    .all(...wanted.flatMap((w) => [w.artist, w.album])) as {
+    title: string;
+    artist: string;
+    tracks: number;
+    mtime: number;
+    image: string | null;
+  }[];
+
+  const byPinKey = new Map(
+    albums.map((a) => [
+      libraryAlbumPinKey(a.artist, a.title),
+      {
+        type: "album" as const,
+        key: `${a.artist}::${a.title}`.toLowerCase(),
+        title: a.title,
+        artist: a.artist || "Unknown artist",
+        tracks: a.tracks,
+        image: a.image || null,
+      },
+    ]),
+  );
+
+  const items: {
+    type: "album" | "playlist";
+    key: string;
+    title: string;
+    artist: string;
+    tracks: number;
+    image: string | null;
+  }[] = [];
+  const seen = new Set<string>();
+  for (const w of wanted) {
+    const item = byPinKey.get(libraryAlbumPinKey(w.artist, w.album));
+    if (!item || seen.has(item.key)) continue;
+    seen.add(item.key);
+    items.push(item);
+  }
+  return items;
+}
+
 export const LIBRARY_LIKED_PIN_KEY = "liked";
 
 export function listLibraryPins(userId: string): {

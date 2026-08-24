@@ -8,6 +8,7 @@ import {
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  Check,
   CirclePlus,
   Copy,
   Download,
@@ -252,7 +253,15 @@ export function LibraryItemContextMenu({
         return;
       }
       emitLibraryPinsChanged();
-      toastSuccess(next ? "Pinned to Library" : "Unpinned");
+      toastSuccess(
+        item.kind === "album"
+          ? next
+            ? "Added to Your Library"
+            : "Removed from Your Library"
+          : next
+            ? "Pinned to Library"
+            : "Unpinned",
+      );
     } catch {
       setPinned(!next);
       onPinnedChange?.(!next);
@@ -485,7 +494,7 @@ export function LibraryItemContextMenu({
     if (item.kind === "folder") {
       return pinned ? "Unpin folder" : "Pin folder";
     }
-    return pinned ? "Unpin album" : "Pin album";
+    return pinned ? "Remove from Your Library" : "Add to Your Library";
   }
 
   function shareUrl() {
@@ -540,7 +549,7 @@ export function LibraryItemContextMenu({
             }
           >
             <Trash2 className="size-4 shrink-0 text-muted-foreground" />
-            Remove from Your Library
+            Delete album files
           </ContextMenuItem>
         ) : null}
 
@@ -572,7 +581,13 @@ export function LibraryItemContextMenu({
         ) : null}
 
         <ContextMenuItem onSelect={() => void togglePin()}>
-          {pinned ? (
+          {item.kind === "album" ? (
+            pinned ? (
+              <Check className="size-4 shrink-0 text-muted-foreground" />
+            ) : (
+              <CirclePlus className="size-4 shrink-0 text-muted-foreground" />
+            )
+          ) : pinned ? (
             <PinOff className="size-4 shrink-0 text-muted-foreground" />
           ) : (
             <Pin className="size-4 shrink-0 text-muted-foreground" />

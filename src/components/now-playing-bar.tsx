@@ -229,7 +229,7 @@ export function NowPlayingBar() {
               label={
                 playbackQuality(track) === "youtube"
                   ? "Playing via YouTube fallback"
-                  : "Playing from local library"
+                  : "Playing from Polarr library"
               }
             >
               <span className="shrink-0">

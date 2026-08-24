@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, Play } from "lucide-react";
+import { Check, CirclePlus, Clock, Play } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { TrackContextMenu } from "@/components/track-context-menu";
@@ -20,7 +20,9 @@ import { decodeAlbumId } from "@/lib/album-ref";
 import { setDragTrack } from "@/lib/drag-track";
 import {
   LIBRARY_CHANGED_EVENT,
+  LIBRARY_PINS_CHANGED_EVENT,
   emitLibraryChanged,
+  emitLibraryPinsChanged,
 } from "@/lib/ui-events";
 import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine } from "@/lib/utils";
 import { toastError, toastSuccess, toastInfo, toastSavingToLibrary } from "@/lib/toast";
@@ -54,6 +56,11 @@ async function sleep(ms: number) {
   await new Promise((r) => setTimeout(r, ms));
 }
 
+/** Same format as libraryAlbumPinKey in db.ts (client cannot import sqlite). */
+function albumLibraryPinKey(artistName: string, albumTitle: string) {
+  return `album:${artistName.trim().toLowerCase()}::${albumTitle.trim().toLowerCase()}`;
+}
+
 export function AlbumClient({ albumId }: { albumId: string }) {
   const { play, track, queue } = usePlayer();
   const router = useRouter();
@@ -72,6 +79,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [inYourLibrary, setInYourLibrary] = useState(false);
 
   const load = useCallback(async () => {
     if (!ref) {
@@ -156,6 +164,41 @@ export function AlbumClient({ albumId }: { albumId: string }) {
       window.removeEventListener(LIBRARY_CHANGED_EVENT, onLibraryChanged);
     };
   }, [load]);
+
+  const libraryPinKey = useMemo(() => {
+    const albumTitle = album?.title || title;
+    const albumArtist = album?.artist || artist;
+    if (!albumTitle || !albumArtist) return "";
+    return albumLibraryPinKey(albumArtist, albumTitle);
+  }, [album?.title, album?.artist, title, artist]);
+
+  useEffect(() => {
+    if (!libraryPinKey) {
+      setInYourLibrary(false);
+      return;
+    }
+    let cancelled = false;
+    async function loadPin() {
+      try {
+        const res = await fetch("/api/library/pins", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        const pins = Array.isArray(data?.pins) ? (data.pins as string[]) : [];
+        if (!cancelled) setInYourLibrary(pins.includes(libraryPinKey));
+      } catch {
+        /* ignore */
+      }
+    }
+    void loadPin();
+    const onPinsChanged = () => {
+      void loadPin();
+    };
+    window.addEventListener(LIBRARY_PINS_CHANGED_EVENT, onPinsChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(LIBRARY_PINS_CHANGED_EVENT, onPinsChanged);
+    };
+  }, [libraryPinKey]);
 
   const totalSeconds = useMemo(
     () => tracks.reduce((s, t) => s + (t.duration || 0), 0),
@@ -401,6 +444,31 @@ export function AlbumClient({ albumId }: { albumId: string }) {
     play(first, albumQueue);
   }
 
+  async function toggleYourLibrary() {
+    if (!libraryPinKey) return;
+    const next = !inYourLibrary;
+    setInYourLibrary(next);
+    try {
+      const res = await fetch("/api/library/pins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemKey: libraryPinKey, pinned: next }),
+      });
+      if (!res.ok) {
+        setInYourLibrary(!next);
+        toastError("Couldn’t update Your Library");
+        return;
+      }
+      emitLibraryPinsChanged();
+      toastSuccess(
+        next ? "Added to Your Library" : "Removed from Your Library",
+      );
+    } catch {
+      setInYourLibrary(!next);
+      toastError("Couldn’t update Your Library");
+    }
+  }
+
   if (!ref) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -497,6 +565,26 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                 aria-label="Play"
               >
                 <Play className="size-6 translate-x-0.5" fill="currentColor" />
+              </button>
+              <button
+                type="button"
+                onClick={() => void toggleYourLibrary()}
+                disabled={!libraryPinKey}
+                className="flex size-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                aria-label={
+                  inYourLibrary
+                    ? "Remove from Your Library"
+                    : "Add to Your Library"
+                }
+                aria-pressed={inYourLibrary}
+              >
+                {inYourLibrary ? (
+                  <span className="flex size-7 items-center justify-center rounded-full bg-foreground text-background">
+                    <Check className="size-4" strokeWidth={3} />
+                  </span>
+                ) : (
+                  <CirclePlus className="size-8" strokeWidth={1.5} />
+                )}
               </button>
             </div>
           </div>

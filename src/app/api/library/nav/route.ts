@@ -4,8 +4,8 @@ import {
   libraryAlbumPinKey,
   libraryFolderPinKey,
   libraryPlaylistPinKey,
-  listLibraryNavItems,
   listLibraryPins,
+  listPinnedAlbumNavItems,
   listPlaylistFolders,
   listUserPlaylistsInFolder,
 } from "@/lib/db";
@@ -22,7 +22,7 @@ export async function GET() {
   const pins = listLibraryPins(user.id);
   const pinOrder = new Map(pins.map((p, i) => [p.itemKey, i]));
 
-  const albums = listLibraryNavItems(48).map((item) => {
+  const albums = listPinnedAlbumNavItems(user.id).map((item) => {
     const fromDb =
       item.image && /^https?:\/\//i.test(item.image) ? item.image : null;
     const fromLidarr =

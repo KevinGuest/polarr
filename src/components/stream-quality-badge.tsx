@@ -7,16 +7,16 @@ import {
 import { cn } from "@/lib/utils";
 
 const LABELS: Record<PlaybackQuality, string> = {
-  local: "Local",
+  local: "Polarr",
   youtube: "YouTube",
 };
 
 const DESCRIPTIONS: Record<PlaybackQuality, string> = {
-  local: "Playing from local library",
+  local: "Playing from Polarr library",
   youtube: "Playing via YouTube fallback",
 };
 
-/** Compact Local / YouTube source chip for the player. */
+/** Compact Polarr / YouTube source chip for the player. */
 export function StreamQualityBadge({
   track,
   quality: qualityProp,

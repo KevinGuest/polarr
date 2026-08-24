@@ -33,9 +33,10 @@ description: >-
   Polarr does not ship Lidarr itself; install Lidarr from the Umbrel App Store
   first if you want automated *arr-style acquisition.
 releaseNotes: >-
-  Polarr now writes yt-dlp / save-on-play files into Lidarr's complete/music
-  folder (the same host path as Lidarr /downloads/complete/music) instead of a
-  separate app-data downloads silo.
+  Lidarr downloads to /downloads/music which is host
+  ${UMBREL_ROOT}/data/storage/downloads/music. Polarr mounts that at /music
+  and writes yt-dlp / save-on-play files there too, instead of a separate
+  app-data downloads silo.
 developer: Polarr
 website: https://github.com/KevinGuest/polarr
 dependencies:

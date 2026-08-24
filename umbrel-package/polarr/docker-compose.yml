@@ -16,14 +16,14 @@ services:
     environment:
       - POLARR_DATA_DIR=/data
       - POLARR_MUSIC_DIR=/music
-      # Same host path as Lidarr /downloads/complete/music — {Artist}/file, no extra nest
+      # Lidarr downloads to /downloads/music — {Artist}/file, no extra nest
       - POLARR_DOWNLOADS_DIR=/music
       - PORT=3000
       - HOSTNAME=0.0.0.0
       - POLARR_APP_VERSION=0.6.1
     volumes:
       - ${APP_DATA_DIR}/data:/data
-      - ${UMBREL_ROOT}/data/storage/downloads/complete/music:/music
+      - ${UMBREL_ROOT}/data/storage/downloads/music:/music
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/v1/status"]
       interval: 15s

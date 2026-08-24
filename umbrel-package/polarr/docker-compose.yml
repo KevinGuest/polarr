@@ -20,7 +20,7 @@ services:
       - POLARR_DOWNLOADS_DIR=/music
       - PORT=3000
       - HOSTNAME=0.0.0.0
-      - POLARR_APP_VERSION=0.6.4
+      - POLARR_APP_VERSION=0.6.5
     volumes:
       - ${APP_DATA_DIR}/data:/data
       - ${UMBREL_ROOT}/data/storage/downloads/music:/music

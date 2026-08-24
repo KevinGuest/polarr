@@ -5,7 +5,6 @@ export type {
   LyricSession,
   LyricQuality,
   ResolveLyricsInput,
-  OffsetSuggestSource,
 } from "./types";
 export {
   parseLrc,

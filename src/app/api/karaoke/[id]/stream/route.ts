@@ -1,15 +1,24 @@
 import fs from "node:fs";
-import { getInstrumentalFile } from "@/lib/karaoke-stems";
+import { getInstrumentalFile, type KaraokeRequestMeta } from "@/lib/karaoke-stems";
 import { json } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
+
+function metaFromUrl(req: Request): KaraokeRequestMeta {
+  const url = new URL(req.url);
+  return {
+    artist: url.searchParams.get("artist") || undefined,
+    title: url.searchParams.get("title") || undefined,
+    album: url.searchParams.get("album") || undefined,
+  };
+}
 
 export async function GET(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
-  const filePath = getInstrumentalFile(id);
+  const filePath = getInstrumentalFile(id, metaFromUrl(req));
   if (!filePath) {
     return json(
       { error: "Instrumental not ready. Request separation first." },

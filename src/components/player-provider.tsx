@@ -695,11 +695,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (!mix) return false;
     const ok = await safePlay(mix);
     if (ok && instReadyRef.current && vocalLevelRef.current < 0.999) {
-      const instOk = await ensureInstPlaying();
-      if (!instOk) {
-        // Keep listening to original at full volume
-        instReadyRef.current = false;
-      }
+      await ensureInstPlaying();
     }
     applyMixVolumes();
     return ok;
@@ -1581,21 +1577,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
       instReadyRef.current = true;
 
-      // If user already wants instrumental, start bus before fading
-      if (vocalLevelRef.current < 0.999 && playingRef.current && !mix.paused) {
-        const ok = await ensureInstPlaying();
-        if (!ok) {
-          instReadyRef.current = false;
-          applyMixVolumes();
-          setKaraokeStatus("error");
-          setKaraokeError("Browser blocked instrumental playback — press play again");
-          return;
-        }
-      }
-
       applyMixVolumes();
       setKaraokeStatus("ready");
       setKaraokeError(null);
+
+      // play() here is often outside a user gesture (Demucs finished later).
+      // Keep the stem loaded; the next slider/play click starts the bus.
+      if (vocalLevelRef.current < 0.999 && playingRef.current && !mix.paused) {
+        await ensureInstPlaying();
+        applyMixVolumes();
+      }
     },
     [applyMixVolumes, ensureInstPlaying],
   );

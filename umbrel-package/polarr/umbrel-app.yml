@@ -2,7 +2,7 @@ manifestVersion: 1
 id: polarr
 category: media
 name: Polarr
-version: "0.6.4"
+version: "0.6.5"
 tagline: Discover, request, and stream your homeserver music
 description: >-
   Polarr is a self-hosted music hub for umbrelOS. Point it at Lidarr (the same
@@ -33,11 +33,9 @@ description: >-
   Polarr does not ship Lidarr itself; install Lidarr from the Umbrel App Store
   first if you want automated *arr-style acquisition.
 releaseNotes: >-
-  Track rows show a Polarr badge when the file is on disk; Liked and Library drop the Source column.
-  Liked Songs show album covers and play the library file.
-  Now playing cards dedupe the same track across users.
-  Search ranks your downloads first, plays the file, and paints library results before catalog.
-  Karaoke uses on-disk library, Lidarr, and download files; the vocal mixer only runs when a file is actually playing.
+  Lyrics show source timestamps as provided (LRCLIB); the manual alignment pill and session offset/DTW rewrite are gone.
+  Karaoke no longer treats autoplay NotAllowedError as a mixer failure; ffmpeg skips cover art, uses an absolute path, and keys jobs on player plus library id.
+  Karaoke remains on-disk only (not YouTube or live).
 developer: Polarr
 website: https://github.com/KevinGuest/polarr
 dependencies:

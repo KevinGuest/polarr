@@ -8,12 +8,10 @@ import * as SliderPrimitive from "@radix-ui/react-slider";
 import {
   Laptop,
   Mic2,
-  Minus,
   MonitorSpeaker,
   Music2,
   Pause,
   Play,
-  Plus,
   SkipBack,
   SkipForward,
   Wifi,
@@ -71,7 +69,6 @@ function LyricsPanel() {
     artist: track?.artist,
     title: track?.title,
     album: track?.album,
-    trackId: karaokeEligible ? track?.id : undefined,
     mediaDurationSec: duration > 0 ? duration : undefined,
     progressSec: progress,
   });
@@ -191,59 +188,6 @@ function LyricsPanel() {
           </p>
         )}
       </div>
-
-      {/* Offset controls — only when line-timed lyrics exist */}
-      {session.synced && session.status === "ready" ? (
-        <div className="absolute bottom-8 left-6 z-20 flex items-center gap-1.5 rounded-full bg-black/45 px-2 py-1.5 ring-1 ring-white/12 backdrop-blur-md">
-          <button
-            type="button"
-            aria-label="Delay lyrics"
-            title="Lyrics later (−0.5s) — wait for the vocal"
-            onClick={() => session.nudgeOffset(-0.5)}
-            className="rounded-full p-1.5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-          >
-            <Minus className="size-3.5" strokeWidth={2.5} />
-          </button>
-          <button
-            type="button"
-            title={
-              session.alignSource === "dtw"
-                ? session.offsetUserSet
-                  ? "Back to vocal-aligned timing (0s)"
-                  : "Aligned to this vocal — click to re-apply"
-                : session.offsetUserSet
-                ? session.offsetSuggested !== 0
-                  ? `Back to auto (${session.offsetSuggested > 0 ? "+" : ""}${session.offsetSuggested.toFixed(1)}s${session.offsetSource === "audio" ? ", from track" : ""})`
-                  : "Back to auto (0s)"
-                : session.offsetSource === "audio"
-                  ? "Auto-aligned to this track — click to keep / re-apply"
-                  : session.offsetSource === "duration"
-                    ? "Auto from duration match — click to re-apply"
-                    : "Auto offset (0s)"
-            }
-            onClick={() => session.resetOffsetToSuggested()}
-            className="min-w-[3.25rem] px-1 text-center text-[11px] font-semibold tabular-nums text-white/80"
-          >
-            {!session.offsetUserSet &&
-            (session.alignSource === "dtw" || session.offsetSource === "audio") ? (
-              <span className="text-white/55">
-                {session.alignSource === "dtw" ? "aligned " : "auto "}
-              </span>
-            ) : null}
-            {session.offsetSec > 0 ? "+" : ""}
-            {session.offsetSec.toFixed(1)}s
-          </button>
-          <button
-            type="button"
-            aria-label="Advance lyrics"
-            title="Lyrics earlier (+0.5s) — fire before the vocal"
-            onClick={() => session.nudgeOffset(0.5)}
-            className="rounded-full p-1.5 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-          >
-            <Plus className="size-3.5" strokeWidth={2.5} />
-          </button>
-        </div>
-      ) : null}
 
       {/* Bottom-right: full mix ↔ Demucs instrumental (downloaded tracks only) */}
       {karaokeEligible ? (

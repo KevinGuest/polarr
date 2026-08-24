@@ -66,7 +66,7 @@ function probeCommand(cmd: string, args: string[]): Promise<boolean> {
 }
 
 /** Resolve a command name on PATH to an absolute path (Windows-friendly). */
-function whichSync(cmd: string): string | null {
+export function whichSync(cmd: string): string | null {
   const pathEnv = process.env.PATH || process.env.Path || "";
   const exts =
     process.platform === "win32"
@@ -173,9 +173,18 @@ export async function ytDlpAvailable(): Promise<boolean> {
   return Boolean(await ensureYtDlp());
 }
 
-export async function ffmpegAvailable(): Promise<boolean> {
-  if (process.env.POLARR_FFMPEG_PATH) {
-    return pathWorks(process.env.POLARR_FFMPEG_PATH);
+/** Absolute ffmpeg path for spawn({ shell: false }). Null if missing. */
+export function resolveFfmpeg(): string | null {
+  const env = process.env.POLARR_FFMPEG_PATH?.trim();
+  if (env) {
+    if (path.isAbsolute(env)) return fs.existsSync(env) ? env : null;
+    return whichSync(env);
   }
-  return probeCommand("ffmpeg", ["-version"]);
+  return whichSync("ffmpeg");
+}
+
+export async function ffmpegAvailable(): Promise<boolean> {
+  const file = resolveFfmpeg();
+  if (!file) return false;
+  return pathWorks(file);
 }

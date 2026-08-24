@@ -10,8 +10,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { findTrack, getTrack, type TrackRow } from "./db";
-import { dataDir } from "./paths";
-import { ffmpegAvailable } from "./tools";
+import { dataDir, musicDir } from "./paths";
+import { resolveFfmpeg } from "./tools";
 
 export type KaraokeStatus =
   | "ready"
@@ -79,15 +79,16 @@ function demucsCliPath(): string | null {
     const req = requireFromApp();
     const pkg = path.dirname(req.resolve("demucs/package.json"));
     const cli = path.join(pkg, "dist", "cli.js");
-    if (fs.existsSync(cli)) return cli;
+    const onnx = path.join(pkg, "htdemucs.onnx");
+    if (fs.existsSync(cli) && fs.existsSync(onnx)) return cli;
   } catch {
     /* not installed */
   }
   return null;
 }
 
-function findFfmpeg(): string {
-  return process.env.POLARR_FFMPEG_PATH?.trim() || "ffmpeg";
+function findFfmpeg(): string | null {
+  return resolveFfmpeg();
 }
 
 function karaokeRoot(): string {
@@ -117,6 +118,19 @@ export function instrumentalPathForKey(key: string): string {
   return path.join(trackWorkDir(key), "instrumental.m4a");
 }
 
+function karaokeStreamUrl(
+  trackId: string,
+  meta?: KaraokeRequestMeta,
+): string {
+  const u = `/api/karaoke/${encodeURIComponent(trackId)}/stream`;
+  const qs = new URLSearchParams();
+  if (meta?.artist?.trim()) qs.set("artist", meta.artist.trim());
+  if (meta?.title?.trim()) qs.set("title", meta.title.trim());
+  if (meta?.album?.trim()) qs.set("album", meta.album.trim());
+  const q = qs.toString();
+  return q ? `${u}?${q}` : u;
+}
+
 export function vocalsPathForKey(key: string): string {
   return path.join(trackWorkDir(key), "vocals.mp3");
 }
@@ -130,7 +144,13 @@ function run(
   args: string[],
   onLine?: (line: string) => void,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (result: { code: number; stdout: string; stderr: string }) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
     const child = spawn(cmd, args, {
       shell: false,
       env: process.env,
@@ -150,9 +170,15 @@ function run(
       stderr += text;
       text.split(/\r?\n/).forEach((l) => l && onLine?.(l));
     });
-    child.on("error", reject);
+    child.on("error", (err) => {
+      done({
+        code: 1,
+        stdout,
+        stderr: err instanceof Error ? err.message : String(err),
+      });
+    });
     child.on("close", (code) => {
-      resolve({ code: code ?? 1, stdout, stderr });
+      done({ code: code ?? 1, stdout, stderr });
     });
   });
 }
@@ -228,15 +254,26 @@ function isStreamPath(p: string | null | undefined): boolean {
 }
 
 function fileOnDisk(track: TrackRow | null | undefined): string | null {
-  const p = track?.path?.trim() || "";
-  if (!p || isStreamPath(p)) return null;
-  try {
-    const st = fs.statSync(p);
-    if (!st.isFile() || st.size < 1024) return null;
-    return p;
-  } catch {
-    return null;
+  const raw = track?.path?.trim() || "";
+  if (!raw || isStreamPath(raw)) return null;
+  const tries = [raw, path.resolve(raw)];
+  if (raw.startsWith("/music")) {
+    tries.push(
+      path.join(musicDir(), raw.slice("/music".length).replace(/^[\\/]+/, "")),
+    );
   }
+  const seen = new Set<string>();
+  for (const p of tries) {
+    if (!p || seen.has(p)) continue;
+    seen.add(p);
+    try {
+      const st = fs.statSync(p);
+      if (st.isFile() && st.size >= 1024) return p;
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
 }
 
 function artistTitleFromRequest(
@@ -317,7 +354,8 @@ async function renderInstrumental(
       "HT-Demucs is not installed. Run npm install demucs and restart Polarr.";
     return;
   }
-  if (!(await ffmpegAvailable())) {
+  const ffDecode = findFfmpeg();
+  if (!ffDecode) {
     job.status = "unavailable";
     job.error = "ffmpeg is required to prepare high-quality instrumentals.";
     return;
@@ -339,14 +377,14 @@ async function renderInstrumental(
   writeStatus(key, job);
 
   const wavIn = path.join(work, "input.wav");
-  const ffDecode = findFfmpeg();
   job.progress = 0.05;
-  const dec = await run(ffDecode, [
+  const decodeArgs = (map: string[]) => [
     "-nostdin",
     "-hide_banner",
     "-y",
     "-i",
     source.filePath,
+    ...map,
     "-ar",
     "44100",
     "-ac",
@@ -354,10 +392,25 @@ async function renderInstrumental(
     "-c:a",
     "pcm_s16le",
     wavIn,
-  ]);
+  ];
+  let dec = await run(ffDecode, decodeArgs(["-vn", "-map", "0:a:0"]));
   if (dec.code !== 0 || !fs.existsSync(wavIn)) {
-    job.status = "error";
-    job.error = `Failed to decode audio for separation.\n${dec.stderr.slice(-400)}`;
+    try {
+      if (fs.existsSync(wavIn)) fs.unlinkSync(wavIn);
+    } catch {
+      /* retry */
+    }
+    dec = await run(ffDecode, decodeArgs(["-vn"]));
+  }
+  if (dec.code !== 0 || !fs.existsSync(wavIn)) {
+    const msg = dec.stderr || "";
+    if (/ENOENT|not found|cannot find the file/i.test(msg)) {
+      job.status = "unavailable";
+      job.error = "ffmpeg is required to prepare high-quality instrumentals.";
+    } else {
+      job.status = "error";
+      job.error = `Failed to decode audio for separation.\n${msg.slice(-400)}`;
+    }
     writeStatus(key, job);
     return;
   }
@@ -406,6 +459,12 @@ async function renderInstrumental(
   writeStatus(key, job);
 
   const ff = findFfmpeg();
+  if (!ff) {
+    job.status = "unavailable";
+    job.error = "ffmpeg is required to prepare high-quality instrumentals.";
+    writeStatus(key, job);
+    return;
+  }
   const mix = await run(ff, [
     "-nostdin",
     "-hide_banner",
@@ -464,26 +523,25 @@ function infoFromKey(
   trackId: string,
   key: string,
   job?: JobState,
+  meta?: KaraokeRequestMeta,
 ): KaraokeInfo | null {
   const inst = instrumentalPathForKey(key);
-  if (fs.existsSync(inst) && fs.statSync(inst).size > 1024) {
+  const instReady =
+    fs.existsSync(inst) && fs.statSync(inst).size > 1024;
+  if (instReady) {
     return {
       status: "ready",
       quality: "demucs",
-      streamUrl: `/api/karaoke/${encodeURIComponent(trackId)}/stream`,
+      streamUrl: karaokeStreamUrl(trackId, meta),
       progress: 1,
     };
   }
-  if (job) {
+  if (job && job.status !== "ready") {
     return {
       status: job.status,
       quality: "none",
       error: job.error,
       progress: job.progress,
-      streamUrl:
-        job.status === "ready"
-          ? `/api/karaoke/${encodeURIComponent(trackId)}/stream`
-          : undefined,
     };
   }
   try {
@@ -494,11 +552,11 @@ function infoFromKey(
       progress?: number;
       bootId?: string;
     };
-    if (parsed.status === "ready" && fs.existsSync(inst)) {
+    if (parsed.status === "ready" && fs.existsSync(inst) && fs.statSync(inst).size > 1024) {
       return {
         status: "ready",
         quality: "demucs",
-        streamUrl: `/api/karaoke/${encodeURIComponent(trackId)}/stream`,
+        streamUrl: karaokeStreamUrl(trackId, meta),
         progress: 1,
       };
     }
@@ -542,24 +600,43 @@ export function getKaraokeInfo(
         "HT-Demucs is not installed. Run npm install demucs and restart Polarr.",
     };
   }
+  if (!findFfmpeg()) {
+    return {
+      status: "unavailable",
+      quality: "none",
+      error: "ffmpeg is required to prepare high-quality instrumentals.",
+    };
+  }
 
   const mem = jobs.get(trackId);
   if (mem) {
-    const fromJob = infoFromKey(trackId, mem.key, mem);
+    const fromJob = infoFromKey(trackId, mem.key, mem, meta);
     if (fromJob) return fromJob;
   }
 
   const known = lookupKey(trackId);
   if (known) {
-    const hit = infoFromKey(trackId, known);
+    const hit = infoFromKey(trackId, known, undefined, meta);
     if (hit) return hit;
   }
 
   const track = resolveKaraokeLibraryTrack(trackId, meta);
+  if (track && track.id !== trackId) {
+    const byLib = jobs.get(track.id);
+    if (byLib) {
+      const fromJob = infoFromKey(trackId, byLib.key, byLib, meta);
+      if (fromJob) return fromJob;
+    }
+    const libAlias = lookupKey(track.id);
+    if (libAlias) {
+      const hit = infoFromKey(trackId, libAlias, undefined, meta);
+      if (hit) return hit;
+    }
+  }
   const filePath = fileOnDisk(track);
   if (track && filePath) {
     const key = libraryKey(track.id, filePath);
-    const hit = infoFromKey(trackId, key);
+    const hit = infoFromKey(trackId, key, undefined, meta);
     if (hit) return hit;
   }
 
@@ -570,15 +647,19 @@ function karaokeKeysForTrack(
   trackId: string,
   meta?: KaraokeRequestMeta,
 ): string[] {
-  const keys = [
-    lookupKey(trackId),
-    jobs.get(trackId)?.key,
-  ].filter(Boolean) as string[];
+  const keys: string[] = [];
+  const add = (k: string | null | undefined) => {
+    if (k && !keys.includes(k)) keys.push(k);
+  };
+  add(lookupKey(trackId));
+  add(jobs.get(trackId)?.key);
 
   const track = resolveKaraokeLibraryTrack(trackId, meta);
-  const filePath = fileOnDisk(track);
-  if (track && filePath) {
-    keys.push(libraryKey(track.id, filePath));
+  if (track) {
+    add(lookupKey(track.id));
+    add(jobs.get(track.id)?.key);
+    const filePath = fileOnDisk(track);
+    if (filePath) add(libraryKey(track.id, filePath));
   }
   return keys;
 }
@@ -635,7 +716,7 @@ export function ensureKaraokeInstrumental(
     };
   }
 
-  const existing = jobs.get(trackId);
+  const existing = jobs.get(trackId) || jobs.get(source.libraryId);
   if (existing?.promise) {
     return {
       status: existing.status,
@@ -651,6 +732,7 @@ export function ensureKaraokeInstrumental(
     key: source.key,
   };
   jobs.set(trackId, job);
+  jobs.set(source.libraryId, job);
   rememberKey(trackId, source.key);
   rememberKey(source.libraryId, source.key);
 
@@ -672,6 +754,7 @@ export function ensureKaraokeInstrumental(
     .finally(() => {
       setTimeout(() => {
         if (jobs.get(trackId) === job) jobs.delete(trackId);
+        if (jobs.get(source.libraryId) === job) jobs.delete(source.libraryId);
       }, 60_000);
     });
 

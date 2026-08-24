@@ -56,7 +56,7 @@ function albumsFromLocal(tracks: TrackRow[], q: string): CatalogAlbumHit[] {
     const key = `${normalizeArtistName(artist)}::${album.trim().toLowerCase()}`;
     const score = scoreLibrarySearchHit(
       q,
-      { id: key, title: album, artist, album },
+      { title: album, artist, album },
       true,
     );
     const prev = byKey.get(key);

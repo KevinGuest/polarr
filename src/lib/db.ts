@@ -4965,11 +4965,12 @@ function promoteListeningRow(entry: TrackRow, next: TrackRow) {
 }
 
 /**
- * Recent listens from everyone on this homeserver (unique songs via
- * trackMatchKey). Collects every listener for each track (≥15s), newest first.
+ * Recent listens from other people on this homeserver (unique songs via
+ * trackMatchKey). The viewer’s own plays never appear — adding or previewing
+ * a file is not “someone else listening.”
  */
 export function listOthersListening(
-  _viewerUserId: string,
+  viewerUserId: string,
   limit = 16,
 ): (TrackRow & {
   playedAt: string;
@@ -4998,10 +4999,11 @@ export function listOthersListening(
        INNER JOIN tracks t ON t.id = p.track_id
        INNER JOIN users u ON u.id = p.user_id
        WHERE (p.listened_seconds IS NULL OR p.listened_seconds >= 15)
+         AND p.user_id != ?
        ORDER BY p.played_at DESC
        LIMIT ?`,
     )
-    .all(fetchN) as Record<string, unknown>[];
+    .all(viewerUserId || "", fetchN) as Record<string, unknown>[];
 
   type Entry = TrackRow & {
     playedAt: string;
@@ -5028,7 +5030,7 @@ export function listOthersListening(
       `${track.artist.trim().toLowerCase()}|${track.title.trim().toLowerCase()}`;
     const userId = String(row.listenedByUserId || "");
     const username = String(row.listenedBy || "").trim();
-    if (!userId || !username) continue;
+    if (!userId || !username || userId === viewerUserId) continue;
     const avatarUrl = avatarUrlForUser(userId);
 
     let entry = byKey.get(key);

@@ -5,7 +5,7 @@ import { albumCoverKey, getAlbumCoverMap } from "@/lib/lidarr";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Recent tracks anyone on this homeserver has been listening to (≥15s). */
+/** Recent tracks other people on this homeserver have been listening to (≥15s). */
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });

@@ -96,8 +96,8 @@ export function BrowseListeningClient() {
         </div>
       ) : items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Tracks show up here after anyone on this server listens for 15+
-          seconds.
+          Tracks other people on this server play for 15+ seconds show up
+          here. Your own plays stay in Recently played.
         </p>
       ) : (
         <MediaShelfGrid>

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-import { readAudioTags } from "./audio-tags";
+import { isArtworkFilename, readAudioTags } from "./audio-tags";
 import { getSettings, getTrackByPath, upsertTrack } from "./db";
 import { downloadsDir, musicDir } from "./paths";
 
@@ -116,12 +116,15 @@ export async function scanMusicLibrary(): Promise<{
     }
 
     const existing = getTrackByPath(file);
+    const junkTitle = isArtworkFilename(existing?.title);
     const unchanged =
       existing &&
       existing.fileSize === fileSize &&
       existing.mtimeMs === mtimeMs &&
       // Old path-only scans left duration 0 — re-probe once for real tags.
-      existing.duration > 0;
+      existing.duration > 0 &&
+      // Thumbnail stream tags used to overwrite titles as cover.jpg.
+      !junkTitle;
 
     const pathTags = parseTagsFromPath(file);
     let title = unchanged ? existing.title : pathTags.title;

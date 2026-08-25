@@ -503,7 +503,7 @@ export async function processDownloadJob(id: string) {
       .map((l) => l.trim())
       .filter(Boolean);
     const outputPath =
-      lines.find((l) => fs.existsSync(l)) ||
+      lines.find((l) => isAudioFile(l) && fs.existsSync(l)) ||
       findNewestAudio(outDir) ||
       null;
 
@@ -575,11 +575,15 @@ export async function processDownloadJob(id: string) {
   }
 }
 
+function isAudioFile(filePath: string): boolean {
+  return /\.(mp3|flac|m4a|aac|ogg|opus|wav|wma)$/i.test(filePath);
+}
+
 function findNewestAudio(dir: string): string | null {
   if (!fs.existsSync(dir)) return null;
   const files = fs
     .readdirSync(dir)
-    .filter((f) => /\.(mp3|flac|m4a|ogg|opus|wav)$/i.test(f))
+    .filter((f) => isAudioFile(f))
     .map((f) => {
       const p = path.join(dir, f);
       return { p, mtime: fs.statSync(p).mtimeMs };

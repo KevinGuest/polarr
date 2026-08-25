@@ -18,9 +18,28 @@ type FfprobeJson = {
     tags?: Record<string, string>;
   };
   streams?: Array<{
+    codec_type?: string;
+    disposition?: { attached_pic?: number };
     tags?: Record<string, string>;
   }>;
 };
+
+/** Embedded cover art streams are often tagged title=cover.jpg. */
+const ARTWORK_FILENAME =
+  /^(cover|folder|front|back|albumart|album.?art|thumb|thumbnail|artwork|scan|booklet)([-_ ]?\d*)\.(jpe?g|png|webp|gif|bmp|tiff?)$/i;
+
+export function isArtworkFilename(value: string | null | undefined): boolean {
+  const t = String(value || "").trim();
+  if (!t) return false;
+  return ARTWORK_FILENAME.test(t);
+}
+
+/** Drop cover-art filenames so callers fall back to path / job metadata. */
+export function cleanAudioTag(value: string | null | undefined): string {
+  const t = String(value || "").trim();
+  if (!t || isArtworkFilename(t)) return "";
+  return t;
+}
 
 function tagGet(
   tags: Record<string, string> | undefined,
@@ -103,20 +122,26 @@ export function readAudioTags(filePath: string): Promise<AudioTags | null> {
       }
       try {
         const data = JSON.parse(stdout) as FfprobeJson;
-        const tags = mergeTags(
-          data.format?.tags,
-          ...(data.streams || []).map((s) => s.tags),
+        // Attached pictures (yt-dlp --embed-thumbnail) often have
+        // title=cover.jpg. Never merge those streams into track metadata.
+        const audioStream = (data.streams || []).find(
+          (s) =>
+            s.codec_type === "audio" &&
+            !s.disposition?.attached_pic,
         );
-        const title = tagGet(tags, "title", "TITLE");
-        const artist = tagGet(
-          tags,
-          "artist",
-          "ARTIST",
-          "album_artist",
-          "ALBUM_ARTIST",
-          "albumartist",
+        const tags = mergeTags(data.format?.tags, audioStream?.tags);
+        const title = cleanAudioTag(tagGet(tags, "title", "TITLE"));
+        const artist = cleanAudioTag(
+          tagGet(
+            tags,
+            "artist",
+            "ARTIST",
+            "album_artist",
+            "ALBUM_ARTIST",
+            "albumartist",
+          ),
         );
-        const album = tagGet(tags, "album", "ALBUM");
+        const album = cleanAudioTag(tagGet(tags, "album", "ALBUM"));
         const duration = Number(data.format?.duration) || 0;
         if (!title && !artist && !album && !duration) {
           resolve(null);

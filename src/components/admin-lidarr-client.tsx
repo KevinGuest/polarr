@@ -27,9 +27,6 @@ type DetectedRoot = {
 
 const CUSTOM_ROOT = "__custom__";
 
-const SCAN_PRESETS = [0, 15, 30, 60] as const;
-type ScanMinutes = (typeof SCAN_PRESETS)[number];
-
 export function AdminLidarrClient() {
   const [lidarrUrl, setLidarrUrl] = useState("");
   const [lidarrApiKey, setLidarrApiKey] = useState("");

@@ -1,4 +1,5 @@
 import { getSettings } from "./db";
+import { namesMatch, titlesMatch } from "./track-match";
 
 export type LidarrArtist = {
   id?: number;
@@ -328,6 +329,12 @@ export class LidarrClient {
     });
   }
 
+  async getArtistTracks(artistId: number): Promise<LidarrTrack[]> {
+    return this.request<LidarrTrack[]>("/track", {
+      query: { artistId: String(artistId) },
+    });
+  }
+
   /** Albums in a date window (Lidarr calendar). */
   async calendar(startIso: string, endIso: string): Promise<LidarrAlbum[]> {
     return this.request<LidarrAlbum[]>("/calendar", {
@@ -591,4 +598,49 @@ export async function probeLidarr(url: string, apiKey: string) {
   const client = new LidarrClient(url, apiKey);
   const status = await client.status();
   return status;
+}
+
+const LIDARR_FILE_CACHE_MS = 2 * 60_000;
+let artistListCache: { at: number; artists: LidarrArtist[] } | null = null;
+const artistTrackCache = new Map<
+  number,
+  { at: number; tracks: LidarrTrack[] }
+>();
+
+/** True when Lidarr already has an on-disk file for this artist + title. */
+export async function lidarrHasTrackFile(
+  artist: string,
+  title: string,
+): Promise<boolean> {
+  const client = LidarrClient.fromSettings();
+  if (!client) return false;
+  const wantArtist = artist.trim();
+  const wantTitle = title.trim();
+  if (!wantArtist || !wantTitle) return false;
+
+  try {
+    const now = Date.now();
+    if (!artistListCache || now - artistListCache.at > LIDARR_FILE_CACHE_MS) {
+      artistListCache = {
+        at: now,
+        artists: await client.listArtists(),
+      };
+    }
+    const match = artistListCache.artists.find((a) =>
+      namesMatch(a.artistName || "", wantArtist),
+    );
+    if (match?.id == null) return false;
+
+    const cached = artistTrackCache.get(match.id);
+    let tracks = cached?.tracks;
+    if (!cached || now - cached.at > LIDARR_FILE_CACHE_MS) {
+      tracks = await client.getArtistTracks(match.id);
+      artistTrackCache.set(match.id, { at: now, tracks });
+    }
+    return (tracks || []).some(
+      (t) => t.hasFile && titlesMatch(t.title || "", wantTitle),
+    );
+  } catch {
+    return false;
+  }
 }

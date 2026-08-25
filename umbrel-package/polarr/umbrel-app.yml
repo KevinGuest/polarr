@@ -2,7 +2,7 @@ manifestVersion: 1
 id: polarr
 category: media
 name: Polarr
-version: "0.6.7"
+version: "0.6.8"
 tagline: Discover, request, and stream your homeserver music
 description: >-
   Polarr is a self-hosted music hub for umbrelOS. Point it at Lidarr (the same
@@ -33,9 +33,9 @@ description: >-
   Polarr does not ship Lidarr itself; install Lidarr from the Umbrel App Store
   first if you want automated *arr-style acquisition.
 releaseNotes: >-
-  SMTP Templates edits invite and test emails, with the Polarr logo in messages.
-  Home shelves are denser with Show all; Explore follows listen taste; empty queue keeps filling from it.
-  Library auto-scans every 15m–1h; invite copy and links no longer land on 0.0.0.0.
+  Invite Copy link pastes the join URL, not the email.
+  Home shelves stay compact; More from mixes 1- and 2-artist rows.
+  Sources: pick a detected Lidarr/music folder; save-on-play skips tracks already in the library.
 developer: Polarr
 website: https://github.com/KevinGuest/polarr
 dependencies:

@@ -390,18 +390,18 @@ export async function pickMoreFromArtists(limit = 3): Promise<ArtistCatalog[]> {
   const seeds: { artist: string }[] = [];
   const seen = new Set<string>();
   for (const row of [
-    ...rankLocalArtists(limit * 2),
-    ...rankLidarrArtists(artists, albums, limit * 3),
+    ...rankLocalArtists(limit * 3),
+    ...rankLidarrArtists(artists, albums, limit * 4),
   ]) {
     const key = artistKey(row.artist);
     if (!key || seen.has(key)) continue;
     seen.add(key);
     seeds.push({ artist: row.artist });
-    if (seeds.length >= Math.max(limit * 3, 6)) break;
+    if (seeds.length >= Math.max(limit * 4, 12)) break;
   }
 
   const shelves: ArtistCatalog[] = [];
-  for (const row of seeds) {
+  for (const row of shuffleList(seeds)) {
     const key = artistKey(row.artist);
     const lidarrAlbums = albumsByArtist.get(key) || [];
     const matchArtist = artists.find((a) => artistKey(a.artistName) === key);
@@ -416,8 +416,25 @@ export async function pickMoreFromArtists(limit = 3): Promise<ArtistCatalog[]> {
       artistImage,
     });
     if (cat.tiles.length < 1) continue;
+    cat.tiles = shuffleHomeTiles(cat.tiles);
     shelves.push(cat);
     if (shelves.length >= limit) break;
   }
   return shelves;
+}
+
+function shuffleList<T>(items: T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/** Shuffle albums among themselves so home “More from” isn’t always the same first four. */
+function shuffleHomeTiles(tiles: CatalogTile[]): CatalogTile[] {
+  const albums = tiles.filter((t) => t.kind === "album");
+  const rest = tiles.filter((t) => t.kind !== "album");
+  return [...shuffleList(albums), ...shuffleList(rest)];
 }

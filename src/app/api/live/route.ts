@@ -8,6 +8,7 @@ import {
 import { createLiveSession } from "@/lib/live-stream";
 import { findTrack, getSettings } from "@/lib/db";
 import { kickSaveOnPlay } from "@/lib/fallback-download";
+import { lidarrHasTrackFile } from "@/lib/lidarr";
 import { primaryArtistName } from "@/lib/track-match";
 import { ytDlpAvailable } from "@/lib/tools";
 
@@ -109,12 +110,18 @@ export async function POST(req: Request) {
   let savingToLibrary = false;
   if (!policy.forceRickroll) {
     const dl = downloadPolicy(user.id);
-    if (dl.ok) {
-      savingToLibrary = kickSaveOnPlay({
-        artist,
-        title,
-        album: album || title,
-      });
+    const settings = getSettings();
+    if (dl.ok && settings.saveOnPlay) {
+      const alreadyLocal = findTrack(artist, title);
+      const alreadyLidarr =
+        !alreadyLocal && (await lidarrHasTrackFile(artist, title));
+      if (!alreadyLocal && !alreadyLidarr) {
+        savingToLibrary = kickSaveOnPlay({
+          artist,
+          title,
+          album: album || title,
+        });
+      }
     }
   }
 

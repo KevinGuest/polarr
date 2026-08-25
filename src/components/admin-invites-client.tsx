@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ChevronDown,
@@ -203,25 +203,36 @@ export function AdminInvitesClient() {
     toastSuccess(`Invite resent to ${data?.emailedTo || inv.emailedTo}`);
   }
 
-  async function copyLink(code: string) {
+  const lastCopyAt = useRef({ t: 0, url: "" });
+
+  function inviteJoinUrl(code: string) {
     const origin =
       typeof window !== "undefined" && window.location?.origin
         ? window.location.origin
         : "";
-    if (!origin || !code.trim()) {
+    if (!origin || !code.trim()) return "";
+    return `${origin}/join?code=${encodeURIComponent(code.trim())}`;
+  }
+
+  function copyLink(code: string) {
+    const url = inviteJoinUrl(code);
+    if (!url) {
       toastError("Could not copy link");
       return;
     }
-    const url = `${origin}/join?code=${encodeURIComponent(code.trim())}`;
-    // Sync path first: DropdownMenu closes on select and often makes
-    // navigator.clipboard.writeText reject after the await boundary.
+    const now = Date.now();
+    if (url === lastCopyAt.current.url && now - lastCopyAt.current.t < 500) return;
+    lastCopyAt.current = { t: now, url };
+    // Copy in this turn (pointerdown / select). Do not prefer execCommand —
+    // it often copies the selected email field instead of the join URL.
     if (copyTextToClipboardSync(url)) {
       toastSuccess("Link copied");
       return;
     }
-    const ok = await copyTextToClipboard(url);
-    if (ok) toastSuccess("Link copied");
-    else toastError("Could not copy link");
+    void copyTextToClipboard(url).then((ok) => {
+      if (ok) toastSuccess("Link copied");
+      else toastError("Could not copy link");
+    });
   }
 
   if (forbidden) {
@@ -327,7 +338,11 @@ export function AdminInvitesClient() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-44">
                           <DropdownMenuItem
-                            onSelect={() => void copyLink(inv.code)}
+                            onPointerDown={(e) => {
+                              if (e.button !== 0) return;
+                              copyLink(inv.code);
+                            }}
+                            onSelect={() => copyLink(inv.code)}
                           >
                             Copy link
                           </DropdownMenuItem>

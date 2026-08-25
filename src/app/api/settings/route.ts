@@ -14,6 +14,7 @@ import { DOWNLOAD_QUALITIES } from "@/lib/download-quality";
 import { isDiscordWebhookUrl, sendDiscordTest } from "@/lib/discord";
 import { sendSmtpTestEmail } from "@/lib/mail";
 import { probeLidarr } from "@/lib/lidarr";
+import { detectMusicRoots } from "@/lib/music-roots";
 import { normalizePublicBaseUrl } from "@/lib/public-url";
 
 export const dynamic = "force-dynamic";
@@ -75,6 +76,7 @@ export async function GET() {
   return json({
     ...maskSecrets(settings),
     hasUsers: hasUsers(),
+    detectedMusicRoots: await detectMusicRoots(),
   });
 }
 

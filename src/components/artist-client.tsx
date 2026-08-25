@@ -277,7 +277,11 @@ export function ArtistClient() {
           ) : null}
 
           {features.length > 0 ? (
-            <MediaShelfRow title="Appears on" itemCount={features.length}>
+            <MediaShelfRow
+              title="Appears on"
+              itemCount={features.length}
+              fillRow={false}
+            >
               {(visible) =>
                 features.slice(0, visible).map((item) => {
                   if (item.kind !== "feature") return null;

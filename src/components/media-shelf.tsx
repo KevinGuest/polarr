@@ -109,6 +109,7 @@ export function MediaShelfRow({
   itemCount,
   minItemPx = 128,
   gapPx = 16,
+  fillRow = true,
   empty,
   children,
 }: {
@@ -121,13 +122,17 @@ export function MediaShelfRow({
   itemCount: number;
   minItemPx?: number;
   gapPx?: number;
+  /**
+   * When true (default), leftover width grows the tiles so the row is full.
+   * When false, keep a full set of columns so a short list stays compact.
+   */
+  fillRow?: boolean;
   empty?: ReactNode;
   children: (visible: number) => ReactNode;
 }) {
   const { ref, count } = useFitCount(minItemPx, gapPx);
   const visible = Math.min(count, Math.max(itemCount, 0));
-  // Always offer Show all when a destination exists and the shelf has items
-  // (not only when the row overflows).
+  const columns = fillRow ? Math.max(visible, 1) : count;
   const showSeeAll = Boolean((seeAllHref || onSeeAll) && itemCount > 0);
 
   return (
@@ -148,9 +153,7 @@ export function MediaShelfRow({
           className="grid w-full"
           style={{
             gap: gapPx,
-            // Equal columns fill the row — leftover width used to grow tiles,
-            // not left as empty space on the right.
-            gridTemplateColumns: `repeat(${visible}, minmax(0, 1fr))`,
+            gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
           }}
         >
           {children(visible)}

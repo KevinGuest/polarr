@@ -18,10 +18,24 @@ import { toastError, toastSaved } from "@/lib/toast";
 const SCAN_PRESETS = [0, 15, 30, 60] as const;
 type ScanMinutes = (typeof SCAN_PRESETS)[number];
 
+type DetectedRoot = {
+  path: string;
+  label: string;
+  source: string;
+  exists: boolean;
+};
+
+const CUSTOM_ROOT = "__custom__";
+
+const SCAN_PRESETS = [0, 15, 30, 60] as const;
+type ScanMinutes = (typeof SCAN_PRESETS)[number];
+
 export function AdminLidarrClient() {
   const [lidarrUrl, setLidarrUrl] = useState("");
   const [lidarrApiKey, setLidarrApiKey] = useState("");
   const [musicRoot, setMusicRoot] = useState("");
+  const [musicRoots, setMusicRoots] = useState<DetectedRoot[]>([]);
+  const [customMusicRoot, setCustomMusicRoot] = useState(false);
   const [saveOnPlay, setSaveOnPlay] = useState(true);
   const [libraryScanMinutes, setLibraryScanMinutes] =
     useState<ScanMinutes>(30);
@@ -29,27 +43,51 @@ export function AdminLidarrClient() {
   const [forbidden, setForbidden] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  function applySettings(settings: {
+    lidarrUrl?: string;
+    lidarrApiKey?: string;
+    musicRoot?: string;
+    detectedMusicRoots?: DetectedRoot[];
+    saveOnPlay?: boolean;
+    libraryScanMinutes?: number;
+  }) {
+    setLidarrUrl(settings.lidarrUrl || "");
+    setLidarrApiKey(settings.lidarrApiKey || "");
+    const root = settings.musicRoot || "";
+    const detected: DetectedRoot[] = Array.isArray(settings.detectedMusicRoots)
+      ? settings.detectedMusicRoots
+      : [];
+    setMusicRoots(detected);
+    setMusicRoot(root);
+    setCustomMusicRoot(
+      Boolean(root) && !detected.some((d) => d.path === root),
+    );
+    setSaveOnPlay(settings.saveOnPlay !== false);
+    const scan = Number(settings.libraryScanMinutes);
+    setLibraryScanMinutes(
+      SCAN_PRESETS.includes(scan as ScanMinutes) ? (scan as ScanMinutes) : 30,
+    );
+  }
+
+  async function loadSettings() {
+    const res = await fetch("/api/settings");
+    if (res.status === 403 || res.status === 401) {
+      setForbidden(true);
+      return null;
+    }
+    return res.json();
+  }
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const res = await fetch("/api/settings");
+      const settings = await loadSettings();
       if (cancelled) return;
-      if (res.status === 403 || res.status === 401) {
-        setForbidden(true);
+      if (!settings) {
         setLoading(false);
         return;
       }
-      const settings = await res.json();
-      setLidarrUrl(settings.lidarrUrl || "");
-      setLidarrApiKey(settings.lidarrApiKey || "");
-      setMusicRoot(settings.musicRoot || "");
-      setSaveOnPlay(settings.saveOnPlay !== false);
-      const scan = Number(settings.libraryScanMinutes);
-      setLibraryScanMinutes(
-        SCAN_PRESETS.includes(scan as ScanMinutes)
-          ? (scan as ScanMinutes)
-          : 30,
-      );
+      applySettings(settings);
 
       const st = await fetch("/api/admin/stats")
         .then((r) => (r.ok ? r.json() : null))
@@ -72,7 +110,6 @@ export function AdminLidarrClient() {
           : {
               lidarrUrl,
               lidarrApiKey,
-              musicRoot,
               fallbackEnabled: true,
             },
       ),
@@ -87,6 +124,8 @@ export function AdminLidarrClient() {
         const v = data.status?.version;
         setStatus(v ? `Connected · v${v}` : "Connected");
         toastSaved("Lidarr connection OK");
+        const next = await loadSettings();
+        if (next) applySettings(next);
       } else {
         setStatus("Offline");
         toastError(
@@ -100,6 +139,25 @@ export function AdminLidarrClient() {
       return;
     }
     toastSaved();
+    const next = await loadSettings();
+    if (next) applySettings(next);
+  }
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ musicRoot: musicRoot.trim() }),
+    });
+    if (res.status === 403 || res.status === 401) {
+      setForbidden(true);
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      toastError(typeof data.error === "string" ? data.error : "Save failed");
+      return;
+    }
+    toastSaved("Music location saved — scanning library…");
+    void fetch("/api/library", { method: "POST" }).catch(() => null);
   }
 
   async function saveSaveOnPlay() {
@@ -180,8 +238,8 @@ export function AdminLidarrClient() {
             <CardHeader>
               <CardTitle>Lidarr</CardTitle>
               <CardDescription>
-                Optional catalog and request connection. Music files under the
-                root path are indexed by the automatic library scan.
+                Optional catalog and request connection. After connecting,
+                pick your music folder below from folders Lidarr reports.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -202,14 +260,6 @@ export function AdminLidarrClient() {
                   autoComplete="off"
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Music root path</Label>
-                <Input
-                  value={musicRoot}
-                  onChange={(e) => setMusicRoot(e.target.value)}
-                  placeholder="./music"
-                />
-              </div>
               <div className="flex flex-wrap gap-2">
                 <Button onClick={() => void saveLidarr(false)}>Save</Button>
                 <Button
@@ -219,6 +269,65 @@ export function AdminLidarrClient() {
                   Test connection
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Music location</CardTitle>
+              <CardDescription>
+                Folder Polarr scans and streams from. Detected from Lidarr root
+                folders and this container’s music mount — choose the one that
+                actually has your files.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="music-root-select">Library folder</Label>
+                <select
+                  id="music-root-select"
+                  value={customMusicRoot ? CUSTOM_ROOT : musicRoot}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === CUSTOM_ROOT) {
+                      setCustomMusicRoot(true);
+                      return;
+                    }
+                    setCustomMusicRoot(false);
+                    setMusicRoot(v);
+                  }}
+                  className="flex h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                >
+                  <option value="">Select a folder…</option>
+                  {musicRoots.map((r) => (
+                    <option key={`${r.source}:${r.path}`} value={r.path}>
+                      {r.label}
+                      {r.exists ? "" : " (not visible here)"}
+                    </option>
+                  ))}
+                  <option value={CUSTOM_ROOT}>Custom path…</option>
+                </select>
+              </div>
+              {customMusicRoot ? (
+                <div className="space-y-2">
+                  <Label htmlFor="music-root-custom">Custom path</Label>
+                  <Input
+                    id="music-root-custom"
+                    value={musicRoot}
+                    onChange={(e) => setMusicRoot(e.target.value)}
+                    placeholder="/music"
+                  />
+                </div>
+              ) : null}
+              {musicRoot &&
+              musicRoots.some((r) => r.path === musicRoot && !r.exists) ? (
+                <p className="text-sm text-muted-foreground">
+                  This path isn’t visible inside Polarr’s container. If Lidarr
+                  uses a different mount, pick the mapped folder (often{" "}
+                  <code className="text-xs">/music</code>) instead.
+                </p>
+              ) : null}
+              <Button onClick={() => void saveMusicRoot()}>Save location</Button>
             </CardContent>
           </Card>
 
@@ -257,10 +366,10 @@ export function AdminLidarrClient() {
             <CardHeader>
               <CardTitle>Save on play</CardTitle>
               <CardDescription>
-                When you play a catalog track that is not in the library, Polarr
-                starts the live stream immediately and also saves a copy in the
-                background via Lidarr or yt-dlp. The next play uses the local
-                file.
+                When you play a catalog track that is not already in the library
+                (and Lidarr doesn’t already have the file), Polarr starts the
+                live stream and saves a copy in the background. Tracks that are
+                already local are left alone.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

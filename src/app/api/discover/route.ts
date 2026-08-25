@@ -121,7 +121,7 @@ export async function GET() {
         return null;
       }
     })(),
-    pickMoreFromArtists(3).catch(() => []),
+    pickMoreFromArtists(5).catch(() => []),
     settings.fallbackEnabled
       ? ytDlpAvailable().catch(() => false)
       : Promise.resolve(false),

@@ -7,7 +7,10 @@ import { CoverArt } from "@/components/cover-art";
 import { ListeningCover } from "@/components/listening-cover";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { albumHref } from "@/lib/album-ref";
-import { MediaShelfRow, MediaTileShell } from "@/components/media-shelf";
+import {
+  MediaShelfRow,
+  MediaTileShell,
+} from "@/components/media-shelf";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
 import { LISTEN_CREDITED_EVENT } from "@/lib/ui-events";
@@ -85,6 +88,23 @@ type MoreFromShelf = {
   image?: string | null;
   items: MoreFromItem[];
 };
+
+function packMoreFromRows(shelves: MoreFromShelf[]) {
+  const rows: MoreFromShelf[][] = [];
+  let i = 0;
+  let pair = true;
+  while (i < shelves.length) {
+    if (pair && i + 1 < shelves.length) {
+      rows.push([shelves[i], shelves[i + 1]]);
+      i += 2;
+    } else {
+      rows.push([shelves[i]]);
+      i += 1;
+    }
+    pair = !pair;
+  }
+  return rows;
+}
 
 function ShelfSkeleton({ count = 8 }: { count?: number }) {
   return (
@@ -215,8 +235,8 @@ export function HomeClient() {
 
       <MediaShelfRow
         title="What others are listening to"
-        seeAllHref="/browse/listening"
         itemCount={others.length}
+        fillRow={false}
         empty={
           <p className="text-sm text-muted-foreground">
             Tracks show up here after anyone on this server listens for 15+
@@ -320,8 +340,9 @@ export function HomeClient() {
         }
       </MediaShelfRow>
 
-      {loading && moreFrom.length === 0
-        ? Array.from({ length: 2 }).map((_, i) => (
+      {loading && moreFrom.length === 0 ? (
+        <div className="grid gap-10 lg:grid-cols-2">
+          {Array.from({ length: 2 }).map((_, i) => (
             <div key={i} className="space-y-4">
               <div className="flex items-center gap-3">
                 <Skeleton className="size-12 shrink-0 rounded-full" />
@@ -330,103 +351,113 @@ export function HomeClient() {
                   <Skeleton className="h-6 w-40" />
                 </div>
               </div>
-              <ShelfSkeleton count={5} />
+              <ShelfSkeleton count={4} />
             </div>
-          ))
-        : null}
+          ))}
+        </div>
+      ) : null}
 
-      {moreFrom.map((shelf) => (
-        <MediaShelfRow
-          key={shelf.artist}
-          eyebrow="More from"
-          title={shelf.artist}
-          seeAllHref={`/artist?name=${encodeURIComponent(shelf.artist)}`}
-          itemCount={shelf.items.length}
-          leading={
-            <button
-              type="button"
-              onClick={() =>
-                router.push(
-                  `/artist?name=${encodeURIComponent(shelf.artist)}`,
-                )
-              }
-              className="shrink-0 overflow-hidden rounded-full"
-              aria-label={`Open ${shelf.artist}`}
-            >
-              <CoverArt
-                seed={shelf.artist}
-                image={shelf.image || undefined}
-                className="size-12 rounded-full"
-              />
-            </button>
-          }
+      {packMoreFromRows(moreFrom).map((row) => (
+        <div
+          key={row.map((s) => s.artist).join("|")}
+          className={row.length > 1 ? "grid gap-10 lg:grid-cols-2" : undefined}
         >
-          {(visible) =>
-            shelf.items.slice(0, visible).map((item) => {
-              if (item.kind === "album") {
-                const href = albumHref({
-                  title: item.album,
-                  artist: item.artist,
-                  foreignAlbumId: item.foreignAlbumId,
-                  lidarrAlbumId: item.lidarrAlbumId,
-                });
-                return (
-                  <MediaTileShell
-                    key={item.id}
-                    title={item.title}
-                    subtitle={item.subtitle}
-                    ariaLabel={`Open ${item.title}`}
-                    onOpen={() => router.push(href)}
-                    cover={
-                      <CoverArt
-                        seed={item.title}
-                        image={item.image || undefined}
-                        className="size-full"
-                      />
-                    }
+          {row.map((shelf) => (
+            <MediaShelfRow
+              key={shelf.artist}
+              eyebrow="More from"
+              title={shelf.artist}
+              seeAllHref={`/artist?name=${encodeURIComponent(shelf.artist)}`}
+              itemCount={shelf.items.length}
+              fillRow={row.length === 1}
+              leading={
+                <button
+                  type="button"
+                  onClick={() =>
+                    router.push(
+                      `/artist?name=${encodeURIComponent(shelf.artist)}`,
+                    )
+                  }
+                  className="shrink-0 overflow-hidden rounded-full"
+                  aria-label={`Open ${shelf.artist}`}
+                >
+                  <CoverArt
+                    seed={shelf.artist}
+                    image={shelf.image || undefined}
+                    className="size-12 rounded-full"
                   />
-                );
+                </button>
               }
+            >
+              {(visible) => {
+                const cap = row.length > 1 ? Math.min(visible, 4) : visible;
+                return shelf.items.slice(0, cap).map((item) => {
+                  if (item.kind === "album") {
+                    const href = albumHref({
+                      title: item.album,
+                      artist: item.artist,
+                      foreignAlbumId: item.foreignAlbumId,
+                      lidarrAlbumId: item.lidarrAlbumId,
+                    });
+                    return (
+                      <MediaTileShell
+                        key={item.id}
+                        title={item.title}
+                        subtitle={item.subtitle}
+                        ariaLabel={`Open ${item.title}`}
+                        onOpen={() => router.push(href)}
+                        cover={
+                          <CoverArt
+                            seed={item.title}
+                            image={item.image || undefined}
+                            className="size-full"
+                          />
+                        }
+                      />
+                    );
+                  }
 
-              const track: PlayerTrack = {
-                id: item.trackId,
-                title: item.title,
-                artist: item.subtitle || item.artist,
-                album: item.album || "",
-                coverPath: item.coverPath || item.image || null,
-              };
-              return (
-                <TrackContextMenu key={item.id} track={track}>
-                  <div className="min-w-0">
-                    <MediaTileShell
-                      title={item.title}
-                      subtitle={item.subtitle}
-                      ariaLabel={`Play ${item.title}`}
-                      onOpen={() => playShelfTrack(item)}
-                      cover={
-                        <CoverArt
-                          seed={item.album || item.title}
-                          image={item.image || undefined}
-                          className="size-full"
+                  const track: PlayerTrack = {
+                    id: item.trackId,
+                    title: item.title,
+                    artist: item.subtitle || item.artist,
+                    album: item.album || "",
+                    coverPath: item.coverPath || item.image || null,
+                  };
+                  return (
+                    <TrackContextMenu key={item.id} track={track}>
+                      <div className="min-w-0">
+                        <MediaTileShell
+                          title={item.title}
+                          subtitle={item.subtitle}
+                          ariaLabel={`Play ${item.title}`}
+                          onOpen={() => playShelfTrack(item)}
+                          cover={
+                            <CoverArt
+                              seed={item.album || item.title}
+                              image={item.image || undefined}
+                              className="size-full"
+                            />
+                          }
+                          playButton={
+                            <button
+                              type="button"
+                              aria-label={`Play ${item.title}`}
+                              onClick={() => playShelfTrack(item)}
+                              className="absolute bottom-2 right-2 flex size-9 items-center justify-center rounded-full border border-border bg-background/95 shadow-md transition-transform hover:scale-105"
+                            >
+                              <Play className="size-3.5" fill="currentColor" />
+                            </button>
+                          }
                         />
-                      }
-                      playButton={
-                        <button
-                          type="button"
-                          aria-label={`Play ${item.title}`}
-                          onClick={() => playShelfTrack(item)}
-                          className="absolute bottom-2 right-2 flex size-9 items-center justify-center rounded-full border border-border bg-background/95 shadow-md transition-transform hover:scale-105"
-                        >
-                          <Play className="size-3.5" fill="currentColor" />
-                        </button>
-                      }
-                    />
-                  </div>
-                </TrackContextMenu>
-              );
-            })
-          }
-        </MediaShelfRow>
+                      </div>
+                    </TrackContextMenu>
+                  );
+                });
+              }}
+            </MediaShelfRow>
+          ))}
+        </div>
       ))}
     </div>
   );

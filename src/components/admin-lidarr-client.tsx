@@ -142,6 +142,8 @@ export function AdminLidarrClient() {
     const next = await loadSettings();
     if (next) applySettings(next);
   }
+
+  async function saveMusicRoot() {
     const res = await fetch("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

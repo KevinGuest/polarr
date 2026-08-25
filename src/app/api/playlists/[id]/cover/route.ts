@@ -5,6 +5,7 @@ import { NextRequest } from "next/server";
 import { getAuthUser, json } from "@/lib/api";
 import {
   getPlaylistCoverPath,
+  getPlaylistCoverPathById,
   getUserPlaylist,
   normalizePlaylistId,
   setPlaylistCoverPath,
@@ -48,7 +49,9 @@ export async function GET(
     return json({ error: "Not found" }, { status: 404 });
   }
 
-  const stored = getPlaylistCoverPath(me.id, playlistId);
+  const stored =
+    getPlaylistCoverPath(me.id, playlistId) ||
+    getPlaylistCoverPathById(playlistId);
   if (!stored || !existsSync(stored)) {
     return json({ error: "No cover" }, { status: 404 });
   }

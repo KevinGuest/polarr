@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/api";
 import {
   getPublicProfile,
-  libraryStats,
+  listPinnedAlbumNavItems,
   listPublicProfiles,
-  publicAlbumsFromLibrary,
-  topTracksFromLibrary,
+  listUserPlaylists,
+  recentAlbumsForUser,
+  topTracksForUser,
+  userProfileStats,
   type PublicProfile,
   type TrackRow,
 } from "@/lib/db";
@@ -35,13 +37,10 @@ function resolveCover(
 ) {
   const fromDb =
     coverPath && /^https?:\/\//i.test(coverPath) ? coverPath : null;
-  return fromDb || covers.get(albumCoverKey(artist, album)) || null;
+  return fromDb || covers.get(albumCoverKey(artist, album)) || coverPath || null;
 }
 
-function trackPayload(
-  t: TrackRow,
-  covers: Map<string, string>,
-) {
+function trackPayload(t: TrackRow, covers: Map<string, string>) {
   return {
     id: t.id,
     title: t.title,
@@ -74,19 +73,43 @@ export async function GET(req: NextRequest) {
     const limit = Number.isFinite(rawLimit)
       ? Math.min(100, Math.max(1, Math.floor(rawLimit)))
       : 10;
-    const stats = libraryStats();
+    const stats = userProfileStats(user.id);
     const covers = await getAlbumCoverMap();
-    const topTracks = topTracksFromLibrary(limit).map((t) =>
+    const topTracks = topTracksForUser(user.id, limit).map((t) =>
       trackPayload(t, covers),
     );
-    const albums = publicAlbumsFromLibrary(14).map((p) => ({
-      key: `${p.artist}::${p.title}`.toLowerCase(),
-      title: p.title,
-      artist: p.artist,
-      tracks: p.tracks,
-      href: albumHref({ title: p.title, artist: p.artist }),
-      coverPath: resolveCover(covers, p.artist, p.title),
-    }));
+
+    const playlists = listUserPlaylists(user.id)
+      .slice(0, 24)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        trackCount: p.trackCount,
+        href: `/playlist/${encodeURIComponent(p.id)}`,
+        coverPath: p.coverUrl,
+      }));
+
+    const pinned = listPinnedAlbumNavItems(user.id).slice(0, 14);
+    const albumsKind = pinned.length > 0 ? "pinned" : "recent";
+    const albumsSource =
+      pinned.length > 0
+        ? pinned.map((p) => ({
+            key: p.key,
+            title: p.title,
+            artist: p.artist,
+            tracks: p.tracks,
+            href: albumHref({ title: p.title, artist: p.artist }),
+            coverPath: resolveCover(covers, p.artist, p.title, p.image),
+          }))
+        : recentAlbumsForUser(user.id, 14).map((p) => ({
+            key: `${p.artist}::${p.title}`.toLowerCase(),
+            title: p.title,
+            artist: p.artist,
+            tracks: p.tracks,
+            href: albumHref({ title: p.title, artist: p.artist }),
+            coverPath: resolveCover(covers, p.artist, p.title, p.coverPath),
+          }));
+
     return NextResponse.json({
       user: publicUser(user),
       me: {
@@ -97,7 +120,9 @@ export async function GET(req: NextRequest) {
       isSelf: user.id === me.id,
       stats,
       topTracks,
-      albums,
+      playlists,
+      albums: albumsSource,
+      albumsKind,
     });
   }
 

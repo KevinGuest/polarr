@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { MoreHorizontal, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -108,6 +109,8 @@ async function fetchUserPayload(publicId: string): Promise<UserDetailPayload> {
 }
 
 export function AdminUsersClient() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [mePublicId, setMePublicId] = useState<string | null>(null);
   const [canManage, setCanManage] = useState(false);
@@ -130,6 +133,7 @@ export function AdminUsersClient() {
   const [revokeTarget, setRevokeTarget] = useState<UserRow | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<UserRow | null>(null);
   const [transferTarget, setTransferTarget] = useState<UserRow | null>(null);
+  const [openedFromQuery, setOpenedFromQuery] = useState(false);
 
   async function refresh() {
     const res = await fetch("/api/admin/users");
@@ -161,6 +165,17 @@ export function AdminUsersClient() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  // Deep-link from Invites “View user” → `/admin/users?user={publicId}`
+  useEffect(() => {
+    const userParam = searchParams.get("user")?.trim();
+    if (!userParam || users.length === 0 || openedFromQuery) return;
+    const match = users.find((u) => u.publicId === userParam);
+    if (!match) return;
+    setDetailsUser(match);
+    setOpenedFromQuery(true);
+    router.replace("/admin/users", { scroll: false });
+  }, [users, searchParams, openedFromQuery, router]);
 
   useEffect(() => {
     if (!activityUser) {

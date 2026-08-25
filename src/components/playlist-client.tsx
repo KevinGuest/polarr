@@ -484,6 +484,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
   const [tracks, setTracks] = useState<PlaylistTrack[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [canEdit, setCanEdit] = useState(true);
   const [coverBusy, setCoverBusy] = useState(false);
   const [localCover, setLocalCover] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -507,6 +508,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
       }
       setPlaylist(data.playlist);
       setTracks(Array.isArray(data.tracks) ? data.tracks : []);
+      setCanEdit(data.canEdit !== false);
       setError(null);
       setLoading(false);
     } catch {
@@ -767,6 +769,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
               void onCoverFile(file);
             }}
           />
+          {canEdit ? (
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
@@ -795,6 +798,24 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
               </span>
             </div>
           </button>
+          ) : (
+            <div className="relative size-44 shrink-0 overflow-hidden rounded-lg shadow-lg sm:size-52 md:size-56">
+              {coverImage ? (
+                <CoverArt
+                  seed={playlist?.id || displayTitle}
+                  image={coverImage}
+                  className="size-full"
+                />
+              ) : (
+                <div
+                  className="flex size-full items-center justify-center bg-[#282828] text-[#7f7f7f]"
+                  aria-hidden
+                >
+                  <Music2 className="size-16 sm:size-20" strokeWidth={1.25} />
+                </div>
+              )}
+            </div>
+          )}
           <div className="min-w-0 flex-1 space-y-2">
             <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
               Playlist
@@ -868,20 +889,24 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-48">
-              <DropdownMenuItem
-                className="gap-2"
-                onSelect={() => setAddOpen(true)}
-              >
-                <Plus className="size-4" />
-                Add songs
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="gap-2"
-                onSelect={() => openDetails()}
-              >
-                <Pencil className="size-4" />
-                Name & details
-              </DropdownMenuItem>
+              {canEdit ? (
+                <>
+                  <DropdownMenuItem
+                    className="gap-2"
+                    onSelect={() => setAddOpen(true)}
+                  >
+                    <Plus className="size-4" />
+                    Add songs
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="gap-2"
+                    onSelect={() => openDetails()}
+                  >
+                    <Pencil className="size-4" />
+                    Name & details
+                  </DropdownMenuItem>
+                </>
+              ) : null}
               <DropdownMenuItem
                 className="gap-2"
                 onSelect={() => void copyPlaylistLink()}
@@ -889,20 +914,25 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                 <Copy className="size-4" />
                 Copy link
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
-                onSelect={() => {
-                  setTimeout(() => setDeleteOpen(true), 0);
-                }}
-              >
-                <Trash2 className="size-4" />
-                Delete
-              </DropdownMenuItem>
+              {canEdit ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
+                    onSelect={() => {
+                      setTimeout(() => setDeleteOpen(true), 0);
+                    }}
+                  >
+                    <Trash2 className="size-4" />
+                    Delete
+                  </DropdownMenuItem>
+                </>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
 
+        {canEdit ? (
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -920,25 +950,36 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
             Name & details
           </button>
         </div>
+        ) : null}
       </section>
 
       <section className="pt-4">
         {empty ? (
           <div className="px-1 py-12">
             <h2 className="text-2xl font-bold tracking-tight">
-              Let&apos;s find something for your playlist
+              {canEdit
+                ? "Let's find something for your playlist"
+                : "This playlist is empty"}
             </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Search your library and add songs, or right-click a track anywhere
-              in Polarr.
-            </p>
-            <button
-              type="button"
-              onClick={() => setAddOpen(true)}
-              className="mt-6 inline-flex items-center gap-1.5 rounded-full bg-foreground px-5 py-2.5 text-sm font-semibold text-background hover:opacity-90"
-            >
-              Add songs
-            </button>
+            {canEdit ? (
+              <>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Search your library and add songs, or right-click a track anywhere
+                  in Polarr.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setAddOpen(true)}
+                  className="mt-6 inline-flex items-center gap-1.5 rounded-full bg-foreground px-5 py-2.5 text-sm font-semibold text-background hover:opacity-90"
+                >
+                  Add songs
+                </button>
+              </>
+            ) : (
+              <p className="mt-2 text-sm text-muted-foreground">
+                Nothing here yet.
+              </p>
+            )}
           </div>
         ) : (
           <div className="w-full overflow-x-auto">
@@ -1075,9 +1116,11 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                       key={trackId}
                       track={playerTrack}
                       inLibrary={Boolean(t.path)}
-                      playlistId={playlistId}
-                      onRemovedFromPlaylist={() =>
-                        void removeFromPlaylist(trackId)
+                      playlistId={canEdit ? playlistId : undefined}
+                      onRemovedFromPlaylist={
+                        canEdit
+                          ? () => void removeFromPlaylist(trackId)
+                          : undefined
                       }
                     >
                       {row}

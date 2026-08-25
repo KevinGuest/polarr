@@ -7,6 +7,7 @@ import { ArrowLeft, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CoverArt } from "@/components/cover-art";
+import { UserAvatar } from "@/components/user-avatar";
 import { albumHref } from "@/lib/album-ref";
 import {
   MediaShelfGrid,
@@ -52,6 +53,14 @@ type CatalogArtist = {
   alreadyInLibrary?: boolean;
 };
 
+type CatalogProfile = {
+  id: string;
+  username: string;
+  avatarUrl: string | null;
+  isAdmin?: boolean;
+  href: string;
+};
+
 type CatalogRow =
   | { kind: "track"; hit: CatalogTrack }
   | { kind: "album"; hit: CatalogAlbum };
@@ -81,6 +90,7 @@ export function SearchClient() {
   const [tracks, setTracks] = useState<CatalogTrack[]>([]);
   const [albums, setAlbums] = useState<CatalogAlbum[]>([]);
   const [artists, setArtists] = useState<CatalogArtist[]>([]);
+  const [profiles, setProfiles] = useState<CatalogProfile[]>([]);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -92,6 +102,7 @@ export function SearchClient() {
       setTracks([]);
       setAlbums([]);
       setArtists([]);
+      setProfiles([]);
       setCatalogError(null);
       setLoading(false);
       return;
@@ -105,6 +116,7 @@ export function SearchClient() {
         tracks?: CatalogTrack[];
         albums?: CatalogAlbum[];
         artists?: CatalogArtist[];
+        profiles?: CatalogProfile[];
         lidarrError?: string | null;
       },
       isFull: boolean,
@@ -115,10 +127,12 @@ export function SearchClient() {
       setTracks(data.tracks || []);
       setAlbums(data.albums || []);
       setArtists(data.artists || []);
+      setProfiles(data.profiles || []);
       const hasHits =
         (data.tracks?.length || 0) +
           (data.albums?.length || 0) +
-          (data.artists?.length || 0) >
+          (data.artists?.length || 0) +
+          (data.profiles?.length || 0) >
         0;
       setCatalogError(
         hasHits
@@ -295,7 +309,8 @@ export function SearchClient() {
     !loading &&
     term &&
     catalogRows.length === 0 &&
-    artists.length === 0;
+    artists.length === 0 &&
+    profiles.length === 0;
 
   function searchHref(extra?: Record<string, string>) {
     const qs = new URLSearchParams();
@@ -474,6 +489,51 @@ export function SearchClient() {
     );
   }
 
+  if (term && view === "profiles") {
+    return (
+      <div className="min-w-0 space-y-8">
+        <div className="flex items-center gap-3">
+          <Link
+            href={searchHref()}
+            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+            aria-label="Back to search"
+          >
+            <ArrowLeft className="size-4" />
+          </Link>
+          <div className="min-w-0 flex-1">
+            <ShelfHeader title="Profiles" titleAs="h1" />
+          </div>
+        </div>
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Searching…</p>
+        ) : profiles.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No profiles found.</p>
+        ) : (
+          <MediaShelfGrid>
+            {profiles.map((hit) => (
+              <MediaTileShell
+                key={hit.id}
+                title={hit.username}
+                subtitle="Profile"
+                ariaLabel={`Open ${hit.username}`}
+                onOpen={() => router.push(hit.href)}
+                coverShape="circle"
+                cover={
+                  <UserAvatar
+                    username={hit.username}
+                    avatarUrl={hit.avatarUrl}
+                    textClassName="text-3xl"
+                    className="size-full rounded-full"
+                  />
+                }
+              />
+            ))}
+          </MediaShelfGrid>
+        )}
+      </div>
+    );
+  }
+
   if (term && view === "artists") {
     return (
       <div className="min-w-0 space-y-8">
@@ -520,20 +580,42 @@ export function SearchClient() {
 
   const topPreview = catalogRows.slice(0, TOP_PREVIEW);
   const showTopAll = catalogRows.length > TOP_PREVIEW;
+  const handleLike =
+    /^@?[a-zA-Z0-9._-]{1,40}$/.test(term) && !/\s/.test(term);
+
+  const profilesShelf =
+    profiles.length > 0 ? (
+      <MediaShelfRow
+        title="Profiles"
+        itemCount={profiles.length}
+        seeAllHref={searchHref({ view: "profiles" })}
+      >
+        {(visible) =>
+          profiles.slice(0, visible).map((hit) => (
+            <MediaTileShell
+              key={hit.id}
+              title={hit.username}
+              subtitle="Profile"
+              ariaLabel={`Open ${hit.username}`}
+              onOpen={() => router.push(hit.href)}
+              coverShape="circle"
+              cover={
+                <UserAvatar
+                  username={hit.username}
+                  avatarUrl={hit.avatarUrl}
+                  textClassName="text-3xl"
+                  className="size-full rounded-full"
+                />
+              }
+            />
+          ))
+        }
+      </MediaShelfRow>
+    ) : null;
 
   return (
     <div className="min-w-0 space-y-10">
-      {term ? null : (
-        <section className="space-y-2">
-          <p className="text-sm text-muted-foreground">
-            Find tracks, albums, and artists.
-          </p>
-          {message ? (
-            <p className="text-sm text-foreground">{message}</p>
-          ) : null}
-        </section>
-      )}
-      {term && message ? (
+      {message ? (
         <p className="text-sm text-foreground">{message}</p>
       ) : null}
       {catalogError && empty ? (
@@ -545,6 +627,8 @@ export function SearchClient() {
       {loading && term ? (
         <p className="text-sm text-muted-foreground">Searching…</p>
       ) : null}
+
+      {handleLike ? profilesShelf : null}
 
       {topPreview.length > 0 ? (
         <section className="min-w-0 space-y-3">
@@ -558,6 +642,8 @@ export function SearchClient() {
           </ul>
         </section>
       ) : null}
+
+      {!handleLike ? profilesShelf : null}
 
       {artists.length > 0 ? (
         <MediaShelfRow

@@ -53,12 +53,27 @@ type PublicAlbum = {
   coverPath: string | null;
 };
 
+type PublicPlaylist = {
+  id: string;
+  name: string;
+  trackCount: number;
+  href: string;
+  coverPath: string | null;
+};
+
 type Payload = {
   user: Profile;
   isSelf: boolean;
-  stats: { tracks: number; albums: number; artists: number };
+  stats: {
+    playlists: number;
+    liked: number;
+    playsThisMonth: number;
+    uniqueTracksThisMonth: number;
+  };
   topTracks: TopTrack[];
+  playlists: PublicPlaylist[];
   albums: PublicAlbum[];
+  albumsKind?: "pinned" | "recent";
 };
 
 function formatDuration(sec: number | null | undefined) {
@@ -247,7 +262,15 @@ export function ProfileClient({
     );
   }
 
-  const { user: profile, stats, topTracks, albums, isSelf } = data;
+  const {
+    user: profile,
+    stats,
+    topTracks,
+    playlists = [],
+    albums,
+    albumsKind = "recent",
+    isSelf,
+  } = data;
   const avatarSrc = cacheBust(profile.avatarUrl, avatarVer);
   const bannerColors = liveBanner ?? profile.bannerColors;
 
@@ -317,11 +340,13 @@ export function ProfileClient({
               {profile.username}
             </h1>
             <p className="text-sm text-muted-foreground">
-              {stats.tracks} track{stats.tracks === 1 ? "" : "s"}
+              {stats.playsThisMonth} play
+              {stats.playsThisMonth === 1 ? "" : "s"} this month
               {" · "}
-              {stats.albums} album{stats.albums === 1 ? "" : "s"}
-              {" · "}
-              {stats.artists} artist{stats.artists === 1 ? "" : "s"}
+              {stats.playlists} playlist{stats.playlists === 1 ? "" : "s"}
+              {stats.liked > 0
+                ? ` · ${stats.liked} liked`
+                : ""}
             </p>
           </div>
         </div>
@@ -351,14 +376,9 @@ export function ProfileClient({
 
           {topTracks.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No tracks in the library yet.{" "}
-              <Link
-                href="/search"
-                className="text-foreground underline-offset-4 hover:underline"
-              >
-                Search
-              </Link>{" "}
-              to start collecting.
+              {isSelf
+                ? "No listening history this month yet. Play something to build your top tracks."
+                : "No top tracks this month."}
             </p>
           ) : (
             <div>
@@ -472,9 +492,46 @@ export function ProfileClient({
         </section>
 
         <section className="space-y-4">
-          <h2 className="text-xl font-semibold tracking-tight">Albums</h2>
+          <h2 className="text-xl font-semibold tracking-tight">Playlists</h2>
+          {playlists.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {isSelf ? "No playlists yet." : "No playlists."}
+            </p>
+          ) : (
+            <div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
+              {playlists.map((p) => (
+                <Link
+                  key={p.id}
+                  href={p.href}
+                  className="w-[9.5rem] shrink-0 space-y-2 rounded-lg p-2 transition-colors hover:bg-muted/40 sm:w-40"
+                >
+                  <CoverArt
+                    seed={p.name}
+                    image={p.coverPath}
+                    className="aspect-square w-full rounded-md shadow-md shadow-black/30"
+                  />
+                  <div className="min-w-0 px-0.5">
+                    <p className="truncate text-sm font-semibold">{p.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {p.trackCount} track{p.trackCount === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="space-y-4">
+          <h2 className="text-xl font-semibold tracking-tight">
+            {albumsKind === "pinned" ? "Saved albums" : "Recently played albums"}
+          </h2>
           {albums.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No albums yet.</p>
+            <p className="text-sm text-muted-foreground">
+              {isSelf
+                ? "No saved or recently played albums yet."
+                : "No albums to show."}
+            </p>
           ) : (
             <div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
               {albums.map((a) => (

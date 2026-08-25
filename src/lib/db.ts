@@ -1631,7 +1631,7 @@ export function getInviteById(id: string): InviteRow | null {
 }
 
 export function getInviteByCode(code: string): InviteRow | null {
-  purgeStaleRevokedInvites();
+  purgeRevokedInvites();
   const key = code.trim().toUpperCase();
   if (!key) return null;
   const row = getDb()
@@ -1641,10 +1641,14 @@ export function getInviteByCode(code: string): InviteRow | null {
 }
 
 export function listInvites(limit = 100): InviteRow[] {
-  purgeStaleRevokedInvites();
+  purgeRevokedInvites();
   return (
     getDb()
-      .prepare(`${INVITE_SELECT} ORDER BY i.created_at DESC LIMIT ?`)
+      .prepare(
+        `${INVITE_SELECT}
+         WHERE i.revoked_at IS NULL
+         ORDER BY i.created_at DESC LIMIT ?`,
+      )
       .all(limit) as Parameters<typeof mapInvite>[0][]
   ).map(mapInvite);
 }
@@ -1660,32 +1664,32 @@ export function inviteStatus(
   return "open";
 }
 
-export function revokeInvite(id: string) {
+/** Drop an open invite immediately — we don’t keep revoked codes. */
+export function revokeInvite(id: string): InviteRow {
   const invite = getInviteById(id);
   if (!invite) throw new Error("Invite not found");
   if (inviteStatus(invite) !== "open") {
     throw new Error("Only open invites can be revoked");
   }
-  getDb()
-    .prepare(`UPDATE invites SET revoked_at = ? WHERE id = ?`)
-    .run(nowIso(), id);
-  return getInviteById(id)!;
+  deleteInvite(id);
+  return invite;
 }
 
 export function deleteInvite(id: string) {
   getDb().prepare(`DELETE FROM invites WHERE id = ?`).run(id);
 }
 
-/** Remove revoked invites that are at least 24 hours old. */
-export function purgeStaleRevokedInvites(maxAgeMs = 24 * 60 * 60 * 1000) {
-  const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+/** Remove any soft-revoked invite rows (legacy); revoke now deletes immediately. */
+export function purgeRevokedInvites() {
   const result = getDb()
-    .prepare(
-      `DELETE FROM invites
-       WHERE revoked_at IS NOT NULL AND revoked_at <= ?`,
-    )
-    .run(cutoff);
+    .prepare(`DELETE FROM invites WHERE revoked_at IS NOT NULL`)
+    .run();
   return result.changes;
+}
+
+/** @deprecated use purgeRevokedInvites */
+export function purgeStaleRevokedInvites(_maxAgeMs?: number) {
+  return purgeRevokedInvites();
 }
 
 export function redeemInvite(
@@ -2123,6 +2127,34 @@ export function getPublicProfile(username: string): PublicProfile | null {
   return mapPublicProfile(row);
 }
 
+/** Case-insensitive username search for global search / profile discovery. */
+export function searchPublicProfiles(
+  query: string,
+  limit = 12,
+): PublicProfile[] {
+  const q = query.trim().replace(/^@+/, "");
+  if (!q) return [];
+  const lim = Math.min(40, Math.max(1, Math.floor(limit)));
+  const safe = q.replace(/[%_]/g, "");
+  if (!safe) return [];
+  const like = `%${safe}%`;
+  const prefix = `${safe}%`;
+  const rows = getDb()
+    .prepare(
+      `${PROFILE_SELECT}
+       WHERE lower(username) LIKE lower(?)
+         AND (access_revoked_at IS NULL OR trim(access_revoked_at) = '')
+       ORDER BY
+         CASE WHEN lower(username) = lower(?) THEN 0
+              WHEN lower(username) LIKE lower(?) THEN 1
+              ELSE 2 END,
+         lower(username) ASC
+       LIMIT ?`,
+    )
+    .all(like, q, prefix, lim) as UserProfileRow[];
+  return rows.map(mapPublicProfile);
+}
+
 /** Real library files only — excludes stream history stubs used for Recently played. */
 const LIBRARY_TRACK_FILTER = `source != 'stream' AND path NOT LIKE 'stream:%' AND path NOT LIKE 'stream://%'`;
 
@@ -2178,6 +2210,149 @@ export function topTracksFromLibrary(limit = 10): TrackRow[] {
       )
       .all(limit) as Record<string, unknown>[]
   ).map(mapTrack);
+}
+
+/** Start of the current UTC calendar month as ISO (for “this month” profile stats). */
+export function startOfUtcMonthIso(date = new Date()): string {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  return `${y}-${m}-01T00:00:00.000Z`;
+}
+
+/**
+ * Top tracks for a user from their listening (≥15s), ranked by play count.
+ * Defaults to the current UTC month to match profile “Top tracks this month”.
+ */
+export function topTracksForUser(
+  userId: string,
+  limit = 10,
+  opts?: { sinceIso?: string | null },
+): (TrackRow & { plays: number })[] {
+  if (!userId) return [];
+  const lim = Math.min(100, Math.max(1, Math.floor(limit)));
+  const since =
+    opts?.sinceIso === null
+      ? null
+      : (opts?.sinceIso ?? startOfUtcMonthIso());
+  const rows = since
+    ? (getDb()
+        .prepare(
+          `SELECT t.id, t.title, t.artist, t.album, t.duration, t.path,
+                  t.cover_path as coverPath, t.source, t.external_id as externalId,
+                  t.file_size as fileSize, t.mtime_ms as mtimeMs,
+                  t.added_at as addedAt, t.updated_at as updatedAt,
+                  COUNT(*) as plays
+           FROM play_history p
+           INNER JOIN tracks t ON t.id = p.track_id
+           WHERE p.user_id = ?
+             AND (p.listened_seconds IS NULL OR p.listened_seconds >= 15)
+             AND p.played_at >= ?
+           GROUP BY p.track_id
+           ORDER BY plays DESC, MAX(p.played_at) DESC
+           LIMIT ?`,
+        )
+        .all(userId, since, lim) as Record<string, unknown>[])
+    : (getDb()
+        .prepare(
+          `SELECT t.id, t.title, t.artist, t.album, t.duration, t.path,
+                  t.cover_path as coverPath, t.source, t.external_id as externalId,
+                  t.file_size as fileSize, t.mtime_ms as mtimeMs,
+                  t.added_at as addedAt, t.updated_at as updatedAt,
+                  COUNT(*) as plays
+           FROM play_history p
+           INNER JOIN tracks t ON t.id = p.track_id
+           WHERE p.user_id = ?
+             AND (p.listened_seconds IS NULL OR p.listened_seconds >= 15)
+           GROUP BY p.track_id
+           ORDER BY plays DESC, MAX(p.played_at) DESC
+           LIMIT ?`,
+        )
+        .all(userId, lim) as Record<string, unknown>[]);
+
+  return rows.map((row) => ({
+    ...mapTrack(row),
+    plays: Number(row.plays) || 0,
+  }));
+}
+
+/** Albums the user has actually listened to recently (not the whole server catalog). */
+export function recentAlbumsForUser(
+  userId: string,
+  limit = 14,
+): {
+  title: string;
+  artist: string;
+  tracks: number;
+  coverPath: string | null;
+  playedAt: string;
+}[] {
+  if (!userId) return [];
+  const lim = Math.min(40, Math.max(1, Math.floor(limit)));
+  return getDb()
+    .prepare(
+      `SELECT t.album as title,
+              t.artist as artist,
+              COUNT(DISTINCT t.id) as tracks,
+              MAX(CASE
+                WHEN t.cover_path IS NOT NULL AND trim(t.cover_path) != ''
+                THEN t.cover_path END) as coverPath,
+              MAX(p.played_at) as playedAt
+       FROM play_history p
+       INNER JOIN tracks t ON t.id = p.track_id
+       WHERE p.user_id = ?
+         AND (p.listened_seconds IS NULL OR p.listened_seconds >= 15)
+         AND t.album IS NOT NULL AND trim(t.album) != ''
+       GROUP BY lower(t.artist), lower(t.album)
+       ORDER BY playedAt DESC
+       LIMIT ?`,
+    )
+    .all(userId, lim) as {
+    title: string;
+    artist: string;
+    tracks: number;
+    coverPath: string | null;
+    playedAt: string;
+  }[];
+}
+
+/** Activity stats for a public profile (not shared Lidarr catalog size). */
+export function userProfileStats(userId: string): {
+  playlists: number;
+  liked: number;
+  playsThisMonth: number;
+  uniqueTracksThisMonth: number;
+} {
+  if (!userId) {
+    return {
+      playlists: 0,
+      liked: 0,
+      playsThisMonth: 0,
+      uniqueTracksThisMonth: 0,
+    };
+  }
+  const since = startOfUtcMonthIso();
+  const playlists = (
+    getDb()
+      .prepare(`SELECT COUNT(*) as c FROM playlists WHERE user_id = ?`)
+      .get(userId) as { c: number }
+  ).c;
+  const liked = countLikedTracks(userId);
+  const playRow = getDb()
+    .prepare(
+      `SELECT COUNT(*) as plays,
+              COUNT(DISTINCT track_id) as uniq
+       FROM play_history
+       WHERE user_id = ?
+         AND (listened_seconds IS NULL OR listened_seconds >= 15)
+         AND played_at >= ?`,
+    )
+    .get(userId, since) as { plays: number; uniq: number };
+  return {
+    playlists: Number(playlists) || 0,
+    liked: Number(liked) || 0,
+    playsThisMonth: Number(playRow?.plays) || 0,
+    uniqueTracksThisMonth: Number(playRow?.uniq) || 0,
+  };
 }
 
 /** Sidebar: albums listed like Spotify library (recent-ish by max mtime). */
@@ -3748,6 +3923,48 @@ export function getUserPlaylist(
   };
 }
 
+/** Any homeserver member can view a playlist by id (profiles / shared library). */
+export function getPlaylistById(playlistId: string): PlaylistDetail | null {
+  const id = normalizePlaylistId(playlistId);
+  if (!id) return null;
+  const row = getDb()
+    .prepare(`${PLAYLIST_SELECT} WHERE p.id = ?`)
+    .get(id) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  const mapped = mapPlaylistRow(row);
+  const profile = getPublicProfileById(mapped.userId);
+  return {
+    ...mapped,
+    ownerUsername: profile?.username || "Unknown",
+    ownerAvatarUrl: profile?.avatarUrl || null,
+  };
+}
+
+/** Tracks on a playlist (no ownership check — homeserver read). */
+export function listPlaylistTracksById(playlistId: string): TrackRow[] {
+  const id = normalizePlaylistId(playlistId);
+  if (!id) return [];
+  const pl = getDb()
+    .prepare(`SELECT id FROM playlists WHERE id = ?`)
+    .get(id) as { id: string } | undefined;
+  if (!pl) return [];
+  return (
+    getDb()
+      .prepare(
+        `SELECT tracks.id, tracks.title, tracks.artist, tracks.album, tracks.duration,
+                tracks.path, tracks.cover_path as coverPath, tracks.source,
+                tracks.external_id as externalId, tracks.file_size as fileSize,
+                tracks.mtime_ms as mtimeMs, pt.added_at as addedAt,
+                tracks.updated_at as updatedAt
+         FROM playlist_tracks pt
+         INNER JOIN tracks ON tracks.id = pt.track_id
+         WHERE pt.playlist_id = ?
+         ORDER BY pt.position ASC`,
+      )
+      .all(id) as Record<string, unknown>[]
+  ).map(mapTrack);
+}
+
 export function createPlaylist(userId: string, name?: string | null): PlaylistRow {
   const now = nowIso();
   const id = newId();
@@ -3877,9 +4094,30 @@ export function getPlaylistCoverPath(
     .get(id, userId) as { coverPath: string | null } | undefined;
   if (!row) return null;
 
+  return resolvePlaylistCoverFile(id, userId, row.coverPath);
+}
+
+/** Cover path for any playlist (viewer need not be owner). */
+export function getPlaylistCoverPathById(playlistId: string): string | null {
+  const id = normalizePlaylistId(playlistId);
+  if (!id) return null;
+  const row = getDb()
+    .prepare(
+      `SELECT user_id as userId, cover_path as coverPath FROM playlists WHERE id = ?`,
+    )
+    .get(id) as { userId: string; coverPath: string | null } | undefined;
+  if (!row) return null;
+  return resolvePlaylistCoverFile(id, row.userId, row.coverPath);
+}
+
+function resolvePlaylistCoverFile(
+  id: string,
+  userId: string,
+  coverPath: string | null | undefined,
+): string | null {
   const dir = playlistCoversDir();
   const tries: string[] = [];
-  const stored = row.coverPath?.trim();
+  const stored = coverPath?.trim();
   if (stored) {
     tries.push(stored);
     tries.push(path.join(dir, path.basename(stored)));

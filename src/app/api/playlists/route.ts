@@ -4,9 +4,11 @@ import {
   addTrackToPlaylist,
   createPlaylist,
   deletePlaylist,
+  getPlaylistById,
   getUserPlaylist,
   isTrackLiked,
   listPlaylistTracks,
+  listPlaylistTracksById,
   listUserPlaylists,
   listUserPlaylistsForTrack,
   normalizePlaylistId,
@@ -30,14 +32,24 @@ export async function GET(req: Request) {
   const forTrack = (params.get("forTrack") || "").trim();
 
   if (playlistId) {
-    const playlist = getUserPlaylist(user.id, playlistId);
+    // Owner gets full edit context; any homeserver member can view.
+    const owned = getUserPlaylist(user.id, playlistId);
+    const playlist = owned ?? getPlaylistById(playlistId);
     if (!playlist) return json({ error: "Playlist not found" }, { status: 404 });
-    const tracks = listPlaylistTracks(user.id, playlistId).map((t) => ({
+    const tracks = (
+      owned
+        ? listPlaylistTracks(user.id, playlistId)
+        : listPlaylistTracksById(playlistId)
+    ).map((t) => ({
       ...t,
       explicit: titleLooksExplicit(t.title),
       localTrackId: t.id,
     }));
-    return json({ playlist, tracks });
+    return json({
+      playlist,
+      tracks,
+      canEdit: Boolean(owned),
+    });
   }
 
   if (forTrack) {

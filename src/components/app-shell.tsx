@@ -206,8 +206,8 @@ function ShellInner({ children }: { children: React.ReactNode }) {
           <div className="relative w-full justify-self-center">
             <Suspense
               fallback={
-                <div className="flex h-9 w-full items-center rounded-full border border-border pl-9 pr-4 text-sm text-muted-foreground">
-                  Search artists, albums, tracks…
+                <div className="flex h-9 w-full items-center justify-center rounded-full border border-border px-4 text-sm text-muted-foreground">
+                  Search
                 </div>
               }
             >

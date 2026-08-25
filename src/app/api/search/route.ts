@@ -1,5 +1,10 @@
 import { json } from "@/lib/api";
-import { findTrack, searchTracksLocal, type TrackRow } from "@/lib/db";
+import {
+  findTrack,
+  searchPublicProfiles,
+  searchTracksLocal,
+  type TrackRow,
+} from "@/lib/db";
 import {
   searchCatalog,
   type CatalogAlbumHit,
@@ -162,6 +167,16 @@ function markAlbumsInLibrary(
   });
 }
 
+function profileHits(q: string) {
+  return searchPublicProfiles(q, 12).map((u) => ({
+    id: u.publicId,
+    username: u.username,
+    avatarUrl: u.avatarUrl,
+    isAdmin: u.isAdmin,
+    href: `/u/${encodeURIComponent(u.username)}`,
+  }));
+}
+
 /**
  * Search: local library first, then catalog.
  * `?library=1` returns on-disk hits immediately so the UI can paint files
@@ -177,10 +192,12 @@ export async function GET(req: Request) {
       tracks: [],
       albums: [],
       artists: [],
+      profiles: [],
       lidarr: [],
     });
   }
 
+  const profiles = profileHits(q);
   const local = searchTracksLocal(q, 48);
   const localAlbums = albumsFromLocal(local, q);
   const localArtists = artistsFromLocal(local);
@@ -192,6 +209,7 @@ export async function GET(req: Request) {
       tracks: local.map(trackToHit),
       albums: localAlbums,
       artists: localArtists,
+      profiles,
       lidarr: [],
     });
   }
@@ -318,6 +336,7 @@ export async function GET(req: Request) {
     tracks,
     albums,
     artists,
+    profiles,
     /** @deprecated use albums/artists */
     lidarr: lidarrBundle.hits,
     lidarrError: lidarrBundle.error,

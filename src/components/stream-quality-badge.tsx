@@ -13,7 +13,7 @@ const LABELS: Record<PlaybackQuality, string> = {
 
 const DESCRIPTIONS: Record<PlaybackQuality, string> = {
   local: "Playing from Polarr library",
-  youtube: "Playing via YouTube fallback",
+  youtube: "Playing via Youtube",
 };
 
 /** Compact Polarr / YouTube source chip for the player and track rows. */

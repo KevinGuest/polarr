@@ -14,6 +14,7 @@ import { DOWNLOAD_QUALITIES } from "@/lib/download-quality";
 import { isDiscordWebhookUrl, sendDiscordTest } from "@/lib/discord";
 import { sendSmtpTestEmail } from "@/lib/mail";
 import { probeLidarr } from "@/lib/lidarr";
+import { normalizePublicBaseUrl } from "@/lib/public-url";
 
 export const dynamic = "force-dynamic";
 
@@ -82,6 +83,7 @@ const bodySchema = z.object({
   lidarrUrl: z.string().url().or(z.literal("")).optional(),
   lidarrApiKey: z.string().optional(),
   saveOnPlay: z.boolean().optional(),
+  libraryScanMinutes: z.union([z.literal(0), z.literal(15), z.literal(30), z.literal(60)]).optional(),
   musicRoot: z.string().optional(),
   fallbackEnabled: z.boolean().optional(),
   downloadQuality: z
@@ -126,6 +128,7 @@ export async function POST(req: Request) {
     body.lidarrUrl !== undefined ||
     body.lidarrApiKey !== undefined ||
     body.saveOnPlay !== undefined ||
+    body.libraryScanMinutes !== undefined ||
     body.musicRoot !== undefined ||
     body.spotifyClientId !== undefined ||
     body.spotifyClientSecret !== undefined ||
@@ -278,6 +281,26 @@ export async function POST(req: Request) {
     return json({ error: "Invalid Discord webhook URL" }, { status: 400 });
   }
 
+  let nextPublicUrl = body.publicUrl ?? current.publicUrl;
+  if (body.publicUrl !== undefined) {
+    const raw = body.publicUrl.trim();
+    if (!raw) {
+      nextPublicUrl = "";
+    } else {
+      const normalized = normalizePublicBaseUrl(raw);
+      if (!normalized) {
+        return json(
+          {
+            error:
+              "Public URL must be a reachable http(s) address — not 0.0.0.0, ::, or blank",
+          },
+          { status: 400 },
+        );
+      }
+      nextPublicUrl = normalized;
+    }
+  }
+
   const next = updateSettings({
     serverName: body.serverName ?? current.serverName,
     lidarrUrl: body.lidarrUrl ?? current.lidarrUrl,
@@ -286,12 +309,14 @@ export async function POST(req: Request) {
         ? body.lidarrApiKey
         : current.lidarrApiKey,
     saveOnPlay: body.saveOnPlay ?? current.saveOnPlay,
+    libraryScanMinutes:
+      body.libraryScanMinutes ?? current.libraryScanMinutes,
     musicRoot: body.musicRoot ?? current.musicRoot,
     fallbackEnabled: true,
     downloadQuality:
       (body.downloadQuality as typeof current.downloadQuality | undefined) ??
       current.downloadQuality,
-    publicUrl: body.publicUrl ?? current.publicUrl,
+    publicUrl: nextPublicUrl,
     smtpHost: body.smtpHost ?? current.smtpHost,
     smtpPort: body.smtpPort ?? current.smtpPort,
     smtpUser: body.smtpUser ?? current.smtpUser,

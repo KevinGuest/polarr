@@ -10,6 +10,7 @@ import {
   getDiscordRedirectUri,
   oauthStateCookieName,
 } from "@/app/api/discord/oauth/route";
+import { resolvePublicBaseUrl } from "@/lib/public-url";
 
 export const dynamic = "force-dynamic";
 
@@ -21,8 +22,7 @@ export async function GET(req: Request) {
 
   const settings = getSettings();
   const publicBase =
-    (settings.publicUrl || "").trim().replace(/\/$/, "") ||
-    `${url.protocol}//${url.host}`;
+    resolvePublicBaseUrl(settings, req) || "http://localhost:3000";
 
   const go = (q: string) =>
     NextResponse.redirect(`${publicBase}/settings?tab=discord&${q}`);

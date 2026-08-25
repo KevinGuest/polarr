@@ -7,6 +7,7 @@ import {
   type TrackRow,
 } from "@/lib/db";
 import { primaryArtistName } from "@/lib/artist-portrait";
+import { listenArtistAffinity, rankExploreAlbums } from "@/lib/explore-recommend";
 
 export type MadeForTrack = {
   id: string;
@@ -85,41 +86,35 @@ function artistKey(artist: string) {
 
 /** Play + like weighted artist affinity for home Explore ranking. */
 export function tasteArtistScores(userId: string): Map<string, number> {
-  const excluded = new Set(listTasteExcludeIds(userId));
-  const recent = listRecentPlays(userId, 100).filter((t) => !excluded.has(t.id));
-  const liked = listLikedTracks(userId, 200).filter((t) => !excluded.has(t.id));
-  const artistScore = new Map<string, number>();
-
-  recent.forEach((t, i) => {
-    const k = artistKey(t.artist);
-    if (!k) return;
-    const weight = Math.max(1, 20 - i * 0.15);
-    artistScore.set(k, (artistScore.get(k) || 0) + weight);
-  });
-  for (const t of liked) {
-    const k = artistKey(t.artist);
-    if (!k) continue;
-    artistScore.set(k, (artistScore.get(k) || 0) + 8);
-  }
-  return artistScore;
+  return listenArtistAffinity(userId).scores;
 }
 
 /** Top artist display names by taste score (for MusicBrainz explore queries). */
 export function tasteArtistNames(userId: string, limit = 8): string[] {
-  const scores = tasteArtistScores(userId);
-  if (scores.size === 0) return [];
-  const recent = listRecentPlays(userId, 40);
-  const liked = listLikedTracks(userId, 40);
-  const label = new Map<string, string>();
-  for (const t of [...recent, ...liked]) {
-    const display = primaryArtistName(t.artist).trim() || t.artist.trim();
-    const k = artistKey(t.artist);
-    if (k && !label.has(k)) label.set(k, display);
+  const { scores, labels } = listenArtistAffinity(userId);
+  if (scores.size === 0) {
+    // Fallback: legacy recent-play labels if affinity empty
+    const recent = listRecentPlays(userId, 40);
+    const liked = listLikedTracks(userId, 40);
+    const artistScore = new Map<string, number>();
+    const label = new Map<string, string>();
+    for (const t of [...recent, ...liked]) {
+      const k = artistKey(t.artist);
+      if (!k) continue;
+      const display = primaryArtistName(t.artist).trim() || t.artist.trim();
+      if (!label.has(k)) label.set(k, display);
+      artistScore.set(k, (artistScore.get(k) || 0) + 1);
+    }
+    return [...artistScore.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([k]) => label.get(k) || k)
+      .filter(Boolean);
   }
   return [...scores.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit)
-    .map(([k]) => label.get(k) || k)
+    .map(([k]) => labels.get(k) || k)
     .filter(Boolean);
 }
 
@@ -140,52 +135,26 @@ export function rankByTasteArtist<T extends { artist: string }>(
 }
 
 /**
- * Blend global trending with personal taste.
- * ~60% chart heat, ~40% preference — chart items you already like float up.
+ * Blend global trending with personal taste (listen-first).
+ * Prefer {@link rankExploreAlbums} for new Explore shelves.
  */
 export function blendTrendingWithTaste<
-  T extends { artist: string; id: string },
+  T extends { artist: string; id: string; title?: string; releaseDate?: string; year?: number; foreignAlbumId?: string; rank?: number },
 >(
   userId: string | null | undefined,
   trending: (T & { rank?: number })[],
   preferencePool: T[],
   limit = 28,
 ): T[] {
-  const taste = userId ? tasteArtistScores(userId) : new Map<string, number>();
-  let maxTaste = 1;
-  for (const v of taste.values()) if (v > maxTaste) maxTaste = v;
-
-  const byKey = new Map<string, T & { rank?: number }>();
-  for (const t of trending) {
-    byKey.set(t.id.toLowerCase(), t);
-  }
-  for (const p of preferencePool) {
-    const k = p.id.toLowerCase();
-    if (!byKey.has(k)) byKey.set(k, p);
-  }
-
-  const trendRank = new Map<string, number>();
-  trending.forEach((t, i) => {
-    trendRank.set(t.id.toLowerCase(), t.rank ?? i + 1);
-  });
-  const trendCount = Math.max(trending.length, 1);
-
-  const scored = [...byKey.values()].map((item) => {
-    const key = item.id.toLowerCase();
-    const r = trendRank.get(key);
-    const trendingScore =
-      r != null ? Math.max(0, 1 - (r - 1) / trendCount) : 0.12;
-    const tasteRaw = taste.get(artistKey(item.artist)) || 0;
-    const tasteNorm = Math.min(1, tasteRaw / maxTaste);
-    // In both worlds → small boost
-    const both =
-      r != null && tasteRaw > 0 ? 0.12 : 0;
-    const score = trendingScore * 0.6 + tasteNorm * 0.4 + both;
-    return { item, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit).map((s) => s.item);
+  return rankExploreAlbums({
+    userId,
+    trending: trending as (T & { rank?: number; title: string })[],
+    preferencePool: preferencePool.map((p) => ({
+      ...p,
+      title: p.title || p.id,
+    })) as (T & { title: string })[],
+    limit,
+  }) as T[];
 }
 
 function formatArtistList(artists: string[], max = 3): string {
@@ -393,38 +362,100 @@ export function buildSongRadio(
   userId: string,
   seed: TrackRow,
 ): MadeForTrack[] {
+  return buildTasteAutoplay(userId, {
+    seed,
+    excludeIds: [seed.id],
+    limit: 40,
+  });
+}
+
+/**
+ * Continuous queue filler from listen affinity (+ optional seed continuity).
+ * Library/streamable files only — used when upcoming queue is empty.
+ */
+export function buildTasteAutoplay(
+  userId: string,
+  opts?: {
+    seed?: TrackRow | null;
+    seedArtist?: string;
+    seedAlbum?: string;
+    excludeIds?: Iterable<string>;
+    limit?: number;
+  },
+): MadeForTrack[] {
+  const limit = Math.max(1, Math.min(opts?.limit ?? 28, 60));
   const excluded = new Set(listTasteExcludeIds(userId));
-  excluded.add(seed.id);
-  const catalog = streamableCatalog(400, excluded);
-  const seedArtist = artistKey(seed.artist);
+  for (const id of opts?.excludeIds || []) {
+    if (id) excluded.add(id);
+  }
+  if (opts?.seed?.id) excluded.add(opts.seed.id);
 
-  const sameArtist = catalog.filter((t) => artistKey(t.artist) === seedArtist);
-  const others = catalog.filter((t) => artistKey(t.artist) !== seedArtist);
+  const catalog = streamableCatalog(500, excluded);
+  if (catalog.length === 0) return [];
 
-  // Prefer same album, then same artist, then shuffled catalog
-  const sameAlbum = sameArtist.filter(
-    (t) =>
-      t.album.trim().toLowerCase() === seed.album.trim().toLowerCase() &&
-      t.id !== seed.id,
+  const { scores } = listenArtistAffinity(userId);
+  let maxTaste = 1;
+  for (const v of scores.values()) if (v > maxTaste) maxTaste = v;
+  const hasTaste = scores.size > 0 && maxTaste > 1;
+
+  const seedArtist = artistKey(
+    opts?.seed?.artist || opts?.seedArtist || "",
   );
-  const restArtist = sameArtist.filter((t) => t.id !== seed.id && !sameAlbum.includes(t));
+  const seedAlbum = (
+    opts?.seed?.album ||
+    opts?.seedAlbum ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
 
   const day = new Date().toISOString().slice(0, 10);
-  const picked = [
-    seed,
-    ...seededShuffle(sameAlbum, `sr-al-${seed.id}-${day}`),
-    ...seededShuffle(restArtist, `sr-ar-${seed.id}-${day}`),
-    ...seededShuffle(others, `sr-ot-${seed.id}-${day}`),
-  ].slice(0, 40);
+  // Stable jitter so the same session isn’t identical every fill, but not pure random.
+  const jitterSeed = `auto-${userId}-${day}-${seedArtist || "x"}-${excluded.size}`;
 
-  // Dedupe by id
-  const seen = new Set<string>();
-  const unique: TrackRow[] = [];
-  for (const t of picked) {
-    if (seen.has(t.id)) continue;
-    seen.add(t.id);
-    unique.push(t);
+  const scored = catalog.map((t, i) => {
+    const ak = artistKey(t.artist);
+    const tasteRaw = scores.get(ak) || 0;
+    const tasteNorm = hasTaste ? Math.min(1, tasteRaw / maxTaste) : 0;
+    let score = hasTaste ? tasteNorm * 0.72 : 0.2;
+
+    if (seedArtist && ak === seedArtist) score += 0.28;
+    if (
+      seedAlbum &&
+      t.album.trim().toLowerCase() === seedAlbum &&
+      seedArtist &&
+      ak === seedArtist
+    ) {
+      score += 0.18;
+    }
+
+    // Mild position-stable jitter (not Math.random each request)
+    let h = 2166136261;
+    const key = `${jitterSeed}:${t.id}:${i}`;
+    for (let c = 0; c < key.length; c++) {
+      h ^= key.charCodeAt(c);
+      h = Math.imul(h, 16777619);
+    }
+    score += (Math.abs(h) % 1000) / 1000 * 0.12;
+
+    return { t, score, ak };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  const out: TrackRow[] = [];
+  const perArtist = new Map<string, number>();
+  for (const row of scored) {
+    const n = perArtist.get(row.ak) || 0;
+    // Keep variety — seed artist can appear a bit more
+    const cap = row.ak && row.ak === seedArtist ? 4 : 2;
+    if (n >= cap) continue;
+    perArtist.set(row.ak, n + 1);
+    out.push(row.t);
+    if (out.length >= limit) break;
   }
-  return unique.map(toDto);
+
+  return out.map(toDto);
 }
+
 

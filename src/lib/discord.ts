@@ -1,4 +1,5 @@
 import { getSettings, type Settings } from "@/lib/db";
+import { resolvePublicBaseUrl } from "@/lib/public-url";
 
 const DISCORD_WEBHOOK_RE =
   /^https:\/\/((canary|ptb)\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/i;
@@ -18,7 +19,7 @@ const DEFAULT_AVATAR_URL =
   "https://raw.githubusercontent.com/KevinGuest/polarr/main/public/polarr-icon.png";
 
 function avatarUrl(settings: Settings) {
-  const base = settings.publicUrl.trim().replace(/\/$/, "");
+  const base = resolvePublicBaseUrl(settings);
   if (base) return `${base}/polarr-icon.png`;
   return DEFAULT_AVATAR_URL;
 }

@@ -1,6 +1,17 @@
 import nodemailer from "nodemailer";
-import { getSettings, smtpConfigured, type Settings } from "@/lib/db";
+import {
+  brandLogoAttachment,
+  emailFromAddress,
+  emailLogoSrc,
+} from "@/lib/brand-logo";
+import {
+  getEmailTemplates,
+  getSettings,
+  smtpConfigured,
+  type Settings,
+} from "@/lib/db";
 import { buildInviteEmail } from "@/lib/invite-email";
+import { applyEmailTemplate, escapeHtml } from "@/lib/email-templates";
 
 export { buildInviteEmail } from "@/lib/invite-email";
 
@@ -19,6 +30,11 @@ function transporter(settings: Settings) {
   });
 }
 
+function mailAttachments() {
+  const logo = brandLogoAttachment();
+  return logo ? [logo] : undefined;
+}
+
 export async function sendInviteEmail(input: {
   to: string;
   code: string;
@@ -30,21 +46,27 @@ export async function sendInviteEmail(input: {
   if (!smtpConfigured(settings)) {
     throw new Error("Email service has not been set up");
   }
-  const content = buildInviteEmail({
-    to: input.to,
-    code: input.code,
-    joinUrl: input.joinUrl,
-    serverName: settings.serverName,
-    invitedBy: input.invitedBy,
-    expiresAt: input.expiresAt,
-    from: settings.smtpFrom,
-  });
+  const templates = getEmailTemplates();
+  const content = buildInviteEmail(
+    {
+      to: input.to,
+      code: input.code,
+      joinUrl: input.joinUrl,
+      serverName: settings.serverName,
+      invitedBy: input.invitedBy,
+      expiresAt: input.expiresAt,
+      from: settings.smtpFrom,
+      logoUrl: emailLogoSrc({ settings }),
+    },
+    templates.invite,
+  );
   await transporter(settings).sendMail({
-    from: settings.smtpFrom,
+    from: emailFromAddress(settings),
     to: input.to,
     subject: content.subject,
     text: content.text,
     html: content.html,
+    attachments: mailAttachments(),
   });
   return content;
 }
@@ -64,43 +86,36 @@ export async function sendSmtpTestEmail(input: {
   if (!to) throw new Error("No recipient email");
   const name = (input.recipientName || "").trim() || "admin";
   const server = settings.serverName.trim() || "Polarr";
-  const subject = `${server} — SMTP test`;
-  const text = [
-    `Hi ${name},`,
-    "",
-    `This is a test message from ${server}.`,
-    "If you received it, SMTP is configured correctly.",
-    "",
-    `Host: ${settings.smtpHost}`,
-    `Port: ${settings.smtpPort}`,
-    `From: ${settings.smtpFrom}`,
-    `Secure: ${settings.smtpSecure ? "yes" : "no"}`,
-  ].join("\n");
-  const html = `
-    <p>Hi ${escapeHtml(name)},</p>
-    <p>This is a test message from <strong>${escapeHtml(server)}</strong>.</p>
-    <p>If you received it, SMTP is configured correctly.</p>
-    <ul>
-      <li>Host: ${escapeHtml(settings.smtpHost)}</li>
-      <li>Port: ${settings.smtpPort}</li>
-      <li>From: ${escapeHtml(settings.smtpFrom)}</li>
-      <li>Secure: ${settings.smtpSecure ? "yes" : "no"}</li>
-    </ul>
-  `.trim();
-  await transporter(settings).sendMail({
+  const template = getEmailTemplates().smtpTest;
+  const logoUrl = emailLogoSrc({ settings });
+  const plain = {
+    serverName: server,
+    recipientName: name,
+    host: settings.smtpHost,
+    port: String(settings.smtpPort),
     from: settings.smtpFrom,
+    secure: settings.smtpSecure ? "yes" : "no",
+    logoUrl,
+  };
+  const htmlVars = {
+    serverName: escapeHtml(server),
+    recipientName: escapeHtml(name),
+    host: escapeHtml(settings.smtpHost),
+    port: String(settings.smtpPort),
+    from: escapeHtml(settings.smtpFrom),
+    secure: settings.smtpSecure ? "yes" : "no",
+    logoUrl,
+  };
+  const subject = applyEmailTemplate(template.subject, plain);
+  const text = applyEmailTemplate(template.text, plain);
+  const html = applyEmailTemplate(template.html, htmlVars);
+  await transporter(settings).sendMail({
+    from: emailFromAddress(settings),
     to,
     subject,
     text,
     html,
+    attachments: mailAttachments(),
   });
   return { to, subject };
-}
-
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }

@@ -26,6 +26,11 @@ import {
   type DownloadQuality,
 } from "./download-quality";
 import {
+  parseEmailTemplatesJson,
+  serializeEmailTemplateOverrides,
+  type EmailTemplatesMap,
+} from "./email-templates";
+import {
   matchSearchQueries,
   namesMatch,
   primaryArtistName,
@@ -74,6 +79,11 @@ export type Settings = {
   discordClientSecret: string;
   /** When a catalog track is played live, also acquire it into the library. */
   saveOnPlay: boolean;
+  /**
+   * Auto library scan interval in minutes.
+   * 0 = off; otherwise 15 / 30 / 60. Env POLARR_LIBRARY_SCAN_MINUTES overrides.
+   */
+  libraryScanMinutes: number;
 };
 
 export type MediaType = "artist" | "album" | "track";
@@ -925,6 +935,14 @@ export function getSettings(): Settings {
       process.env.POLARR_DISCORD_CLIENT_SECRET ||
       "",
     saveOnPlay: getSetting("saveOnPlay", "true") !== "false",
+    libraryScanMinutes: (() => {
+      const raw = getSetting("libraryScanMinutes", "30");
+      const n = Number.parseInt(raw, 10);
+      if (!Number.isFinite(n) || n <= 0) return 0;
+      if (n <= 15) return 15;
+      if (n <= 30) return 30;
+      return 60;
+    })(),
   };
 }
 
@@ -958,12 +976,24 @@ export function updateSettings(partial: Partial<Settings>): Settings {
   setSetting("discordClientId", next.discordClientId);
   setSetting("discordClientSecret", next.discordClientSecret);
   setSetting("saveOnPlay", String(next.saveOnPlay));
+  setSetting("libraryScanMinutes", String(next.libraryScanMinutes));
   return next;
 }
 
 export function smtpConfigured(settings?: Settings): boolean {
   const s = settings ?? getSettings();
   return Boolean(s.smtpHost.trim() && s.smtpFrom.trim() && s.smtpPort > 0);
+}
+
+export function getEmailTemplates(): EmailTemplatesMap {
+  return parseEmailTemplatesJson(getSetting("emailTemplates", ""));
+}
+
+export function saveEmailTemplates(
+  templates: EmailTemplatesMap,
+): EmailTemplatesMap {
+  setSetting("emailTemplates", serializeEmailTemplateOverrides(templates));
+  return getEmailTemplates();
 }
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
@@ -3861,6 +3891,30 @@ export function listUserPlaylists(userId: string): PlaylistRow[] {
   ).map(mapPlaylistRow);
 }
 
+/** All user-created playlists on the server (admin / staff). */
+export function listAllUserPlaylists(): (PlaylistRow & {
+  ownerUsername: string;
+})[] {
+  return (
+    getDb()
+      .prepare(
+        `SELECT p.id, p.user_id as userId, p.name,
+                p.description as description,
+                p.created_at as createdAt, p.updated_at as updatedAt,
+                p.cover_path as coverPath, p.folder_id as folderId,
+                (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlist_id = p.id) as trackCount,
+                COALESCE(u.username, 'Unknown') as ownerUsername
+         FROM playlists p
+         LEFT JOIN users u ON u.id = p.user_id
+         ORDER BY p.updated_at DESC`,
+      )
+      .all() as Record<string, unknown>[]
+  ).map((row) => ({
+    ...mapPlaylistRow(row),
+    ownerUsername: String(row.ownerUsername || "Unknown"),
+  }));
+}
+
 export function listUserPlaylistsInFolder(
   userId: string,
   folderId: string | null,
@@ -4163,6 +4217,24 @@ export function deletePlaylist(
     existing.id,
     userId,
   );
+  if (cover) {
+    try {
+      fs.unlinkSync(cover);
+    } catch {
+      /* ignore */
+    }
+  }
+  return { ok: true };
+}
+
+/** Staff delete — any user's playlist by id. */
+export function adminDeletePlaylist(
+  playlistId: string,
+): { ok: boolean; error?: string } {
+  const existing = getPlaylistById(playlistId);
+  if (!existing) return { ok: false, error: "Playlist not found" };
+  const cover = getPlaylistCoverPathById(existing.id);
+  getDb().prepare(`DELETE FROM playlists WHERE id = ?`).run(existing.id);
   if (cover) {
     try {
       fs.unlinkSync(cover);
@@ -4816,6 +4888,57 @@ export function listRecentPlays(
     ...mapTrack(row),
     playedAt: String(row.playedAt),
     liked: Number(row.liked) === 1,
+  }));
+}
+
+/**
+ * Credited listens for taste / Explore ML — includes listen depth.
+ * One row per track (latest play), newest first.
+ */
+export function listUserListenSignals(
+  userId: string,
+  limit = 250,
+): {
+  trackId: string;
+  title: string;
+  artist: string;
+  album: string;
+  playedAt: string;
+  listenedSeconds: number;
+}[] {
+  if (!userId) return [];
+  const rows = getDb()
+    .prepare(
+      `SELECT p.track_id as trackId,
+              t.title as title,
+              t.artist as artist,
+              t.album as album,
+              MAX(p.played_at) as playedAt,
+              MAX(COALESCE(p.listened_seconds, 30)) as listenedSeconds
+       FROM play_history p
+       INNER JOIN tracks t ON t.id = p.track_id
+       WHERE p.user_id = ?
+         AND (p.listened_seconds IS NULL OR p.listened_seconds >= 15)
+       GROUP BY p.track_id
+       ORDER BY playedAt DESC
+       LIMIT ?`,
+    )
+    .all(userId, limit) as {
+    trackId: string;
+    title: string;
+    artist: string;
+    album: string;
+    playedAt: string;
+    listenedSeconds: number;
+  }[];
+
+  return rows.map((r) => ({
+    trackId: String(r.trackId || ""),
+    title: String(r.title || ""),
+    artist: String(r.artist || ""),
+    album: String(r.album || ""),
+    playedAt: String(r.playedAt || ""),
+    listenedSeconds: Math.max(15, Number(r.listenedSeconds) || 30),
   }));
 }
 

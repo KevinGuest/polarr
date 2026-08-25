@@ -228,7 +228,7 @@ export function NowPlayingBar() {
             <BarTooltip
               label={
                 playbackQuality(track) === "youtube"
-                  ? "Playing via YouTube fallback"
+                  ? "Playing via Youtube"
                   : "Playing from Polarr library"
               }
             >

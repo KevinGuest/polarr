@@ -11,9 +11,9 @@ import {
 import Link from "next/link";
 
 /** How many equal-width tiles fit in one row (no horizontal scroll). */
-export function useFitCount(minItemPx = 144, gapPx = 20) {
+export function useFitCount(minItemPx = 128, gapPx = 16) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const [count, setCount] = useState(6);
+  const [count, setCount] = useState(8);
 
   const measure = useCallback(() => {
     const el = ref.current;
@@ -107,8 +107,8 @@ export function MediaShelfRow({
   seeAllHref,
   onSeeAll,
   itemCount,
-  minItemPx = 144,
-  gapPx = 20,
+  minItemPx = 128,
+  gapPx = 16,
   empty,
   children,
 }: {
@@ -125,7 +125,10 @@ export function MediaShelfRow({
   children: (visible: number) => ReactNode;
 }) {
   const { ref, count } = useFitCount(minItemPx, gapPx);
-  const showSeeAll = Boolean((seeAllHref || onSeeAll) && itemCount > count);
+  const visible = Math.min(count, Math.max(itemCount, 0));
+  // Always offer Show all when a destination exists and the shelf has items
+  // (not only when the row overflows).
+  const showSeeAll = Boolean((seeAllHref || onSeeAll) && itemCount > 0);
 
   return (
     <section className="space-y-4">
@@ -142,14 +145,15 @@ export function MediaShelfRow({
       ) : (
         <div
           ref={ref}
-          className="grid justify-start"
+          className="grid w-full"
           style={{
             gap: gapPx,
-            // Cap tile width so covers don't balloon on wide layouts
-            gridTemplateColumns: `repeat(${count}, minmax(0, 9rem))`,
+            // Equal columns fill the row — leftover width used to grow tiles,
+            // not left as empty space on the right.
+            gridTemplateColumns: `repeat(${visible}, minmax(0, 1fr))`,
           }}
         >
-          {children(count)}
+          {children(visible)}
         </div>
       )}
     </section>
@@ -168,7 +172,7 @@ export function MediaShelfGrid({
     <div
       className={
         className ??
-        "grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7"
+        "grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 2xl:grid-cols-8"
       }
     >
       {children}

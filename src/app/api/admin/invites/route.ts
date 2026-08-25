@@ -11,6 +11,7 @@ import {
   smtpConfigured,
 } from "@/lib/db";
 import { sendInviteEmail } from "@/lib/mail";
+import { requirePublicBaseUrl } from "@/lib/public-url";
 import { scrambleUserId } from "@/lib/user-id";
 
 export const dynamic = "force-dynamic";
@@ -54,15 +55,27 @@ export async function POST(req: Request) {
     return json({ error: "Valid email is required" }, { status: 400 });
   }
 
+  let base: string;
+  try {
+    base = requirePublicBaseUrl(settings, req);
+  } catch (err) {
+    return json(
+      {
+        error:
+          err instanceof Error
+            ? err.message
+            : "Public URL is required for invite emails",
+      },
+      { status: 400 },
+    );
+  }
+
   const expiresInDays = parsed.data.expiresInDays ?? 14;
   const invite = createInvite(admin.id, {
     expiresInDays,
     emailedTo: parsed.data.email,
   });
 
-  const base =
-    settings.publicUrl.trim().replace(/\/$/, "") ||
-    new URL(req.url).origin;
   const joinUrl = `${base}/join?code=${encodeURIComponent(invite.code)}`;
 
   try {
@@ -132,9 +145,20 @@ export async function PATCH(req: Request) {
     );
   }
 
-  const base =
-    settings.publicUrl.trim().replace(/\/$/, "") ||
-    new URL(req.url).origin;
+  let base: string;
+  try {
+    base = requirePublicBaseUrl(settings, req);
+  } catch (err) {
+    return json(
+      {
+        error:
+          err instanceof Error
+            ? err.message
+            : "Public URL is required for invite emails",
+      },
+      { status: 400 },
+    );
+  }
   const joinUrl = `${base}/join?code=${encodeURIComponent(invite.code)}`;
 
   try {

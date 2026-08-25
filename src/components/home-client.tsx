@@ -86,11 +86,15 @@ type MoreFromShelf = {
   items: MoreFromItem[];
 };
 
-function ShelfSkeleton({ count = 6 }: { count?: number }) {
+function ShelfSkeleton({ count = 8 }: { count?: number }) {
   return (
-    <div className="flex gap-5" aria-busy>
+    <div
+      className="grid w-full gap-4"
+      style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}
+      aria-busy
+    >
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="w-36 shrink-0 space-y-2.5">
+        <div key={i} className="min-w-0 space-y-2.5">
           <Skeleton className="aspect-square w-full rounded-md" />
           <Skeleton className="h-3.5 w-4/5" />
           <Skeleton className="h-3 w-3/5" />
@@ -265,7 +269,7 @@ export function HomeClient() {
 
       <MediaShelfRow
         title="Explore"
-        seeAllHref="/browse/releases"
+        seeAllHref="/browse/explore"
         itemCount={catalog.length}
         empty={
           loading ? (
@@ -282,6 +286,7 @@ export function HomeClient() {
 
       <MediaShelfRow
         title="Artists"
+        seeAllHref="/browse/artists"
         itemCount={artists.length}
         empty={
           loading ? (

@@ -24,7 +24,7 @@ type Track = {
   addedAt?: string;
 };
 
-type Mode = "tracks" | "albums" | "playlists";
+type Mode = "tracks" | "albums";
 
 const COPY: Record<
   Mode,
@@ -39,12 +39,6 @@ const COPY: Record<
     title: "Albums",
     blurb: "Albums grouped from library tracks.",
     empty: "No albums yet.",
-  },
-  playlists: {
-    title: "Playlists",
-    blurb:
-      "Public playlist shelves derived from library albums for now. Custom playlists will land here later.",
-    empty: "No playlist shelves yet.",
   },
 };
 
@@ -289,10 +283,9 @@ export function AdminMediaClient({ mode }: { mode: Mode }) {
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {a.tracks.length} track{a.tracks.length === 1 ? "" : "s"}
-                  {mode === "playlists" ? " · library shelf" : ""}
                 </p>
               </div>
-              {mode === "albums" && canDeleteFiles ? (
+              {canDeleteFiles ? (
                 <Button
                   size="icon"
                   variant="ghost"

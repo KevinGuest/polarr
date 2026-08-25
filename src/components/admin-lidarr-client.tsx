@@ -15,11 +15,16 @@ import {
 } from "@/components/ui/card";
 import { toastError, toastSaved } from "@/lib/toast";
 
+const SCAN_PRESETS = [0, 15, 30, 60] as const;
+type ScanMinutes = (typeof SCAN_PRESETS)[number];
+
 export function AdminLidarrClient() {
   const [lidarrUrl, setLidarrUrl] = useState("");
   const [lidarrApiKey, setLidarrApiKey] = useState("");
   const [musicRoot, setMusicRoot] = useState("");
   const [saveOnPlay, setSaveOnPlay] = useState(true);
+  const [libraryScanMinutes, setLibraryScanMinutes] =
+    useState<ScanMinutes>(30);
   const [status, setStatus] = useState("…");
   const [forbidden, setForbidden] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -39,6 +44,12 @@ export function AdminLidarrClient() {
       setLidarrApiKey(settings.lidarrApiKey || "");
       setMusicRoot(settings.musicRoot || "");
       setSaveOnPlay(settings.saveOnPlay !== false);
+      const scan = Number(settings.libraryScanMinutes);
+      setLibraryScanMinutes(
+        SCAN_PRESETS.includes(scan as ScanMinutes)
+          ? (scan as ScanMinutes)
+          : 30,
+      );
 
       const st = await fetch("/api/admin/stats")
         .then((r) => (r.ok ? r.json() : null))
@@ -109,6 +120,24 @@ export function AdminLidarrClient() {
     toastSaved();
   }
 
+  async function saveLibraryScan() {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ libraryScanMinutes }),
+    });
+    if (res.status === 403 || res.status === 401) {
+      setForbidden(true);
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      toastError(typeof data.error === "string" ? data.error : "Save failed");
+      return;
+    }
+    toastSaved();
+  }
+
   if (forbidden) {
     return (
       <div className="space-y-3">
@@ -151,8 +180,8 @@ export function AdminLidarrClient() {
             <CardHeader>
               <CardTitle>Lidarr</CardTitle>
               <CardDescription>
-                Optional catalog and request connection. Music is scanned from
-                the root path below when files land.
+                Optional catalog and request connection. Music files under the
+                root path are indexed by the automatic library scan.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -190,6 +219,37 @@ export function AdminLidarrClient() {
                   Test connection
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Library scan</CardTitle>
+              <CardDescription>
+                Automatically index new files under the music root (and Polarr
+                downloads). First scan runs shortly after startup.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="library-scan-interval">Scan every</Label>
+                <select
+                  id="library-scan-interval"
+                  value={libraryScanMinutes}
+                  onChange={(e) =>
+                    setLibraryScanMinutes(
+                      Number(e.target.value) as ScanMinutes,
+                    )
+                  }
+                  className="flex h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                >
+                  <option value={15}>15 minutes</option>
+                  <option value={30}>30 minutes</option>
+                  <option value={60}>1 hour</option>
+                  <option value={0}>Off (manual only)</option>
+                </select>
+              </div>
+              <Button onClick={() => void saveLibraryScan()}>Save</Button>
             </CardContent>
           </Card>
 

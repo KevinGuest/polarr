@@ -6,6 +6,7 @@ import {
   discordOAuthConfigured,
   getSettings,
 } from "@/lib/db";
+import { resolvePublicBaseUrl } from "@/lib/public-url";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ const OAUTH_STATE_COOKIE = "polarr_discord_oauth";
 
 function redirectUri(): string {
   const s = getSettings();
-  const base = (s.publicUrl || "").trim().replace(/\/$/, "");
+  const base = resolvePublicBaseUrl(s);
   if (base) return `${base}/api/discord/callback`;
   return "http://localhost:3000/api/discord/callback";
 }

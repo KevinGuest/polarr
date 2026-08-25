@@ -28,6 +28,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { copyTextToClipboard, copyTextToClipboardSync } from "@/lib/clipboard";
+import { POLARR_LOGO_PUBLIC_URL } from "@/lib/email-templates";
+import type { EmailTemplateBody } from "@/lib/email-templates";
 import { buildInviteEmail } from "@/lib/invite-email";
 import { toastError, toastSuccess } from "@/lib/toast";
 
@@ -60,6 +63,9 @@ export function AdminInvitesClient() {
   const [showPreview, setShowPreview] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [inviteTemplate, setInviteTemplate] = useState<EmailTemplateBody | null>(
+    null,
+  );
 
   async function refresh() {
     const res = await fetch("/api/admin/invites");
@@ -80,6 +86,31 @@ export function AdminInvitesClient() {
     void refresh();
   }, []);
 
+  useEffect(() => {
+    if (!dialogOpen) return;
+    let cancelled = false;
+    void fetch("/api/admin/email-templates", { cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        const tpl = data?.templates?.invite;
+        if (
+          !cancelled &&
+          tpl &&
+          typeof tpl.subject === "string" &&
+          typeof tpl.html === "string"
+        ) {
+          setInviteTemplate(tpl);
+        }
+      })
+      .catch(() => {
+        /* keep default builder */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dialogOpen]);
+
   const pageCount = Math.max(1, Math.ceil(invites.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
   const pageInvites = useMemo(() => {
@@ -98,16 +129,20 @@ export function AdminInvitesClient() {
     const expiresAt = new Date(
       Date.now() + 14 * 24 * 60 * 60 * 1000,
     ).toISOString();
-    return buildInviteEmail({
-      to: email.trim() || "friend@example.com",
-      code,
-      joinUrl: `${origin}/join?code=${encodeURIComponent(code)}`,
-      serverName,
-      invitedBy: "you",
-      expiresAt,
-      from: "polarr@example.com",
-    });
-  }, [email, serverName]);
+    return buildInviteEmail(
+      {
+        to: email.trim() || "friend@example.com",
+        code,
+        joinUrl: `${origin}/join?code=${encodeURIComponent(code)}`,
+        serverName,
+        invitedBy: "you",
+        expiresAt,
+        from: "polarr@example.com",
+        logoUrl: POLARR_LOGO_PUBLIC_URL,
+      },
+      inviteTemplate || undefined,
+    );
+  }, [email, serverName, inviteTemplate]);
 
   async function sendInvite() {
     setCreating(true);
@@ -169,13 +204,24 @@ export function AdminInvitesClient() {
   }
 
   async function copyLink(code: string) {
-    const url = `${window.location.origin}/join?code=${encodeURIComponent(code)}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      toastSuccess("Link copied");
-    } catch {
+    const origin =
+      typeof window !== "undefined" && window.location?.origin
+        ? window.location.origin
+        : "";
+    if (!origin || !code.trim()) {
       toastError("Could not copy link");
+      return;
     }
+    const url = `${origin}/join?code=${encodeURIComponent(code.trim())}`;
+    // Sync path first: DropdownMenu closes on select and often makes
+    // navigator.clipboard.writeText reject after the await boundary.
+    if (copyTextToClipboardSync(url)) {
+      toastSuccess("Link copied");
+      return;
+    }
+    const ok = await copyTextToClipboard(url);
+    if (ok) toastSuccess("Link copied");
+    else toastError("Could not copy link");
   }
 
   if (forbidden) {

@@ -1,5 +1,5 @@
-import { AdminMediaClient } from "@/components/admin-media-client";
+import { AdminPlaylistsClient } from "@/components/admin-playlists-client";
 
 export default function AdminPlaylistsPage() {
-  return <AdminMediaClient mode="playlists" />;
+  return <AdminPlaylistsClient />;
 }

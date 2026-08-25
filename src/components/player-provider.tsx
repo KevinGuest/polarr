@@ -141,6 +141,59 @@ async function fetchLikedPlayerTracks(): Promise<PlayerTrack[]> {
   }
 }
 
+/** Taste / listen-affinity autoplay filler when the queue runs dry. */
+async function fetchTasteAutoplayTracks(
+  current: PlayerTrack,
+  excludeIds: string[],
+  limit = 24,
+): Promise<PlayerTrack[]> {
+  try {
+    const qs = new URLSearchParams();
+    qs.set("limit", String(limit));
+    if (
+      !current.id.startsWith("live:") &&
+      !current.id.startsWith("stream:") &&
+      !current.id.startsWith("catalog:")
+    ) {
+      qs.set("trackId", current.id);
+    }
+    const artist =
+      (current.resolveArtist || "").trim() ||
+      primaryArtistName(current.artist) ||
+      current.artist;
+    if (artist) qs.set("artist", artist);
+    if (current.album) qs.set("album", current.album);
+    if (excludeIds.length) {
+      qs.set("exclude", excludeIds.slice(0, 100).join(","));
+    }
+    const res = await fetch(`/api/radio?${qs.toString()}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const list = Array.isArray(data.tracks) ? data.tracks : [];
+    return list.map(
+      (t: {
+        id: string;
+        title: string;
+        artist: string;
+        album?: string;
+        coverPath?: string | null;
+      }) =>
+        withPlayerMeta({
+          id: t.id,
+          title: t.title,
+          artist: t.artist,
+          album: t.album || "",
+          coverPath: t.coverPath,
+          quality: "local",
+        }),
+    );
+  } catch {
+    return [];
+  }
+}
+
 export type PlayerPanelId = "lyrics" | "devices" | "nowPlaying" | "queue";
 
 export type QueueTab = "queue" | "recent";
@@ -743,27 +796,46 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const q = queueRef.current;
       const idx = q.findIndex((t) => t.id === current.id);
       const queued = idx >= 0 ? q[idx + 1] : undefined;
-      if (queued) return queued;
-
-      // Empty upcoming — Liked Songs only when shuffle is on
-      if (!shuffleRef.current) {
-        return null;
+      if (queued) {
+        // Soft top-up: keep a taste-based runway ahead of the playhead
+        const remaining = idx >= 0 ? q.length - idx - 1 : 0;
+        if (remaining <= 2) {
+          void topUpQueueFromTasteRef.current(current);
+        }
+        return queued;
       }
 
-      const liked = await fetchLikedPlayerTracks();
-      const rest = shuffleTracks(liked.filter((t) => t.id !== current.id));
-      if (rest.length > 0) {
-        const nextQ = [current, ...rest];
+      // Nothing upcoming — grow the queue from this user’s listen taste
+      const exclude = new Set(q.map((t) => t.id));
+      exclude.add(current.id);
+      let fill = await fetchTasteAutoplayTracks(
+        current,
+        [...exclude],
+        24,
+      );
+      fill = fill.filter((t) => !exclude.has(t.id));
+
+      // Fallback: liked songs when the library/taste pool is thin
+      if (fill.length === 0) {
+        const liked = await fetchLikedPlayerTracks();
+        fill = shuffleTracks(liked.filter((t) => !exclude.has(t.id)));
+      }
+
+      if (fill.length > 0) {
+        const nextQ =
+          idx >= 0
+            ? [...q.slice(0, idx + 1), ...fill]
+            : [current, ...fill];
         queueRef.current = nextQ;
         setQueue(nextQ);
         publishRef.current({
           queue: nextQ,
           ownerId: tabIdRef.current,
         });
-        return rest[0]!;
+        return fill[0]!;
       }
 
-      // No likes — restore pre-replace queue, then stop
+      // No autoplay material — restore pre-replace queue if we had one
       const original = fallbackQueueRef.current;
       if (original?.length) {
         fallbackQueueRef.current = null;
@@ -781,6 +853,40 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const advanceTargetRef = useRef(resolveAdvanceTarget);
   advanceTargetRef.current = resolveAdvanceTarget;
+
+  const autoplayTopUpBusyRef = useRef(false);
+  const topUpQueueFromTasteRef = useRef(
+    async (_current: PlayerTrack): Promise<void> => {},
+  );
+  topUpQueueFromTasteRef.current = async (current: PlayerTrack) => {
+    if (autoplayTopUpBusyRef.current) return;
+    autoplayTopUpBusyRef.current = true;
+    try {
+      const q = queueRef.current;
+      const idx = q.findIndex((t) => t.id === current.id);
+      const remaining = idx >= 0 ? q.length - idx - 1 : q.length;
+      if (remaining > 2) return;
+
+      const exclude = new Set(q.map((t) => t.id));
+      exclude.add(current.id);
+      const fill = (
+        await fetchTasteAutoplayTracks(current, [...exclude], 16)
+      ).filter((t) => !exclude.has(t.id));
+      if (fill.length === 0) return;
+
+      const head = idx >= 0 ? q.slice(0, idx + 1) : [];
+      const upcoming = (idx >= 0 ? q.slice(idx + 1) : q).concat(fill);
+      const capped = [...head, ...upcoming.slice(0, 40)];
+      queueRef.current = capped;
+      setQueue(capped);
+      publishRef.current({
+        queue: capped,
+        ownerId: tabIdRef.current,
+      });
+    } finally {
+      autoplayTopUpBusyRef.current = false;
+    }
+  };
 
   const claimAndPlay = useCallback(
     (raw: PlayerTrack, nextQueue?: PlayerTrack[], gen?: number) => {

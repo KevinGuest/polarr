@@ -3,10 +3,12 @@ import { getSettings } from "@/lib/db";
 import { pickMoreFromArtists } from "@/lib/artist-catalog";
 import { buildHomeArtists } from "@/lib/home-artists";
 import { LidarrClient } from "@/lib/lidarr";
+import { tasteArtistNames } from "@/lib/made-for";
 import {
-  blendTrendingWithTaste,
-  tasteArtistNames,
-} from "@/lib/made-for";
+  expandTasteNeighborhood,
+  rankExploreAlbums,
+  type ExploreAlbum,
+} from "@/lib/explore-recommend";
 import {
   browseReleaseGroups,
   browseReleaseGroupsForArtist,
@@ -70,11 +72,12 @@ export async function GET() {
   let lidarrArtists: Awaited<ReturnType<LidarrClient["catalogArtists"]>> = [];
   let lidarrError: string | null = null;
 
-  const tasteNames = user ? tasteArtistNames(user.id, 6) : [];
+  const tasteNames = user ? tasteArtistNames(user.id, 12) : [];
 
   const [
     mbNew,
     tasteAlbums,
+    neighborhood,
     trending,
     lidarrBundle,
     moreFrom,
@@ -84,14 +87,25 @@ export async function GET() {
     (async () => {
       if (tasteNames.length === 0) return [] as MbCatalogRelease[];
       const batches = await Promise.all(
-        tasteNames.slice(0, 5).map((name) =>
-          browseReleaseGroupsForArtist(name, 5).catch(
+        tasteNames.slice(0, 8).map((name) =>
+          browseReleaseGroupsForArtist(name, 6).catch(
             () => [] as MbCatalogRelease[],
           ),
         ),
       );
       return batches.flat();
     })(),
+    user
+      ? expandTasteNeighborhood(user.id, 8).catch(() => ({
+          albums: [] as ExploreAlbum[],
+          graph: new Map<string, number>(),
+          heardAlbums: new Set<string>(),
+        }))
+      : Promise.resolve({
+          albums: [] as ExploreAlbum[],
+          graph: new Map<string, number>(),
+          heardAlbums: new Set<string>(),
+        }),
     fetchTrendingAlbums(28).catch(() => []),
     (async () => {
       if (!client) return null;
@@ -120,7 +134,7 @@ export async function GET() {
 
   const artists = await buildHomeArtists({
     userId: user?.id,
-    limit: 24,
+    limit: 48,
     lidarrArtists,
   }).catch(() => [] as Awaited<ReturnType<typeof buildHomeArtists>>);
 
@@ -150,7 +164,7 @@ export async function GET() {
     releases.slice(0, 12).map((r) => (r.foreignAlbumId || r.id).toLowerCase()),
   );
 
-  // Explore = charts (trending) blended with preference pool
+  // Explore = listen affinity + related-artist neighborhood, charts as spice
   const trendingCards: ReleaseCard[] = trending.map((t) => ({
     id: t.id,
     title: t.title,
@@ -164,18 +178,33 @@ export async function GET() {
   }));
 
   const preferencePool = mergeByKey([
+    ...neighborhood.albums.map(
+      (a): ReleaseCard => ({
+        id: a.id,
+        title: a.title,
+        artist: a.artist,
+        year: a.year,
+        image: a.image,
+        foreignAlbumId: a.foreignAlbumId,
+        releaseDate: a.releaseDate,
+        hasFile: false,
+        monitored: false,
+      }),
+    ),
     ...tasteAlbums.map(fromMb),
     ...mbNew.map(fromMb),
   ]).filter((r) => !latestKeys.has((r.foreignAlbumId || r.id).toLowerCase()));
 
-  const catalog = blendTrendingWithTaste(
-    user?.id,
-    trendingCards.filter(
+  const catalog = rankExploreAlbums({
+    userId: user?.id,
+    trending: trendingCards.filter(
       (r) => !latestKeys.has((r.foreignAlbumId || r.id).toLowerCase()),
     ),
     preferencePool,
-    28,
-  );
+    graph: neighborhood.graph.size > 0 ? neighborhood.graph : undefined,
+    heardAlbums: neighborhood.heardAlbums,
+    limit: 36,
+  });
 
   const moreFromDto = moreFromFresh.map((cat) => ({
     artist: cat.artist,

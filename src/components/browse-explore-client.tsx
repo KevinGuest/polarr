@@ -13,46 +13,27 @@ import {
 } from "@/components/media-shelf";
 import { Skeleton } from "@/components/ui/skeleton";
 
-function catalogAlbumHref(r: {
-  title: string;
-  artist: string;
-  foreignAlbumId?: string;
-  lidarrAlbumId?: number;
-}) {
-  return albumHref({
-    title: r.title,
-    artist: r.artist,
-    foreignAlbumId: r.foreignAlbumId,
-    lidarrAlbumId: r.lidarrAlbumId,
-  });
-}
-
 type Release = {
   id: string;
   title: string;
   artist: string;
-  year?: number;
   image?: string;
   foreignAlbumId?: string;
-  foreignArtistId?: string;
-  releaseDate?: string;
-  hasFile: boolean;
-  monitored: boolean;
   lidarrAlbumId?: number;
 };
 
-export function BrowseReleasesClient() {
+export function BrowseExploreClient() {
   const router = useRouter();
-  const [releases, setReleases] = useState<Release[]>([]);
+  const [items, setItems] = useState<Release[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/discover");
+      const res = await fetch("/api/discover", { cache: "no-store" });
       const data = await res.json();
-      setReleases(Array.isArray(data.releases) ? data.releases : []);
+      setItems(Array.isArray(data.catalog) ? data.catalog : []);
       setError(data.lidarrError || null);
     } finally {
       setLoading(false);
@@ -74,7 +55,7 @@ export function BrowseReleasesClient() {
           <ArrowLeft className="size-4" />
         </Link>
         <div className="min-w-0 flex-1">
-          <ShelfHeader title="Latest releases" titleAs="h1" />
+          <ShelfHeader title="Explore" titleAs="h1" />
         </div>
       </div>
 
@@ -82,12 +63,12 @@ export function BrowseReleasesClient() {
         <p className="text-sm text-destructive">Lidarr: {error}</p>
       ) : null}
 
-      {loading && releases.length === 0 ? (
+      {loading && items.length === 0 ? (
         <div
-          className="grid grid-cols-2 gap-x-5 gap-y-8 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"
+          className="grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7"
           aria-busy="true"
         >
-          {Array.from({ length: 10 }).map((_, i) => (
+          {Array.from({ length: 14 }).map((_, i) => (
             <div key={i} className="space-y-2.5">
               <Skeleton className="aspect-square w-full rounded-md" />
               <Skeleton className="h-3.5 w-4/5" />
@@ -95,14 +76,19 @@ export function BrowseReleasesClient() {
             </div>
           ))}
         </div>
-      ) : releases.length === 0 ? (
+      ) : items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No albums yet. Connect Lidarr or wait for MusicBrainz catalog.
+          What’s trending, nudged by what you play and like.
         </p>
       ) : (
         <MediaShelfGrid>
-          {releases.map((r) => {
-            const href = catalogAlbumHref(r);
+          {items.map((r) => {
+            const href = albumHref({
+              title: r.title,
+              artist: r.artist,
+              foreignAlbumId: r.foreignAlbumId,
+              lidarrAlbumId: r.lidarrAlbumId,
+            });
             return (
               <MediaTileShell
                 key={r.id}

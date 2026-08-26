@@ -11,6 +11,7 @@ import {
   ShelfHeader,
 } from "@/components/media-shelf";
 import { Skeleton } from "@/components/ui/skeleton";
+import { fetchDiscoverFeed } from "@/lib/discover-client";
 
 type CatalogArtist = {
   name: string;
@@ -26,8 +27,7 @@ export function BrowseArtistsClient() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/discover", { cache: "no-store" });
-      const data = await res.json();
+      const data = await fetchDiscoverFeed();
       setArtists(Array.isArray(data.artists) ? data.artists : []);
     } finally {
       setLoading(false);

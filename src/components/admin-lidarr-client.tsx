@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { FileBrowserDialog } from "@/components/file-browser-dialog";
 import { toastError, toastSaved } from "@/lib/toast";
 
 const SCAN_PRESETS = [0, 15, 30, 60] as const;
@@ -25,20 +27,18 @@ type DetectedRoot = {
   exists: boolean;
 };
 
-const CUSTOM_ROOT = "__custom__";
-
 export function AdminLidarrClient() {
   const [lidarrUrl, setLidarrUrl] = useState("");
   const [lidarrApiKey, setLidarrApiKey] = useState("");
   const [musicRoot, setMusicRoot] = useState("");
   const [musicRoots, setMusicRoots] = useState<DetectedRoot[]>([]);
-  const [customMusicRoot, setCustomMusicRoot] = useState(false);
   const [saveOnPlay, setSaveOnPlay] = useState(true);
   const [libraryScanMinutes, setLibraryScanMinutes] =
     useState<ScanMinutes>(30);
   const [status, setStatus] = useState("…");
   const [forbidden, setForbidden] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [browserOpen, setBrowserOpen] = useState(false);
 
   function applySettings(settings: {
     lidarrUrl?: string;
@@ -56,9 +56,6 @@ export function AdminLidarrClient() {
       : [];
     setMusicRoots(detected);
     setMusicRoot(root);
-    setCustomMusicRoot(
-      Boolean(root) && !detected.some((d) => d.path === root),
-    );
     setSaveOnPlay(settings.saveOnPlay !== false);
     const scan = Number(settings.libraryScanMinutes);
     setLibraryScanMinutes(
@@ -275,47 +272,62 @@ export function AdminLidarrClient() {
             <CardHeader>
               <CardTitle>Music location</CardTitle>
               <CardDescription>
-                Folder Polarr scans and streams from. Detected from Lidarr root
-                folders and this container’s music mount — choose the one that
-                actually has your files.
+                Folder Polarr scans and streams from. Use Browse to pick a
+                folder inside this container, or choose a detected Lidarr /
+                mount path.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="music-root-select">Library folder</Label>
-                <select
-                  id="music-root-select"
-                  value={customMusicRoot ? CUSTOM_ROOT : musicRoot}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v === CUSTOM_ROOT) {
-                      setCustomMusicRoot(true);
-                      return;
-                    }
-                    setCustomMusicRoot(false);
-                    setMusicRoot(v);
-                  }}
-                  className="flex h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-                >
-                  <option value="">Select a folder…</option>
-                  {musicRoots.map((r) => (
-                    <option key={`${r.source}:${r.path}`} value={r.path}>
-                      {r.label}
-                      {r.exists ? "" : " (not visible here)"}
-                    </option>
-                  ))}
-                  <option value={CUSTOM_ROOT}>Custom path…</option>
-                </select>
-              </div>
-              {customMusicRoot ? (
-                <div className="space-y-2">
-                  <Label htmlFor="music-root-custom">Custom path</Label>
+                <Label htmlFor="music-root-path">Library folder</Label>
+                <div className="flex gap-2">
                   <Input
-                    id="music-root-custom"
+                    id="music-root-path"
                     value={musicRoot}
-                    onChange={(e) => setMusicRoot(e.target.value)}
+                    onChange={(e) => {
+                      setMusicRoot(e.target.value);
+                    }}
                     placeholder="/music"
+                    className="font-mono text-sm"
+                    autoComplete="off"
+                    spellCheck={false}
                   />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="shrink-0 gap-1.5"
+                    onClick={() => setBrowserOpen(true)}
+                  >
+                    <FolderOpen className="size-4" />
+                    Browse
+                  </Button>
+                </div>
+              </div>
+              {musicRoots.length > 0 ? (
+                <div className="space-y-2">
+                  <Label htmlFor="music-root-select">Detected folders</Label>
+                  <select
+                    id="music-root-select"
+                    value={
+                      musicRoots.some((r) => r.path === musicRoot)
+                        ? musicRoot
+                        : ""
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (!v) return;
+                      setMusicRoot(v);
+                    }}
+                    className="flex h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                  >
+                    <option value="">Quick pick…</option>
+                    {musicRoots.map((r) => (
+                      <option key={`${r.source}:${r.path}`} value={r.path}>
+                        {r.label}
+                        {r.exists ? "" : " (not visible here)"}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               ) : null}
               {musicRoot &&
@@ -327,6 +339,14 @@ export function AdminLidarrClient() {
                 </p>
               ) : null}
               <Button onClick={() => void saveMusicRoot()}>Save location</Button>
+              <FileBrowserDialog
+                open={browserOpen}
+                onOpenChange={setBrowserOpen}
+                initialPath={musicRoot || "/music"}
+                onSelect={(p) => {
+                  setMusicRoot(p);
+                }}
+              />
             </CardContent>
           </Card>
 

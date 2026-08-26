@@ -13,6 +13,16 @@ import {
 } from "@/components/media-shelf";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
+import {
+  fetchDiscoverFeed,
+  peekDiscoverCache,
+  seedDiscoverCache,
+} from "@/lib/discover-client";
+import type {
+  DiscoverMoreFromShelf,
+  DiscoverPayload,
+  DiscoverReleaseCard,
+} from "@/lib/discover-types";
 import { LISTEN_CREDITED_EVENT } from "@/lib/ui-events";
 import { formatTrackArtistLine } from "@/lib/utils";
 
@@ -30,19 +40,7 @@ function catalogAlbumHref(r: {
   });
 }
 
-type Release = {
-  id: string;
-  title: string;
-  artist: string;
-  year?: number;
-  image?: string;
-  foreignAlbumId?: string;
-  foreignArtistId?: string;
-  releaseDate?: string;
-  hasFile: boolean;
-  monitored: boolean;
-  lidarrAlbumId?: number;
-};
+type Release = DiscoverReleaseCard;
 
 type CatalogArtist = {
   name: string;
@@ -57,37 +55,8 @@ type OthersItem = PlayerTrack & {
   listeners?: { username: string; avatarUrl?: string | null }[];
 };
 
-type MoreFromItem =
-  | {
-      kind: "album";
-      id: string;
-      title: string;
-      subtitle: string;
-      artist: string;
-      album: string;
-      image?: string | null;
-      trackCount: number;
-      foreignAlbumId?: string;
-      lidarrAlbumId?: number;
-    }
-  | {
-      kind: "single" | "feature";
-      id: string;
-      title: string;
-      subtitle: string;
-      artist: string;
-      album?: string;
-      image?: string | null;
-      trackId: string;
-      duration?: number;
-      coverPath?: string | null;
-    };
-
-type MoreFromShelf = {
-  artist: string;
-  image?: string | null;
-  items: MoreFromItem[];
-};
+type MoreFromItem = DiscoverMoreFromShelf["items"][number];
+type MoreFromShelf = DiscoverMoreFromShelf;
 
 function packMoreFromRows(shelves: MoreFromShelf[]) {
   const rows: MoreFromShelf[][] = [];
@@ -150,22 +119,52 @@ function ShelfSkeleton({
   );
 }
 
-export function HomeClient() {
+function applyDiscover(
+  data: DiscoverPayload,
+  set: {
+    setCatalog: (v: Release[]) => void;
+    setMoreFrom: (v: MoreFromShelf[]) => void;
+    setReleases: (v: Release[]) => void;
+    setArtists: (v: CatalogArtist[]) => void;
+    setLidarrError: (v: string | null) => void;
+  },
+) {
+  set.setCatalog(Array.isArray(data.catalog) ? data.catalog : []);
+  set.setMoreFrom(Array.isArray(data.moreFrom) ? data.moreFrom : []);
+  set.setReleases(Array.isArray(data.releases) ? data.releases : []);
+  set.setArtists(Array.isArray(data.artists) ? data.artists : []);
+  set.setLidarrError(data.lidarrError || null);
+}
+
+export function HomeClient({
+  initialDiscover = null,
+}: {
+  initialDiscover?: DiscoverPayload | null;
+}) {
   const router = useRouter();
   const { play } = usePlayer();
-  const [moreFrom, setMoreFrom] = useState<MoreFromShelf[]>([]);
-  const [catalog, setCatalog] = useState<Release[]>([]);
-  const [releases, setReleases] = useState<Release[]>([]);
-  const [artists, setArtists] = useState<CatalogArtist[]>([]);
+  const seeded = initialDiscover ?? peekDiscoverCache();
+  const [moreFrom, setMoreFrom] = useState<MoreFromShelf[]>(
+    () => seeded?.moreFrom || [],
+  );
+  const [catalog, setCatalog] = useState<Release[]>(
+    () => seeded?.catalog || [],
+  );
+  const [releases, setReleases] = useState<Release[]>(
+    () => seeded?.releases || [],
+  );
+  const [artists, setArtists] = useState<CatalogArtist[]>(
+    () => seeded?.artists || [],
+  );
   const [others, setOthers] = useState<OthersItem[]>([]);
-  const [lidarrError, setLidarrError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [lidarrError, setLidarrError] = useState<string | null>(
+    () => seeded?.lidarrError || null,
+  );
+  const [loading, setLoading] = useState(!seeded);
 
   const loadOthers = useCallback(async () => {
     try {
-      const res = await fetch("/api/listening?limit=48", {
-        cache: "no-store",
-      });
+      const res = await fetch("/api/listening?limit=48");
       if (!res.ok) return;
       const data = await res.json();
       const next = Array.isArray(data.items) ? data.items : [];
@@ -177,27 +176,41 @@ export function HomeClient() {
     }
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/discover", { cache: "no-store" });
-      const data = await res.json();
-      setCatalog(Array.isArray(data.catalog) ? data.catalog : []);
-      setMoreFrom(Array.isArray(data.moreFrom) ? data.moreFrom : []);
-      setReleases(data.releases || []);
-      setArtists(Array.isArray(data.artists) ? data.artists : []);
-      setLidarrError(data.lidarrError || null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (opts?: { force?: boolean; background?: boolean }) => {
+      if (!opts?.background) setLoading(true);
+      try {
+        const data = await fetchDiscoverFeed({ force: opts?.force });
+        applyDiscover(data, {
+          setCatalog,
+          setMoreFrom,
+          setReleases,
+          setArtists,
+          setLidarrError,
+        });
+      } catch {
+        /* keep previous shelves */
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
-    void load();
+    if (initialDiscover) {
+      seedDiscoverCache(initialDiscover);
+    }
+    // Warm paint from SSR / module cache; refresh in background when stale.
+    if (seeded) {
+      void load({ force: true, background: true });
+    } else {
+      void load();
+    }
     void loadOthers();
     const t = window.setInterval(() => {
       void loadOthers();
-    }, 15_000);
+    }, 30_000);
     const onListen = () => {
       void loadOthers();
     };
@@ -206,7 +219,9 @@ export function HomeClient() {
       window.clearInterval(t);
       window.removeEventListener(LISTEN_CREDITED_EVENT, onListen);
     };
-  }, [load, loadOthers]);
+    // intentionally once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function playOthersTrack(item: OthersItem) {
     const pt: PlayerTrack = {

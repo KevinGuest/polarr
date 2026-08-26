@@ -12,6 +12,7 @@ import {
   ShelfHeader,
 } from "@/components/media-shelf";
 import { Skeleton } from "@/components/ui/skeleton";
+import { fetchDiscoverFeed } from "@/lib/discover-client";
 
 type Release = {
   id: string;
@@ -31,8 +32,7 @@ export function BrowseExploreClient() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/discover", { cache: "no-store" });
-      const data = await res.json();
+      const data = await fetchDiscoverFeed();
       setItems(Array.isArray(data.catalog) ? data.catalog : []);
       setError(data.lidarrError || null);
     } finally {

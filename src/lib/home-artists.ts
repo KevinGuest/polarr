@@ -129,13 +129,29 @@ export async function buildHomeArtists(opts: {
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
     .slice(0, limit);
 
+  // Prefer images we already have (charts / Lidarr). Only resolve a handful
+  // of missing faces so discover isn't gated on ~48 Deezer round-trips.
+  const MAX_PORTRAIT_FETCH = 12;
+  let portraitBudget = MAX_PORTRAIT_FETCH;
+
   const withPortraits = await Promise.all(
     sorted.map(async (a): Promise<HomeArtist | null> => {
-      const fresh = await resolveArtistPortrait({
-        artist: a.name,
-        foreignArtistId: a.foreignArtistId,
-      }).catch(() => null);
-      const image = fresh || a.image;
+      let image = a.image;
+      if (image && /^https?:\/\//i.test(image)) {
+        return {
+          name: a.name,
+          image,
+          foreignArtistId: a.foreignArtistId,
+        };
+      }
+      if (portraitBudget > 0) {
+        portraitBudget -= 1;
+        const fresh = await resolveArtistPortrait({
+          artist: a.name,
+          foreignArtistId: a.foreignArtistId,
+        }).catch(() => null);
+        image = fresh || image;
+      }
       if (!image) return null;
       return {
         name: a.name,

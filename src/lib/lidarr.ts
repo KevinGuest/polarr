@@ -132,6 +132,13 @@ let coverMapsCache: {
 } | null = null;
 const COVER_MAP_TTL_MS = 5 * 60_000;
 
+/** Shared Lidarr /album + /artist dumps — one cold trip feeds discover, nav, covers. */
+const LIDARR_LIST_TTL_MS = 3 * 60_000;
+let albumDumpCache: { at: number; items: LidarrAlbum[] } | null = null;
+let artistDumpCache: { at: number; items: LidarrArtist[] } | null = null;
+let albumDumpInflight: Promise<LidarrAlbum[]> | null = null;
+let artistDumpInflight: Promise<LidarrArtist[]> | null = null;
+
 async function loadCoverMaps(): Promise<{
   albums: Map<string, string>;
   artists: Map<string, string>;
@@ -319,11 +326,41 @@ export class LidarrClient {
   }
 
   async listArtists(): Promise<LidarrArtist[]> {
-    return this.request<LidarrArtist[]>("/artist");
+    if (
+      artistDumpCache &&
+      Date.now() - artistDumpCache.at < LIDARR_LIST_TTL_MS
+    ) {
+      return artistDumpCache.items;
+    }
+    if (artistDumpInflight) return artistDumpInflight;
+    artistDumpInflight = this.request<LidarrArtist[]>("/artist")
+      .then((items) => {
+        artistDumpCache = { at: Date.now(), items };
+        return items;
+      })
+      .finally(() => {
+        artistDumpInflight = null;
+      });
+    return artistDumpInflight;
   }
 
   async listAlbums(): Promise<LidarrAlbum[]> {
-    return this.request<LidarrAlbum[]>("/album");
+    if (
+      albumDumpCache &&
+      Date.now() - albumDumpCache.at < LIDARR_LIST_TTL_MS
+    ) {
+      return albumDumpCache.items;
+    }
+    if (albumDumpInflight) return albumDumpInflight;
+    albumDumpInflight = this.request<LidarrAlbum[]>("/album")
+      .then((items) => {
+        albumDumpCache = { at: Date.now(), items };
+        return items;
+      })
+      .finally(() => {
+        albumDumpInflight = null;
+      });
+    return albumDumpInflight;
   }
 
   async getAlbum(id: number): Promise<LidarrAlbum> {

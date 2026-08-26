@@ -252,6 +252,8 @@ type PlayerContextValue = {
   addToQueue: (track: PlayerTrack) => void;
   removeFromQueue: (trackId: string) => void;
   playQueueIndex: (index: number) => void;
+  /** Patch http(s) cover URLs onto queued / current tracks by id. */
+  patchTrackCovers: (covers: Record<string, string>) => void;
   /** Open a panel without closing others; pass "none" to close all. */
   setPanel: (panel: PlayerPanel) => void;
   closePanel: (id: PlayerPanelId) => void;
@@ -1979,6 +1981,39 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [play, queue],
   );
 
+  const patchTrackCovers = useCallback(
+    (covers: Record<string, string>) => {
+      const entries = Object.entries(covers).filter(
+        ([, url]) => url && /^https?:\/\//i.test(url),
+      );
+      if (entries.length === 0) return;
+      const map = new Map(entries);
+
+      setQueue((prev) => {
+        let changed = false;
+        const nextQ = prev.map((t) => {
+          const url = map.get(t.id);
+          if (!url) return t;
+          if (t.coverPath && /^https?:\/\//i.test(t.coverPath)) return t;
+          changed = true;
+          return { ...t, coverPath: url };
+        });
+        if (!changed) return prev;
+        queueRef.current = nextQ;
+        return nextQ;
+      });
+
+      setTrack((prev) => {
+        if (!prev) return prev;
+        const url = map.get(prev.id);
+        if (!url) return prev;
+        if (prev.coverPath && /^https?:\/\//i.test(prev.coverPath)) return prev;
+        return { ...prev, coverPath: url };
+      });
+    },
+    [],
+  );
+
   const isPanelOpen = useCallback(
     (id: PlayerPanelId) => (id === "queue" ? true : openPanels[id]),
     [openPanels],
@@ -2049,6 +2084,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       addToQueue,
       removeFromQueue,
       playQueueIndex,
+      patchTrackCovers,
       setPanel,
       closePanel,
       togglePanel,
@@ -2083,6 +2119,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       addToQueue,
       removeFromQueue,
       playQueueIndex,
+      patchTrackCovers,
       setPanel,
       closePanel,
       togglePanel,

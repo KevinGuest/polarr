@@ -1003,26 +1003,37 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
       <div className="lg:hidden">
         <div
           className={cn(
-            "fixed inset-x-0 top-0 z-30 border-b border-border/40 bg-background/75 backdrop-blur-md transition-opacity duration-200",
+            "fixed inset-x-0 top-0 z-30 transition-colors duration-200",
             showStickyTitle
-              ? "pointer-events-auto opacity-100"
-              : "pointer-events-none opacity-0",
+              ? "border-b border-border/40 bg-background/75 backdrop-blur-md"
+              : "bg-transparent",
           )}
         >
           <div className="flex items-center gap-2 px-3 pb-2 pt-[max(0.5rem,var(--safe-top))]">
             <button
               type="button"
               onClick={() => router.back()}
-              className="rounded-full p-1.5 text-foreground"
+              className={cn(
+                "rounded-full p-1.5",
+                showStickyTitle
+                  ? "text-foreground"
+                  : "bg-black/35 text-white backdrop-blur-sm",
+              )}
               aria-label="Go back"
             >
               <ChevronLeft className="size-6" />
             </button>
-            <h1 className="min-w-0 flex-1 truncate text-center text-base font-semibold">
+            <h1
+              className={cn(
+                "min-w-0 flex-1 truncate text-center text-base font-semibold transition-opacity duration-200",
+                showStickyTitle ? "opacity-100" : "opacity-0",
+              )}
+            >
               {displayTitle}
             </h1>
             <div className="size-9" aria-hidden />
           </div>
+          {showStickyTitle ? (
           <div className="flex items-center gap-2 overflow-x-auto px-3 pb-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {canEdit ? (
               <>
@@ -1060,9 +1071,10 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
               )}
             </button>
           </div>
+          ) : null}
         </div>
 
-        <div className="relative pb-1 pt-[max(0.5rem,var(--safe-top))]">
+        <div className="relative pb-1 pt-[max(3.25rem,calc(var(--safe-top)+2.75rem))]">
           <div
             className="pointer-events-none absolute inset-0"
             style={{
@@ -1071,14 +1083,6 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
             }}
             aria-hidden
           />
-          <button
-            type="button"
-            onClick={() => router.back()}
-            className="absolute left-3 top-[max(0.5rem,var(--safe-top))] z-10 rounded-full bg-black/35 p-1.5 text-white backdrop-blur-sm"
-            aria-label="Go back"
-          >
-            <ChevronLeft className="size-6" />
-          </button>
           <div className="relative mx-auto aspect-square w-[calc(100%-3rem)] max-w-[18rem] overflow-hidden rounded-md shadow-2xl">
             {coverImage ? (
               <CoverArt

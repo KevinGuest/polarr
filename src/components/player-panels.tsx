@@ -8,19 +8,19 @@ import { createPortal } from "react-dom";
 import * as SliderPrimitive from "@radix-ui/react-slider";
 import { PlayerGlassBackdrop } from "@/components/player-glass-backdrop";
 import { PlayerSlider } from "@/components/player-slider";
-import { TrackActionsDrawer } from "@/components/track-actions-drawer";
+import { MobileSaveButton } from "@/components/saved-in-drawer";
 import {
   Laptop,
   ListMusic,
   MessageSquareQuote,
   Mic2,
   MonitorSpeaker,
-  Music2,
   Pause,
   Play,
   Shuffle,
   SkipBack,
   SkipForward,
+  Sparkles,
   Volume1,
   Volume2,
   Wifi,
@@ -30,7 +30,6 @@ import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { StreamQualityBadge } from "@/components/stream-quality-badge";
 import { TrackContextMenu } from "@/components/track-context-menu";
-import { TrackLikeButton } from "@/components/track-like-button";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -51,6 +50,138 @@ function formatRemaining(progress: number, duration: number): string {
   return `-${formatDuration(rem)}`;
 }
 
+/** Apple Music Sing–style mic with sparkles. */
+function SingMicIcon({ className }: { className?: string }) {
+  return (
+    <span className={cn("relative inline-flex items-center justify-center", className)}>
+      <Mic2 className="size-[1.15em]" strokeWidth={1.75} />
+      <Sparkles
+        className="absolute -right-[0.15em] -top-[0.2em] size-[0.55em]"
+        strokeWidth={2.25}
+        fill="currentColor"
+      />
+    </span>
+  );
+}
+
+/**
+ * Collapsed: frosted circle with mic+sparkles.
+ * Expanded: vertical pill slider to blend vocals → instrumental.
+ */
+function SingControl({
+  compact,
+  vocalLevel,
+  setVocalLevel,
+  karaokeStatus,
+  karaokeProgress,
+  karaokeError,
+  karaokeEligible,
+}: {
+  compact?: boolean;
+  vocalLevel: number;
+  setVocalLevel: (v: number) => void;
+  karaokeStatus: string;
+  karaokeProgress: number;
+  karaokeError: string | null;
+  karaokeEligible: boolean;
+}) {
+  const singing = vocalLevel < 0.97;
+  const [expanded, setExpanded] = useState(false);
+  const preparing =
+    karaokeStatus === "processing" || karaokeStatus === "queued";
+
+  useEffect(() => {
+    if (singing) setExpanded(true);
+  }, [singing]);
+
+  if (!karaokeEligible) return null;
+
+  const pct = Math.round(vocalLevel * 100);
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        aria-label="Sing — adjust vocals"
+        onClick={(e) => {
+          e.stopPropagation();
+          setExpanded(true);
+          // Nudge into sing mode so Demucs starts preparing.
+          if (vocalLevel > 0.98) setVocalLevel(0.55);
+        }}
+        className={cn(
+          "absolute right-5 z-30 flex size-12 items-center justify-center rounded-full bg-white/15 text-white ring-1 ring-white/20 backdrop-blur-md transition-transform active:scale-95",
+          compact ? "bottom-4" : "bottom-10",
+          preparing && "animate-pulse",
+        )}
+      >
+        <SingMicIcon className="text-[1.35rem]" />
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        "absolute right-5 z-30 flex flex-col items-center",
+        compact ? "bottom-4" : "bottom-10",
+      )}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <div className="flex flex-col items-center rounded-full bg-white/15 px-2 py-2.5 ring-1 ring-white/20 backdrop-blur-md">
+        <SliderPrimitive.Root
+          orientation="vertical"
+          value={[pct]}
+          onValueChange={(vals) => {
+            const next = vals[0];
+            if (typeof next === "number") setVocalLevel(next / 100);
+          }}
+          max={100}
+          step={1}
+          aria-label="Vocal amount"
+          className="relative flex h-40 w-8 touch-none select-none flex-col items-center"
+        >
+          <SliderPrimitive.Track className="relative w-1 grow overflow-hidden rounded-full bg-white/25 data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1">
+            <SliderPrimitive.Range className="absolute bg-white/90 data-[orientation=vertical]:w-full" />
+          </SliderPrimitive.Track>
+          <SliderPrimitive.Thumb className="block size-4 rounded-full bg-white shadow-md ring-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50" />
+        </SliderPrimitive.Root>
+        <button
+          type="button"
+          aria-label={
+            singing ? "Sing mode on — tap to collapse" : "Collapse sing control"
+          }
+          onClick={(e) => {
+            e.stopPropagation();
+            if (singing) {
+              setVocalLevel(1);
+              setExpanded(false);
+            } else {
+              setExpanded(false);
+            }
+          }}
+          className="mt-2 flex size-9 items-center justify-center rounded-full text-white"
+        >
+          <SingMicIcon className="text-[1.15rem]" />
+        </button>
+      </div>
+      {preparing ? (
+        <span className="mt-1.5 text-[10px] font-medium text-white/55">
+          {Math.round((karaokeProgress || 0) * 100)}%
+        </span>
+      ) : null}
+      {karaokeStatus === "error" && karaokeError ? (
+        <span
+          className="mt-1.5 max-w-[5rem] text-center text-[10px] text-red-300/90"
+          title={karaokeError}
+        >
+          Unavailable
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function subscribeLg(onChange: () => void) {
   const mq = window.matchMedia("(min-width: 1024px)");
   mq.addEventListener("change", onChange);
@@ -69,9 +200,14 @@ function useIsLg() {
 function LyricsBody({
   open,
   compact,
+  controlsVisible = true,
+  onRevealControls,
 }: {
   open: boolean;
   compact?: boolean;
+  /** When false (mobile lyrics), first tap reveals controls instead of seeking. */
+  controlsVisible?: boolean;
+  onRevealControls?: () => void;
 }) {
   const {
     track,
@@ -88,6 +224,8 @@ function LyricsBody({
   } = usePlayer();
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const activeRef = useRef<HTMLButtonElement | null>(null);
+  const programmaticScroll = useRef(false);
+  const ignoreAutoScrollUntil = useRef(0);
 
   const session = useKaraokeSession({
     open,
@@ -98,44 +236,92 @@ function LyricsBody({
     progressSec: progress,
   });
 
+  // Fresh track / open → start at the top.
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller || !open) return;
+    programmaticScroll.current = true;
+    scroller.scrollTop = 0;
+    ignoreAutoScrollUntil.current = 0;
+    requestAnimationFrame(() => {
+      programmaticScroll.current = false;
+    });
+  }, [open, track?.id]);
+
+  // Keep the active line pinned near the top (karaoke follow).
   useEffect(() => {
     const scroller = scrollerRef.current;
     const active = activeRef.current;
     if (!scroller || !active || !session.synced) return;
-    const topPin = compact ? 48 : 80;
+    if (Date.now() < ignoreAutoScrollUntil.current) return;
+
+    const topPin = compact ? 12 : 72;
+    const target = Math.max(0, active.offsetTop - topPin);
+    programmaticScroll.current = true;
     scroller.scrollTo({
-      top: Math.max(0, active.offsetTop - topPin),
+      top: target,
       behavior: "smooth",
     });
+    const t = window.setTimeout(() => {
+      programmaticScroll.current = false;
+    }, 450);
+    return () => window.clearTimeout(t);
   }, [session.activeIndex, session.synced, compact]);
 
   const sidedLines = useMemo(
     () =>
       assignLyricSides(
         session.lines,
-        track?.artist || "",
+        track?.artist || track?.resolveArtist || "",
         track?.title || "",
       ),
-    [session.lines, track?.artist, track?.title],
+    [session.lines, track?.artist, track?.resolveArtist, track?.title],
   );
-  const dual = isDualLyricLayout(sidedLines);
   const duo = useMemo(
-    () => (track ? duoArtists(track.artist, track.title) : null),
+    () =>
+      track
+        ? duoArtists(track.artist || track.resolveArtist || "", track.title)
+        : null,
     [track],
   );
+  const dual = isDualLyricLayout(sidedLines, duo);
 
   if (!open || !track) return null;
 
   const canSeek = session.synced && duration > 0;
 
+  function onLyricActivate(line: (typeof sidedLines)[number]) {
+    // Mobile: first tap only brings controls back — don't jump the playhead.
+    if (compact && !controlsVisible) {
+      onRevealControls?.();
+      return;
+    }
+    if (!canSeek) {
+      onRevealControls?.();
+      return;
+    }
+    const t = session.seekSecForLine(line);
+    seek(Math.min(1, Math.max(0, t / duration)));
+    onRevealControls?.();
+  }
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div
         ref={scrollerRef}
+        onScroll={() => {
+          if (programmaticScroll.current) return;
+          // User scrolled — pause follow so we don't fight them.
+          ignoreAutoScrollUntil.current = Date.now() + 3500;
+        }}
+        onPointerDown={() => {
+          if (compact && !controlsVisible) onRevealControls?.();
+        }}
         className={cn(
           "min-h-0 flex-1 overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden",
+          // Extra bottom pad so late lines can still pin near the top.
           compact
-            ? "px-5 pb-8 pt-2"
+            ? "px-5 pb-[50vh] pt-1"
             : "px-8 pb-[70vh] pt-20 md:px-16 lg:px-24",
         )}
       >
@@ -173,11 +359,9 @@ function LyricsBody({
                 key={`${line.time}-${i}-${line.text.slice(0, 12)}`}
                 type="button"
                 ref={active ? activeRef : undefined}
-                disabled={!canSeek}
-                onClick={() => {
-                  if (!canSeek) return;
-                  const t = session.seekSecForLine(line);
-                  seek(Math.min(1, Math.max(0, t / duration)));
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onLyricActivate(line);
                 }}
                 className={cn(
                   "block w-full max-w-3xl py-3 leading-snug tracking-tight transition-[color,filter,font-size,opacity] duration-300",
@@ -185,8 +369,9 @@ function LyricsBody({
                   dual && line.side === "right" && "ml-auto text-right",
                   dual && line.side === "center" && "mx-auto text-center",
                   !dual && "text-left",
-                  canSeek && "cursor-pointer hover:text-white hover:blur-none",
-                  !canSeek && "cursor-default",
+                  canSeek && controlsVisible
+                    ? "cursor-pointer hover:text-white hover:blur-none"
+                    : "cursor-default",
                   !session.synced &&
                     "text-2xl font-semibold text-white/75 md:text-3xl",
                   session.synced &&
@@ -232,80 +417,15 @@ function LyricsBody({
       </div>
 
       {karaokeEligible ? (
-      <div
-        className={cn(
-          "absolute right-5 z-20 flex flex-col items-center gap-2 rounded-full bg-black/45 px-2.5 py-3.5 ring-1 ring-white/12 backdrop-blur-md",
-          compact ? "bottom-3" : "bottom-8",
-        )}
-      >
-        <button
-          type="button"
-          aria-label="Full original mix"
-          onClick={() => setVocalLevel(1)}
-          className={cn(
-            "shrink-0 transition-colors",
-            vocalLevel > 0.85
-              ? "text-white"
-              : "text-white/40 hover:text-white/75",
-          )}
-        >
-          <Mic2 className="size-4" />
-        </button>
-        <SliderPrimitive.Root
-          orientation="vertical"
-          value={[Math.round(vocalLevel * 100)]}
-          onValueChange={(vals) => {
-            const next = vals[0];
-            if (typeof next === "number") setVocalLevel(next / 100);
-          }}
-          max={100}
-          step={1}
-          aria-label="Vocals vs instrumental"
-          className="relative flex h-36 w-6 touch-none select-none flex-col items-center data-[orientation=vertical]:h-36"
-        >
-          <SliderPrimitive.Track className="relative w-1 grow overflow-hidden rounded-full bg-white/25 data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1">
-            <SliderPrimitive.Range className="absolute bg-white data-[orientation=vertical]:w-full" />
-          </SliderPrimitive.Track>
-          <SliderPrimitive.Thumb className="block size-3.5 rounded-full bg-white shadow-md ring-0 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50 active:scale-105" />
-        </SliderPrimitive.Root>
-        <button
-          type="button"
-          aria-label="Instrumental only"
-          onClick={() => setVocalLevel(0)}
-          className={cn(
-            "shrink-0 transition-colors",
-            vocalLevel < 0.15
-              ? "text-white"
-              : "text-white/40 hover:text-white/75",
-            karaokeStatus === "processing" || karaokeStatus === "queued"
-              ? "animate-pulse"
-              : "",
-          )}
-        >
-          <Music2 className="size-4" />
-        </button>
-        {(karaokeStatus === "processing" || karaokeStatus === "queued") && (
-          <span className="mt-0.5 max-w-[4.5rem] text-center text-[9px] leading-tight text-white/50">
-            {Math.round((karaokeProgress || 0) * 100)}%
-          </span>
-        )}
-        {karaokeStatus === "error" && karaokeError && (
-          <span
-            className="mt-0.5 max-w-[4.5rem] text-center text-[9px] leading-tight text-red-300/80"
-            title={karaokeError}
-          >
-            fail
-          </span>
-        )}
-        {karaokeStatus === "unavailable" && (
-          <span
-            className="mt-0.5 max-w-[4.5rem] text-center text-[9px] leading-tight text-white/40"
-            title={karaokeError ?? "Unavailable"}
-          >
-            n/a
-          </span>
-        )}
-      </div>
+        <SingControl
+          compact={compact}
+          vocalLevel={vocalLevel}
+          setVocalLevel={setVocalLevel}
+          karaokeStatus={karaokeStatus}
+          karaokeProgress={karaokeProgress}
+          karaokeError={karaokeError}
+          karaokeEligible={karaokeEligible}
+        />
       ) : null}
     </div>
   );
@@ -521,15 +641,7 @@ function NowPlayingPopup() {
               <SkipForward className="size-7" fill="currentColor" />
             </button>
           </div>
-          <div className="flex items-center justify-between px-2">
-            <TrackLikeButton
-              key={track.id}
-              trackId={track.id}
-              artist={track.artist}
-              title={track.title}
-              album={track.album}
-              coverPath={track.coverPath}
-            />
+          <div className="flex items-center justify-end px-2">
             <button
               type="button"
               onClick={() => togglePanel("lyrics")}
@@ -559,6 +671,7 @@ function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
     playQueueIndex,
     removeFromQueue,
     addToQueue,
+    patchTrackCovers,
     queueTab,
     setQueueTab,
     shuffle,
@@ -569,6 +682,56 @@ function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
   >([]);
   const [recentLoading, setRecentLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const coverFetchAttempted = useRef(new Set<string>());
+
+  // Backfill missing http covers for visible queue rows (radio/playlist gaps).
+  useEffect(() => {
+    const missing = queue
+      .filter(
+        (t) =>
+          t.id &&
+          !coverFetchAttempted.current.has(t.id) &&
+          !t.id.startsWith("live:") &&
+          !t.id.startsWith("stream:") &&
+          !t.id.startsWith("catalog:") &&
+          !(t.coverPath && /^https?:\/\//i.test(t.coverPath)),
+      )
+      .slice(0, 16);
+    if (missing.length === 0) return;
+
+    for (const t of missing) coverFetchAttempted.current.add(t.id);
+
+    let cancelled = false;
+    void Promise.all(
+      missing.map(async (t) => {
+        try {
+          const res = await fetch(`/api/tracks/${encodeURIComponent(t.id)}`, {
+            cache: "force-cache",
+          });
+          if (!res.ok) return null;
+          const data = await res.json();
+          const cover = data?.track?.coverUrl || data?.track?.coverPath;
+          if (cover && /^https?:\/\//i.test(cover)) {
+            return [t.id, cover] as const;
+          }
+        } catch {
+          /* ignore */
+        }
+        return null;
+      }),
+    ).then((rows) => {
+      if (cancelled) return;
+      const covers: Record<string, string> = {};
+      for (const row of rows) {
+        if (row) covers[row[0]] = row[1];
+      }
+      if (Object.keys(covers).length) patchTrackCovers(covers);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [queue, patchTrackCovers]);
 
   useEffect(() => {
     if (queueTab !== "recent") return;
@@ -729,7 +892,11 @@ function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
                   <div className="flex items-center gap-3 rounded-lg px-1 py-1">
                     <CoverArt
                       seed={track.title}
-                      image={track.coverPath || undefined}
+                      image={
+                        track.coverPath && /^https?:\/\//i.test(track.coverPath)
+                          ? track.coverPath
+                          : undefined
+                      }
                       className="size-12 shrink-0 rounded-md"
                     />
                     <div className="min-w-0">
@@ -790,7 +957,11 @@ function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
                           >
                             <CoverArt
                               seed={t.title}
-                              image={t.coverPath || undefined}
+                              image={
+                                t.coverPath && /^https?:\/\//i.test(t.coverPath)
+                                  ? t.coverPath
+                                  : undefined
+                              }
                               className="size-11 shrink-0 rounded-md"
                             />
                             <div className="min-w-0">
@@ -863,7 +1034,11 @@ function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
                       >
                         <CoverArt
                           seed={item.title}
-                          image={item.coverPath || undefined}
+                          image={
+                            item.coverPath && /^https?:\/\//i.test(item.coverPath)
+                              ? item.coverPath
+                              : undefined
+                          }
                           className="size-11 shrink-0 rounded-md"
                         />
                         <div className="min-w-0 flex-1">
@@ -876,18 +1051,6 @@ function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
                           </div>
                         </div>
                       </button>
-                      <TrackLikeButton
-                        trackId={item.id}
-                        initialLiked={Boolean(item.liked)}
-                        revealOnHover
-                        onLikedChange={(liked) => {
-                          setRecent((prev) =>
-                            prev.map((r) =>
-                              r.id === item.id ? { ...r, liked } : r,
-                            ),
-                          );
-                        }}
-                      />
                     </div>
                   </TrackContextMenu>
                 </li>
@@ -904,7 +1067,26 @@ function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
 type MobileSheetView = "player" | "lyrics" | "queue" | "devices";
 
 function SheetMoreButton({ track }: { track: PlayerTrack }) {
-  return <TrackActionsDrawer track={track} />;
+  const artistName = track.resolveArtist || track.artist;
+  const inLibrary =
+    Boolean(track.id) &&
+    !track.id.startsWith("stream:") &&
+    !track.id.startsWith("live:") &&
+    !track.id.startsWith("catalog:");
+
+  return (
+    <MobileSaveButton
+      trackId={track.id}
+      artist={artistName}
+      title={track.title}
+      album={track.album}
+      coverPath={track.coverPath}
+      duration={track.duration ?? undefined}
+      onPolarr={inLibrary}
+      alreadyInLibrary={inLibrary}
+      tone="on-dark"
+    />
+  );
 }
 
 function MobileSheetHeader({ track }: { track: PlayerTrack }) {
@@ -928,16 +1110,6 @@ function MobileSheetHeader({ track }: { track: PlayerTrack }) {
           <span className="truncate">{track.artist}</span>
         </div>
       </div>
-      <TrackLikeButton
-        key={track.id}
-        trackId={track.id}
-        artist={track.artist}
-        title={track.title}
-        album={track.album}
-        coverPath={track.coverPath}
-        size="md"
-        className="size-11 text-white"
-      />
       <SheetMoreButton track={track} />
     </div>
   );
@@ -966,6 +1138,9 @@ function MobileTransport({
   onNext: () => void;
   onVolume: (v: number) => void;
 }) {
+  const { vocalLevel, karaokeEligible } = usePlayer();
+  const singing = karaokeEligible && vocalLevel < 0.97;
+
   return (
     <div className="shrink-0 px-6 pt-2">
           <PlayerSlider
@@ -976,9 +1151,18 @@ function MobileTransport({
             tone="on-dark"
             className="-my-3"
           />
-      <div className="mt-1.5 flex items-center justify-between text-[11px] tabular-nums text-white/55">
+      <div className="relative mt-1.5 flex h-4 items-center justify-between text-[11px] tabular-nums text-white/55">
         <span>{formatDuration(progress)}</span>
-        <StreamQualityBadge track={track} className="bg-white/12 text-white/80" />
+        <span className="absolute inset-x-0 text-center text-[11px] font-medium tracking-wide text-white/55">
+          {singing ? (
+            "Sing"
+          ) : (
+            <StreamQualityBadge
+              track={track}
+              className="bg-white/12 text-white/80"
+            />
+          )}
+        </span>
         <span>{formatRemaining(progress, duration)}</span>
       </div>
       <div className="flex items-center justify-center gap-10 py-3">
@@ -1221,8 +1405,13 @@ function MobilePlayerSheet() {
         transform: dragY > 0 ? `translateY(${dragY}px)` : undefined,
         transition: startY.current == null ? "transform 0.2s ease-out" : undefined,
       }}
-      onPointerDown={() => {
-        if (view === "lyrics") bumpLyricsControls();
+      onPointerDown={(e) => {
+        // Don't steal lyric / control taps — LyricsBody handles reveal.
+        if (view === "lyrics") {
+          const t = e.target as HTMLElement | null;
+          if (t?.closest("button, input, [role='slider']")) return;
+          bumpLyricsControls();
+        }
       }}
       onTouchMove={(e) => {
         if (startY.current == null) return;
@@ -1287,16 +1476,6 @@ function MobilePlayerSheet() {
                   <span className="truncate">{track.artist}</span>
                 </div>
               </div>
-              <TrackLikeButton
-                key={track.id}
-                trackId={track.id}
-                artist={track.artist}
-                title={track.title}
-                album={track.album}
-                coverPath={track.coverPath}
-                size="md"
-                className="size-11 text-white"
-              />
               <SheetMoreButton track={track} />
             </div>
           </div>
@@ -1304,7 +1483,12 @@ function MobilePlayerSheet() {
           <>
             <MobileSheetHeader track={track} />
             {view === "lyrics" ? (
-              <LyricsBody open compact />
+              <LyricsBody
+                open
+                compact
+                controlsVisible={lyricsControlsVisible}
+                onRevealControls={bumpLyricsControls}
+              />
             ) : view === "queue" ? (
               <div className="min-h-0 flex-1">
                 <QueuePanel variant="sheet" />

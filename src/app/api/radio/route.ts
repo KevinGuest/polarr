@@ -1,6 +1,7 @@
 import { getAuthUser, json } from "@/lib/api";
 import { getTrack } from "@/lib/db";
 import { buildTasteAutoplay } from "@/lib/made-for";
+import { coverFromMap, getAlbumCoverMap } from "@/lib/lidarr";
 
 export const dynamic = "force-dynamic";
 
@@ -30,14 +31,32 @@ export async function GET(req: Request) {
     ? Math.max(1, Math.min(limitRaw, 60))
     : 24;
 
+  const covers = await getAlbumCoverMap();
+  const withCovers = <
+    T extends {
+      artist: string;
+      album?: string | null;
+      title?: string;
+      coverPath?: string | null;
+    },
+  >(
+    tracks: T[],
+  ) =>
+    tracks.map((t) => ({
+      ...t,
+      coverPath: coverFromMap(covers, t.artist, t.album, t.title, t.coverPath),
+    }));
+
   if (trackId) {
     const seed = getTrack(trackId);
     if (!seed) return json({ error: "Track not found" }, { status: 404 });
-    const tracks = buildTasteAutoplay(user.id, {
-      seed,
-      excludeIds: [seed.id, ...excludeIds],
-      limit,
-    });
+    const tracks = withCovers(
+      buildTasteAutoplay(user.id, {
+        seed,
+        excludeIds: [seed.id, ...excludeIds],
+        limit,
+      }),
+    );
     return json({
       mode: "seed",
       seed: {
@@ -50,12 +69,14 @@ export async function GET(req: Request) {
     });
   }
 
-  const tracks = buildTasteAutoplay(user.id, {
-    seedArtist: artist || undefined,
-    seedAlbum: album || undefined,
-    excludeIds,
-    limit,
-  });
+  const tracks = withCovers(
+    buildTasteAutoplay(user.id, {
+      seedArtist: artist || undefined,
+      seedAlbum: album || undefined,
+      excludeIds,
+      limit,
+    }),
+  );
 
   return json({
     mode: "taste",

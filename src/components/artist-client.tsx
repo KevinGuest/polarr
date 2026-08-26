@@ -267,21 +267,31 @@ export function ArtistClient() {
       <div className="lg:hidden">
         <div
           className={cn(
-            "fixed inset-x-0 top-0 z-30 flex items-center gap-2 border-b border-border/50 bg-background/90 px-3 pb-2.5 pt-[max(0.5rem,var(--safe-top))] backdrop-blur-md transition-opacity duration-200",
+            "fixed inset-x-0 top-0 z-30 flex items-center gap-2 px-3 pb-2.5 pt-[max(0.5rem,var(--safe-top))] transition-colors duration-200",
             showStickyTitle
-              ? "pointer-events-auto opacity-100"
-              : "pointer-events-none opacity-0",
+              ? "border-b border-border/50 bg-background/90 backdrop-blur-md"
+              : "bg-transparent",
           )}
         >
           <button
             type="button"
             onClick={() => router.back()}
-            className="rounded-full p-1.5 text-foreground"
+            className={cn(
+              "rounded-full p-1.5",
+              showStickyTitle
+                ? "text-foreground"
+                : "bg-black/35 text-white backdrop-blur-sm",
+            )}
             aria-label="Go back"
           >
             <ChevronLeft className="size-6" />
           </button>
-          <h1 className="min-w-0 flex-1 truncate text-base font-semibold">
+          <h1
+            className={cn(
+              "min-w-0 flex-1 truncate text-base font-semibold transition-opacity duration-200",
+              showStickyTitle ? "opacity-100" : "opacity-0",
+            )}
+          >
             {name}
           </h1>
         </div>
@@ -305,14 +315,6 @@ export function ArtistClient() {
                 className="size-full object-cover"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-background via-background/30 to-black/40" />
-              <button
-                type="button"
-                onClick={() => router.back()}
-                className="absolute left-3 top-[max(0.5rem,var(--safe-top))] rounded-full bg-black/35 p-1.5 text-white backdrop-blur-sm"
-                aria-label="Go back"
-              >
-                <ChevronLeft className="size-6" />
-              </button>
               <div className="absolute inset-x-0 bottom-0 p-4 pb-5">
                 <h1 className="text-[2rem] font-bold leading-tight tracking-tight">
                   {name}

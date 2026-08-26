@@ -12,7 +12,7 @@ import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { StreamQualityBadge } from "@/components/stream-quality-badge";
 import { PlayerSlider } from "@/components/player-slider";
-import { TrackLikeButton } from "@/components/track-like-button";
+import { MobileSaveButton } from "@/components/saved-in-drawer";
 import { usePlayer } from "@/components/player-provider";
 import { albumHref } from "@/lib/album-ref";
 import { cn, formatDuration, formatTrackArtistLine } from "@/lib/utils";
@@ -196,13 +196,13 @@ export function MiniplayerClient({
           </div>
 
           <div className="flex justify-center pt-1">
-            <TrackLikeButton
-              key={track.id}
+            <MobileSaveButton
               trackId={track.id}
               artist={track.artist}
               title={track.title}
               album={track.album}
               coverPath={track.coverPath}
+              size="sm"
             />
           </div>
         </div>

@@ -27,8 +27,8 @@ import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { MiniplayerClient } from "@/components/miniplayer-client";
 import { PlayerSlider } from "@/components/player-slider";
+import { MobileSaveButton } from "@/components/saved-in-drawer";
 import { StreamQualityBadge } from "@/components/stream-quality-badge";
-import { TrackLikeButton } from "@/components/track-like-button";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { playbackQuality, usePlayer } from "@/components/player-provider";
 import {
@@ -324,15 +324,16 @@ export function NowPlayingBar() {
           </div>
 
           <div className="hidden items-center justify-end gap-1 lg:flex">
-            <BarTooltip label="Save to Liked Songs">
+            <BarTooltip label="Add to Liked Songs">
               <span className="inline-flex">
-                <TrackLikeButton
-                  key={track.id}
+                <MobileSaveButton
                   trackId={track.id}
                   artist={track.artist}
                   title={track.title}
                   album={track.album}
                   coverPath={track.coverPath}
+                  duration={track.duration ?? undefined}
+                  size="sm"
                 />
               </span>
             </BarTooltip>

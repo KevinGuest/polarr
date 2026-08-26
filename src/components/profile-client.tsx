@@ -223,17 +223,21 @@ export function ProfileClient({
 
   if (loading) {
     return (
-      <div className="-mx-4 -mt-4 space-y-10 md:-mx-8 lg:-mx-10" aria-busy="true">
-        <div className="border-b border-border px-4 pb-8 pt-10 md:px-8 md:pb-10 md:pt-14 lg:px-10">
-          <div className="flex flex-col items-start gap-6 sm:flex-row sm:items-end">
-            <Skeleton className="size-28 shrink-0 rounded-full sm:size-36" />
-            <div className="min-w-0 flex-1 space-y-3">
-              <Skeleton className="h-8 w-48" />
-              <Skeleton className="h-4 w-32" />
+      <div className="-mx-4 space-y-10 pb-8 md:-mx-8 md:-mt-4 lg:-mx-10">
+        <div
+          className="flex min-h-[16rem] flex-col justify-center border-b border-border px-4 pb-12 pt-10 max-lg:min-h-[18rem] max-lg:pb-14 max-lg:pt-[max(6.75rem,calc(var(--safe-top)+5.25rem))] md:min-h-[20rem] md:px-8 md:pb-14 md:pt-14 lg:px-10"
+          style={bannerStyle(null)}
+        >
+          <div className="flex flex-row items-end gap-4 sm:gap-6">
+            <Skeleton className="size-28 shrink-0 rounded-full sm:size-36 md:size-44" />
+            <div className="min-w-0 flex-1 space-y-2 pb-1">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-8 w-40 sm:h-10" />
+              <Skeleton className="h-4 w-48" />
             </div>
           </div>
         </div>
-        <div className="space-y-3 px-4 md:px-8 lg:px-10">
+        <div className="space-y-3 px-5 md:px-8 lg:px-10">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="flex items-center gap-3">
               <Skeleton className="size-11 shrink-0 rounded-md" />
@@ -275,12 +279,12 @@ export function ProfileClient({
   const bannerColors = liveBanner ?? profile.bannerColors;
 
   return (
-    <div className="-mx-4 -mt-4 space-y-10 pb-8 md:-mx-8 lg:-mx-10">
+    <div className="-mx-4 space-y-10 pb-8 md:-mx-8 md:-mt-4 lg:-mx-10">
       <section
-        className="relative overflow-hidden border-b border-border px-4 pb-8 pt-10 md:px-8 md:pb-10 md:pt-14 lg:px-10"
+        className="relative flex min-h-[16rem] flex-col justify-center overflow-hidden border-b border-border px-4 pb-12 pt-10 max-lg:min-h-[18rem] max-lg:pb-14 max-lg:pt-[max(6.75rem,calc(var(--safe-top)+5.25rem))] md:min-h-[20rem] md:px-8 md:pb-14 md:pt-14 lg:px-10"
         style={bannerStyle(bannerColors)}
       >
-        <div className="relative flex flex-col items-start gap-6 sm:flex-row sm:items-end">
+        <div className="relative flex flex-row items-end gap-4 sm:gap-6">
           <div className="relative shrink-0">
             {isSelf ? (
               <>
@@ -297,7 +301,7 @@ export function ProfileClient({
                   type="button"
                   disabled={uploading}
                   onClick={() => fileRef.current?.click()}
-                  className="group relative flex size-36 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-muted text-5xl font-semibold uppercase shadow-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70 sm:size-44 sm:text-6xl"
+                  className="group relative flex size-28 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-muted text-4xl font-semibold uppercase shadow-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70 sm:size-36 sm:text-5xl md:size-44 md:text-6xl"
                   aria-label={
                     profile.avatarUrl
                       ? "Change profile photo"
@@ -307,7 +311,7 @@ export function ProfileClient({
                   <UserAvatar
                     username={profile.username}
                     avatarUrl={avatarSrc}
-                    textClassName="text-5xl sm:text-6xl"
+                    textClassName="text-4xl sm:text-5xl md:text-6xl"
                     className="bg-transparent"
                   />
                   <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
@@ -320,23 +324,23 @@ export function ProfileClient({
               </>
             ) : (
               <div
-                className="relative size-36 overflow-hidden rounded-full border border-border/60 bg-muted shadow-lg sm:size-44"
+                className="relative size-28 overflow-hidden rounded-full border border-border/60 bg-muted shadow-lg sm:size-36 md:size-44"
                 aria-hidden
               >
                 <UserAvatar
                   username={profile.username}
                   avatarUrl={avatarSrc}
-                  textClassName="text-5xl sm:text-6xl"
+                  textClassName="text-4xl sm:text-5xl md:text-6xl"
                 />
               </div>
             )}
           </div>
-          <div className="min-w-0 flex-1 space-y-2 pb-1">
+          <div className="min-w-0 flex-1 space-y-1.5 pb-0.5 sm:space-y-2 sm:pb-1">
             <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
               Profile
               {profile.isAdmin ? " · Admin" : ""}
             </p>
-            <h1 className="break-all text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
+            <h1 className="break-all text-2xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
               {profile.username}
             </h1>
             <p className="text-sm text-muted-foreground">
@@ -352,7 +356,7 @@ export function ProfileClient({
         </div>
       </section>
 
-      <div className="space-y-10 px-4 md:px-8 lg:px-10">
+      <div className="space-y-10 px-5 md:px-8 lg:px-10">
         <section className="space-y-4">
           <div className="flex items-end justify-between gap-3">
             <div>
@@ -410,7 +414,7 @@ export function ProfileClient({
                         <td
                           className={trackRowStartCell(
                             isCurrent,
-                            "w-12 py-2 pl-2 pr-1 text-center align-middle",
+                            "w-12 py-2 pl-1 pr-1 text-center align-middle",
                           )}
                         >
                           <button
@@ -470,13 +474,12 @@ export function ProfileClient({
                             album={t.album}
                             coverPath={t.coverPath}
                             duration={t.duration ?? undefined}
-                            onPolarr
                           />
                         </td>
                         <td
                           className={trackRowEndCell(
                             isCurrent,
-                            "w-16 py-2 pr-3 text-right align-middle tabular-nums text-muted-foreground",
+                            "w-16 py-2 pr-1 text-right align-middle tabular-nums text-muted-foreground",
                           )}
                         >
                           {formatDuration(t.duration)}

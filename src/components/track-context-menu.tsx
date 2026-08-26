@@ -2,7 +2,6 @@
 
 import {
   toastError,
-  toastHeart,
   toastInfo,
   toastSuccess,
 } from "@/lib/toast";
@@ -139,7 +138,6 @@ export function TrackContextMenu({
         liked: persisted,
         count: typeof data?.count === "number" ? data.count : undefined,
       });
-      toastHeart(persisted ? "Saved to Liked Songs" : "Removed from Liked Songs");
     } catch {
       setLiked(!next);
       toastError("Couldn’t update Liked Songs");

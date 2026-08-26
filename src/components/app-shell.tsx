@@ -31,10 +31,11 @@ import { PlayerPanels, PlayerQueueRail } from "@/components/player-panels";
 import { PlayerProvider } from "@/components/player-provider";
 import { NotificationsBell, NotificationsLink, useNotifications } from "@/components/admin-error-notifications";
 import { ProfileDrawer, UserMenu } from "@/components/user-menu";
+import { AuthProvider, useAuth } from "@/components/auth-provider";
 import { BanStatusBox } from "@/components/ban-status-box";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePlayer } from "@/components/player-provider";
-import { roleIsStaff, type UserRole } from "@/lib/roles";
+import { roleIsStaff } from "@/lib/roles";
 
 const primaryNav = [
   { href: "/", label: "Home", icon: Home },
@@ -80,13 +81,21 @@ const MINIPLAYER_PATH = "/miniplayer";
 
 function PolarrMark({ className }: { className?: string }) {
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src="/polarr-icon.png"
-      alt=""
-      aria-hidden
-      className={cn("rounded-md object-cover", className)}
-    />
+    <span
+      className={cn(
+        "relative inline-flex shrink-0 overflow-hidden rounded-md bg-black",
+        className,
+      )}
+    >
+      {/* Asset has generous padding; scale so the glyph matches wordmark weight. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/polarr-icon.png"
+        alt=""
+        aria-hidden
+        className="size-full scale-[1.32] object-cover"
+      />
+    </span>
   );
 }
 
@@ -181,13 +190,15 @@ function ShellInner({ children }: { children: React.ReactNode }) {
   const isArtistPage = pathname === "/artist";
   const isAlbumPage = pathname.startsWith("/album");
   const isPlaylistPage = pathname.startsWith("/playlist");
+  const isProfilePage =
+    pathname === "/profile" || pathname.startsWith("/u/");
   const isNotificationsPage = pathname === "/notifications";
   const isHomePage = pathname === "/";
   const mobileTitle =
     isSearchPage || isLibraryPage ? null : mobilePageTitle(pathname);
   const { unread: notificationUnread } = useNotifications();
   const [libraryExpanded, setLibraryExpanded] = useState(false);
-  const [role, setRole] = useState<UserRole | null>(null);
+  const { role } = useAuth();
   const [adminNavOpen, setAdminNavOpen] = useState(false);
   const [mobileViewport, setMobileViewport] = useState(() =>
     typeof window !== "undefined"
@@ -206,36 +217,6 @@ function ShellInner({ children }: { children: React.ReactNode }) {
     mq.addEventListener("change", sync);
     return () => mq.removeEventListener("change", sync);
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/auth/me", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { user: null }))
-      .then((data: { user?: { role?: string; isAdmin?: boolean } | null }) => {
-        if (cancelled) return;
-        const r = data.user?.role;
-        if (
-          r === "owner" ||
-          r === "admin" ||
-          r === "moderator" ||
-          r === "member"
-        ) {
-          setRole(r);
-        } else if (data.user?.isAdmin) {
-          setRole("admin");
-        } else if (data.user) {
-          setRole("member");
-        } else {
-          setRole(null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setRole(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [pathname]);
 
   const visibleAdminGroups = useMemo(() => {
     const isFullAdmin = role === "admin" || role === "owner";
@@ -270,12 +251,13 @@ function ShellInner({ children }: { children: React.ReactNode }) {
         isArtistPage && "max-lg:px-4 max-lg:py-0",
         isAlbumPage && "max-lg:px-0 max-lg:py-0",
         isPlaylistPage && "max-lg:px-0 max-lg:py-0",
+        isProfilePage && "max-lg:px-4 max-lg:py-0",
         !isAdminPath &&
           (track
             ? "max-lg:pb-[calc(var(--mobile-dock-stack)+var(--mobile-dock-player-h)+1rem)]"
             : "max-lg:pb-[calc(var(--mobile-dock-stack)+1rem)]"),
       ),
-    [isAdminPath, isAlbumPage, isArtistPage, isLibraryPage, isPlaylistPage, isSearchPage, track],
+    [isAdminPath, isAlbumPage, isArtistPage, isLibraryPage, isPlaylistPage, isProfilePage, isSearchPage, track],
   );
 
   const adminSidebarInner = (
@@ -286,8 +268,10 @@ function ShellInner({ children }: { children: React.ReactNode }) {
         aria-label="Polarr admin"
         onClick={closeAdminNav}
       >
-        <PolarrMark className="size-7" />
-        <span className="text-lg font-semibold tracking-tight">Polarr</span>
+        <PolarrMark className="size-8" />
+        <span className="text-lg font-semibold leading-none tracking-tight">
+          Polarr
+        </span>
       </Link>
       <div className="flex min-h-0 flex-1 flex-col">
         <ScrollArea className="min-h-0 flex-1">
@@ -308,7 +292,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="flex h-dvh flex-col bg-background text-foreground">
+    <div className="relative flex h-dvh flex-col bg-background text-foreground">
       {isAdminPath ? (
         <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 pt-[max(0.5rem,var(--safe-top))] lg:hidden">
           <button
@@ -324,8 +308,8 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             className="inline-flex min-w-0 items-center gap-2 text-foreground"
             aria-label="Polarr admin"
           >
-            <PolarrMark className="size-7" />
-            <span className="truncate text-base font-semibold tracking-tight">
+            <PolarrMark className="size-8" />
+            <span className="truncate text-base font-semibold leading-none tracking-tight">
               Polarr
             </span>
           </Link>
@@ -345,8 +329,8 @@ function ShellInner({ children }: { children: React.ReactNode }) {
               className="inline-flex w-fit items-center gap-2.5 justify-self-start text-foreground"
               aria-label="Polarr home"
             >
-              <PolarrMark className="size-7" />
-              <span className="text-lg font-semibold tracking-tight">
+              <PolarrMark className="size-8" />
+              <span className="text-lg font-semibold leading-none tracking-tight">
                 Polarr
               </span>
             </Link>
@@ -374,24 +358,28 @@ function ShellInner({ children }: { children: React.ReactNode }) {
               isArtistPage && "hidden",
               isAlbumPage && "hidden",
               isPlaylistPage && "hidden",
+              isProfilePage &&
+                "absolute inset-x-0 top-0 z-20 bg-transparent",
             )}
           >
-            {isHomePage ? (
+            {isHomePage || isProfilePage ? (
               <>
-                <ProfileDrawer side="left" />
                 <Link
                   href="/"
                   aria-label="Polarr home"
                   className="inline-flex min-w-0 flex-1 items-center gap-2.5"
                 >
-                  <PolarrMark className="size-8 shrink-0" />
-                  <span className="truncate text-xl font-semibold tracking-tight">
+                  <PolarrMark className="size-9 shrink-0" />
+                  <span className="truncate text-xl font-semibold leading-none tracking-tight">
                     Polarr
                   </span>
                 </Link>
-                {!isNotificationsPage ? (
-                  <NotificationsLink unread={notificationUnread} />
-                ) : null}
+                <div className="flex shrink-0 items-center gap-1">
+                  {!isNotificationsPage ? (
+                    <NotificationsLink unread={notificationUnread} />
+                  ) : null}
+                  <ProfileDrawer side="right" />
+                </div>
               </>
             ) : (
               <>
@@ -520,9 +508,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   if (isAuthScreen) {
     return (
       <PlayerProvider>
-        <div className="flex min-h-dvh items-center justify-center bg-background px-4 py-12 text-foreground">
-          {children}
-        </div>
+        <AuthProvider>
+          <div className="flex min-h-dvh items-center justify-center bg-background px-4 py-12 text-foreground">
+            {children}
+          </div>
+        </AuthProvider>
       </PlayerProvider>
     );
   }
@@ -530,16 +520,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   if (isMiniplayer) {
     return (
       <PlayerProvider>
-        <div className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
-          {children}
-        </div>
+        <AuthProvider>
+          <div className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+            {children}
+          </div>
+        </AuthProvider>
       </PlayerProvider>
     );
   }
 
   return (
     <PlayerProvider>
-      <ShellInner>{children}</ShellInner>
+      <AuthProvider>
+        <ShellInner>{children}</ShellInner>
+      </AuthProvider>
     </PlayerProvider>
   );
 }

@@ -134,7 +134,7 @@ async function loadLikedPlayerTracks(): Promise<PlayerTrack[]> {
   const res = await fetch("/api/likes", { cache: "no-store" });
   const data = await res.json().catch(() => null);
   if (!res.ok) return [];
-  const list = Array.isArray(data?.items) ? data.items : [];
+  const list = Array.isArray(data?.tracks) ? data.tracks : [];
   return list.map(
     (t: {
       id: string;

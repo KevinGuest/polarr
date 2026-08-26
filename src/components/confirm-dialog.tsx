@@ -105,7 +105,7 @@ export function PromptDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="z-[120]">
         <form
           onSubmit={(e) => {
             e.preventDefault();

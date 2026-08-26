@@ -9,7 +9,7 @@ import {
   toggleTrackLiked,
   type LikeMeta,
 } from "@/lib/db";
-import { albumCoverKey, getAlbumCoverMap } from "@/lib/lidarr";
+import { coverFromMap, getAlbumCoverMap } from "@/lib/lidarr";
 import { getLiveSession } from "@/lib/live-stream";
 
 export const runtime = "nodejs";
@@ -73,13 +73,13 @@ export async function GET(req: Request) {
 
   const covers = await getAlbumCoverMap();
   const items = listLikedTracks(user.id, 500).map((t) => {
-    const fromDb =
-      t.coverPath && /^https?:\/\//i.test(t.coverPath) ? t.coverPath : null;
-    const album = (t.album || t.title || "").trim();
-    const fromLidarr = album
-      ? covers.get(albumCoverKey(t.artist, album)) || null
-      : null;
-    const coverPath = fromDb || fromLidarr || t.coverPath;
+    const coverPath = coverFromMap(
+      covers,
+      t.artist,
+      t.album,
+      t.title,
+      t.coverPath,
+    );
     return {
       id: t.id,
       title: t.title,

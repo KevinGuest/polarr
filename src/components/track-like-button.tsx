@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { LikeButton } from "@/components/like-button";
 import { useLikeToggle } from "@/hooks/use-like-toggle";
+import { LIKES_CHANGED_EVENT } from "@/lib/ui-events";
 
 /** Heart wired to /api/likes — loads current liked state for the track. */
 export function TrackLikeButton({
@@ -11,6 +12,7 @@ export function TrackLikeButton({
   size = "sm",
   className,
   revealOnHover = false,
+  tone = "default",
   artist,
   title,
   album,
@@ -25,6 +27,7 @@ export function TrackLikeButton({
   className?: string;
   /** Hide until row hover; stays visible when liked. Needs a `group` ancestor. */
   revealOnHover?: boolean;
+  tone?: "default" | "on-dark";
   /** Identity for streamed tracks that aren't in the library yet. */
   artist?: string;
   title?: string;
@@ -35,15 +38,21 @@ export function TrackLikeButton({
 }) {
   const [fetched, setFetched] = useState(initialLiked ?? false);
   const [ready, setReady] = useState(initialLiked !== undefined);
+  const [fetchNonce, setFetchNonce] = useState(0);
 
   useEffect(() => {
+    setFetchNonce(0);
     if (initialLiked !== undefined) {
       setFetched(initialLiked);
       setReady(true);
-      return;
+    } else {
+      setReady(false);
     }
+  }, [trackId, initialLiked]);
+
+  useEffect(() => {
+    if (initialLiked !== undefined && fetchNonce === 0) return;
     let cancelled = false;
-    setReady(false);
     void fetch(
       `/api/likes?trackId=${encodeURIComponent(trackId)}${
         artist ? `&artist=${encodeURIComponent(artist)}` : ""
@@ -61,7 +70,16 @@ export function TrackLikeButton({
     return () => {
       cancelled = true;
     };
-  }, [trackId, initialLiked, artist, title]);
+  }, [trackId, initialLiked, artist, title, fetchNonce]);
+
+  useEffect(() => {
+    function onLikesChanged() {
+      setFetchNonce((n) => n + 1);
+    }
+    window.addEventListener(LIKES_CHANGED_EVENT, onLikesChanged);
+    return () =>
+      window.removeEventListener(LIKES_CHANGED_EVENT, onLikesChanged);
+  }, []);
 
   const { liked, toggle } = useLikeToggle(trackId, fetched, {
     artist,
@@ -78,6 +96,7 @@ export function TrackLikeButton({
         size={size}
         className={className}
         revealOnHover={revealOnHover}
+        tone={tone}
         onToggle={() => undefined}
       />
     );
@@ -89,6 +108,7 @@ export function TrackLikeButton({
       size={size}
       className={className}
       revealOnHover={revealOnHover}
+      tone={tone}
       onToggle={() => {
         onLikedChange?.(!liked);
         void toggle();

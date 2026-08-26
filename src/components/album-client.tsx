@@ -507,21 +507,31 @@ export function AlbumClient({ albumId }: { albumId: string }) {
       <div className="lg:hidden">
         <div
           className={cn(
-            "fixed inset-x-0 top-0 z-30 flex items-center gap-2 border-b border-border/40 bg-background/75 px-3 pb-2.5 pt-[max(0.5rem,var(--safe-top))] backdrop-blur-md transition-opacity duration-200",
+            "fixed inset-x-0 top-0 z-30 flex items-center gap-2 px-3 pb-2.5 pt-[max(0.5rem,var(--safe-top))] transition-colors duration-200",
             showStickyTitle
-              ? "pointer-events-auto opacity-100"
-              : "pointer-events-none opacity-0",
+              ? "border-b border-border/40 bg-background/75 backdrop-blur-md"
+              : "bg-transparent",
           )}
         >
           <button
             type="button"
             onClick={() => router.back()}
-            className="rounded-full p-1.5 text-foreground"
+            className={cn(
+              "rounded-full p-1.5",
+              showStickyTitle
+                ? "text-foreground"
+                : "bg-black/35 text-white backdrop-blur-sm",
+            )}
             aria-label="Go back"
           >
             <ChevronLeft className="size-6" />
           </button>
-          <h1 className="min-w-0 flex-1 truncate text-base font-semibold">
+          <h1
+            className={cn(
+              "min-w-0 flex-1 truncate text-base font-semibold transition-opacity duration-200",
+              showStickyTitle ? "opacity-100" : "opacity-0",
+            )}
+          >
             {displayTitle || "Album"}
           </h1>
         </div>
@@ -534,7 +544,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
           </div>
         ) : (
           <>
-            <div className="relative pb-1 pt-[max(0.5rem,var(--safe-top))]">
+            <div className="relative pb-1 pt-[max(3.25rem,calc(var(--safe-top)+2.75rem))]">
               <div
                 className="pointer-events-none absolute inset-0"
                 style={{
@@ -543,14 +553,6 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                 }}
                 aria-hidden
               />
-              <button
-                type="button"
-                onClick={() => router.back()}
-                className="absolute left-3 top-[max(0.5rem,var(--safe-top))] z-10 rounded-full bg-black/35 p-1.5 text-white backdrop-blur-sm"
-                aria-label="Go back"
-              >
-                <ChevronLeft className="size-6" />
-              </button>
               <div className="relative mx-auto aspect-square w-[calc(100%-3rem)] max-w-[18rem] overflow-hidden rounded-md shadow-2xl">
                 <CoverArt
                   seed={coverSeed}

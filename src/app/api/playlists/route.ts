@@ -18,6 +18,7 @@ import {
   setPlaylistFolder,
   updatePlaylistDetails,
 } from "@/lib/db";
+import { coverFromMap, getAlbumCoverMap } from "@/lib/lidarr";
 import { titleLooksExplicit } from "@/lib/utils";
 
 export const runtime = "nodejs";
@@ -36,12 +37,14 @@ export async function GET(req: Request) {
     const owned = getUserPlaylist(user.id, playlistId);
     const playlist = owned ?? getPlaylistById(playlistId);
     if (!playlist) return json({ error: "Playlist not found" }, { status: 404 });
+    const covers = await getAlbumCoverMap();
     const tracks = (
       owned
         ? listPlaylistTracks(user.id, playlistId)
         : listPlaylistTracksById(playlistId)
     ).map((t) => ({
       ...t,
+      coverPath: coverFromMap(covers, t.artist, t.album, t.title, t.coverPath),
       explicit: titleLooksExplicit(t.title),
       localTrackId: t.id,
     }));

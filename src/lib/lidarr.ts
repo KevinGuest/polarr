@@ -189,6 +189,20 @@ export async function getArtistCoverMap(): Promise<Map<string, string>> {
   return (await loadCoverMaps()).artists;
 }
 
+/** Prefer stored http(s) cover, else Lidarr album art for artist+album. */
+export function coverFromMap(
+  covers: Map<string, string>,
+  artist: string,
+  album: string | null | undefined,
+  title: string | null | undefined,
+  coverPath: string | null | undefined,
+): string | null {
+  if (coverPath && /^https?:\/\//i.test(coverPath)) return coverPath;
+  const albumName = (album || title || "").trim();
+  if (!albumName || !artist.trim()) return null;
+  return covers.get(albumCoverKey(artist, albumName)) || null;
+}
+
 /** Prefer stored cover, else Lidarr album art for artist+album. */
 export async function resolveTrackCover(input: {
   coverPath?: string | null;

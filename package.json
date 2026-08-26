@@ -1,6 +1,6 @@
 {
   "name": "polarr",
-  "version": "0.6.10",
+  "version": "0.6.11",
   "private": true,
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0 --port 3000",
@@ -32,7 +32,7 @@
     "clsx": "^2.1.1",
     "demucs": "^1.0.0",
     "lucide-react": "^1.28.0",
-    "next": "^16.3.2",
+    "next": "^16.3.3",
     "next-themes": "^0.4.6",
     "nodemailer": "^9.0.4",
     "radix-ui": "^1.6.7",
@@ -51,7 +51,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "^16.3.2",
+    "eslint-config-next": "^16.3.3",
     "tailwindcss": "^4",
     "typescript": "^5"
   },

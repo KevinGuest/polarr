@@ -10,13 +10,20 @@ export type SidedLyricLine = LyricLine & {
   displayText: string;
 };
 
+function splitGuestChunk(raw: string): string[] {
+  return raw
+    .split(/,|&|\band\b/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 /** Primary + first featured guest when the credit is a clear duo. */
 export function duoArtists(
   artist: string,
   title: string,
 ): { left: string; right: string } | null {
   const credited = (artist || "").trim();
-  if (!credited) return null;
+  if (!credited && !(title || "").trim()) return null;
 
   let primary = primaryArtistName(credited) || credited;
   const guests: string[] = [];
@@ -26,28 +33,35 @@ export function duoArtists(
   );
   if (featInArtist) {
     primary = featInArtist[1]!.trim() || primary;
-    guests.push(
-      ...featInArtist[2]!
-        .split(/,|&|\band\b/i)
-        .map((s) => s.trim())
-        .filter(Boolean),
-    );
-  } else {
-    // "A & B" / "A x B" / "A, B" as equal partners
+    guests.push(...splitGuestChunk(featInArtist[2]!));
+  } else if (credited) {
+    // "A & B" / "A x B" / "A, B" / "A with B" as equal partners
     const pair = credited.match(
-      /^(.+?)\s+(?:&|and|x|,)\s+(.+)$/i,
+      /^(.+?)\s+(?:&|and|x|with|,)\s+(.+)$/i,
     );
     if (pair && !/\bfeat/i.test(credited)) {
       const a = pair[1]!.trim();
-      const b = pair[2]!.split(/,|&|\band\b/i)[0]?.trim() || "";
-      if (a && b) return { left: a, right: b };
+      const b = splitGuestChunk(pair[2]!)[0] || "";
+      if (a && b && normalizeArtistName(a) !== normalizeArtistName(b)) {
+        return { left: a, right: b };
+      }
     }
   }
 
   guests.push(...extractFeaturedArtists(title || ""));
-  const right = guests[0]?.trim();
+  // Title patterns: "Song - Artist1 & Artist2" already handled via artist field;
+  // also "ft. X" without parens mid-title
+  const titleFt = (title || "").match(
+    /(?:feat\.?|ft\.?|featuring)\s+([^([\]\n]+)/i,
+  );
+  if (titleFt?.[1]) guests.push(...splitGuestChunk(titleFt[1]));
+
+  const right = guests.find(
+    (g) =>
+      g.trim() &&
+      normalizeArtistName(g) !== normalizeArtistName(primary || ""),
+  )?.trim();
   if (!primary || !right) return null;
-  if (normalizeArtistName(primary) === normalizeArtistName(right)) return null;
   return { left: primary, right };
 }
 
@@ -60,23 +74,37 @@ function matchesArtist(label: string, artist: string): boolean {
   // First token (e.g. "Drake" from "Drake & Future")
   const a0 = a.split(" ")[0] || "";
   const b0 = b.split(" ")[0] || "";
-  return a0.length >= 3 && b0.length >= 3 && a0 === b0;
+  if (a0.length >= 3 && b0.length >= 3 && a0 === b0) return true;
+  // Numeric stage names: "21" from "21 savage"
+  if (/^\d/.test(a0) && a0 === b0) return true;
+  return false;
 }
 
 /** `[Verse 1: Drake]` / `[Chorus: Lil Baby & Friends]` */
 function sectionSpeaker(text: string): string | null {
   const m = text.match(/^\[[^\]]*:\s*([^\]]+)\]\s*$/);
   if (!m?.[1]) return null;
-  // Take first named credit in the bracket
   return m[1].split(/,|&|\band\b|\//i)[0]?.trim() || null;
 }
 
+/** `[Verse 2]` / `[Chorus]` without a name — structural cue for duets. */
+function sectionIndex(text: string): number | null {
+  const m = text.match(
+    /^\[\s*(?:verse|hook)\s*(\d+)\s*\]\s*$/i,
+  );
+  if (!m?.[1]) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Leading `Drake:` or `Lil Baby -` credit on a lyric line. */
-function leadingSpeaker(text: string, duo: { left: string; right: string }): string | null {
+function leadingSpeaker(
+  text: string,
+  duo: { left: string; right: string },
+): string | null {
   const m = text.match(/^([^:\-]{1,40})\s*[:\-]\s+(.+)$/);
   if (!m?.[1] || !m[2]) return null;
   const label = m[1].trim();
-  // Karaoke voice tags: v1 / v2 / A / B
   if (/^v?1$/i.test(label) || /^a$/i.test(label)) return duo.left;
   if (/^v?2$/i.test(label) || /^b$/i.test(label)) return duo.right;
   if (matchesArtist(label, duo.left) || matchesArtist(label, duo.right)) {
@@ -86,16 +114,36 @@ function leadingSpeaker(text: string, duo: { left: string; right: string }): str
 }
 
 /** Bare `[Drake]` / `(Lil Baby)` cue lines. */
-function bareArtistCue(text: string, duo: { left: string; right: string }): string | null {
+function bareArtistCue(
+  text: string,
+  duo: { left: string; right: string },
+): string | null {
   const m = text.match(/^[\[(]\s*([^\]\)]+)\s*[\])]?\s*$/);
   if (!m?.[1]) return null;
   const label = m[1].split(/,|&|\band\b|\//i)[0]?.trim() || "";
-  if (!label || /^(verse|chorus|bridge|intro|outro|hook|refrain|pre[- ]?chorus)\b/i.test(label)) {
+  if (
+    !label ||
+    /^(verse|chorus|bridge|intro|outro|hook|refrain|pre[- ]?chorus)\b/i.test(
+      label,
+    )
+  ) {
     return null;
   }
   if (matchesArtist(label, duo.left) || matchesArtist(label, duo.right)) {
     return label;
   }
+  return null;
+}
+
+/** Artist name appears as its own short line inside the lyric. */
+function inlineArtistOnlyLine(
+  text: string,
+  duo: { left: string; right: string },
+): string | null {
+  const t = text.trim();
+  if (t.length > 48) return null;
+  if (matchesArtist(t, duo.left)) return duo.left;
+  if (matchesArtist(t, duo.right)) return duo.right;
   return null;
 }
 
@@ -108,9 +156,14 @@ function sideForSpeaker(
   return "center";
 }
 
+function flip(side: LyricSide): LyricSide {
+  return side === "left" ? "right" : side === "right" ? "left" : "left";
+}
+
 /**
  * When the track is a clear duo, map lines to left (primary) / right (guest).
- * Uses Genius-style section headers and sticky speaker; otherwise stays centered.
+ * Uses Genius-style section headers, sticky speaker, verse index, and
+ * silence / ♪ gaps so unmarked LRC still splits across the two artists.
  */
 export function assignLyricSides(
   lines: LyricLine[],
@@ -128,11 +181,23 @@ export function assignLyricSides(
 
   let sticky: LyricSide = "left";
   let sawSpeaker = false;
+  let prevTime = Number.NEGATIVE_INFINITY;
+  /** Lines since last side flip — avoid flipping every tiny gap. */
+  let sinceFlip = 0;
 
   return lines.map((line) => {
     const raw = line.text.trim();
+    const t = Number(line.time) || 0;
+    const gapSec = t - prevTime;
     const isGap = raw === "♪" || raw === "♫";
+    prevTime = t;
+
     if (isGap) {
+      // Instrumental break → next verse often flips artist on duets
+      if (sawSpeaker || sinceFlip >= 2) {
+        sticky = flip(sticky);
+        sinceFlip = 0;
+      }
       return { ...line, side: "center" as const, displayText: raw };
     }
 
@@ -140,7 +205,16 @@ export function assignLyricSides(
     if (section) {
       sticky = sideForSpeaker(section, duo);
       sawSpeaker = true;
-      // Keep section markers as centered dim labels
+      sinceFlip = 0;
+      return { ...line, side: "center" as const, displayText: raw };
+    }
+
+    const verseN = sectionIndex(raw);
+    if (verseN != null) {
+      // Odd verses → primary (left), even → guest (right) — common duet form
+      sticky = verseN % 2 === 1 ? "left" : "right";
+      sawSpeaker = true;
+      sinceFlip = 0;
       return { ...line, side: "center" as const, displayText: raw };
     }
 
@@ -148,6 +222,15 @@ export function assignLyricSides(
     if (cue) {
       sticky = sideForSpeaker(cue, duo);
       sawSpeaker = true;
+      sinceFlip = 0;
+      return { ...line, side: "center" as const, displayText: raw };
+    }
+
+    const only = inlineArtistOnlyLine(raw, duo);
+    if (only) {
+      sticky = sideForSpeaker(only, duo);
+      sawSpeaker = true;
+      sinceFlip = 0;
       return { ...line, side: "center" as const, displayText: raw };
     }
 
@@ -155,6 +238,7 @@ export function assignLyricSides(
     if (lead) {
       sticky = sideForSpeaker(lead, duo);
       sawSpeaker = true;
+      sinceFlip = 0;
       const stripped = raw.replace(/^[^:\-]{1,40}\s*[:\-]\s+/, "").trim();
       return {
         ...line,
@@ -163,25 +247,26 @@ export function assignLyricSides(
       };
     }
 
-    // Without explicit markers, still split once we know it's a duo:
-    // sticky starts left; alternate on blank-ish gaps is too noisy —
-    // keep sticky side so consecutive lines from one verse stay together.
-    if (!sawSpeaker) {
-      // Before any speaker cue, keep primary-left so the page still reads as a duo.
-      return { ...line, side: "left" as const, displayText: raw };
+    // Long silence between sung lines → treat as a verse break and flip
+    if (gapSec >= 7 && sinceFlip >= 3) {
+      sticky = flip(sticky);
+      sinceFlip = 0;
+      sawSpeaker = true;
     }
 
+    sinceFlip += 1;
     return { ...line, side: sticky, displayText: raw };
   });
 }
 
-export function isDualLyricLayout(lines: SidedLyricLine[]): boolean {
-  let left = false;
-  let right = false;
-  for (const line of lines) {
-    if (line.side === "left") left = true;
-    if (line.side === "right") right = true;
-    if (left && right) return true;
-  }
-  return false;
+/** True when a duo credit exists (layout columns), not only when both sides appear. */
+export function isDualLyricLayout(
+  lines: SidedLyricLine[],
+  duo: { left: string; right: string } | null,
+): boolean {
+  if (!duo) return false;
+  if (lines.length === 0) return false;
+  // Prefer evidence of both sides, but still dual-column for known duos
+  // so unmarked LRC at least starts primary-left under both names.
+  return true;
 }

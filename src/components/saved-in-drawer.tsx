@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { LikedSongsCover } from "@/components/liked-songs-cover";
 import { emitLikesChanged, emitLibraryChanged } from "@/lib/ui-events";
 import { cn } from "@/lib/utils";
-import { toastError, toastHeart, toastInfo, toastSuccess } from "@/lib/toast";
+import { toastError, toastInfo, toastSuccess } from "@/lib/toast";
 
 type PlaylistRow = {
   id: string;
@@ -133,6 +133,10 @@ export function MobileSaveButton({
   alreadyInLibrary,
   onDownload,
   onSavedChange,
+  tone = "default",
+  size = "md",
+  seedLiked,
+  className,
 }: {
   trackId: string;
   artist: string;
@@ -144,20 +148,27 @@ export function MobileSaveButton({
   alreadyInLibrary?: boolean;
   onDownload?: () => void;
   onSavedChange?: () => void;
+  /** Player / dark sheet — white + / check. */
+  tone?: "default" | "on-dark";
+  size?: "sm" | "md";
+  /** Prefer showing as liked before membership loads. */
+  seedLiked?: boolean;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [optimisticLiked, setOptimisticLiked] = useState(false);
-  const { saved, liked, refresh } = useTrackSavedStatus(trackId, {
+  const [optimisticLiked, setOptimisticLiked] = useState(Boolean(seedLiked));
+  const { liked, refresh } = useTrackSavedStatus(trackId, {
     onPolarr,
     alreadyInLibrary,
   });
 
   useEffect(() => {
-    setOptimisticLiked(false);
-  }, [trackId]);
+    setOptimisticLiked(Boolean(seedLiked));
+  }, [trackId, seedLiked]);
 
-  const showCheck = saved || liked || optimisticLiked;
+  // Check = in Liked Songs (plus means “add to liked”).
+  const showCheck = liked || optimisticLiked;
 
   async function ensureLiked() {
     if (liked || optimisticLiked) return true;
@@ -187,7 +198,6 @@ export function MobileSaveButton({
         liked: true,
         count: typeof data?.count === "number" ? data.count : undefined,
       });
-      toastHeart("Saved to Liked Songs");
       await refresh();
       onSavedChange?.();
       return true;
@@ -199,6 +209,8 @@ export function MobileSaveButton({
       setBusy(false);
     }
   }
+
+  const sm = size === "sm";
 
   return (
     <>
@@ -214,15 +226,31 @@ export function MobileSaveButton({
             setOpen(true);
           })();
         }}
-        className="flex size-9 shrink-0 items-center justify-center disabled:opacity-50"
+        className={cn(
+          "flex shrink-0 items-center justify-center disabled:opacity-50",
+          sm ? "size-8" : "size-11",
+          tone === "on-dark" && "text-white",
+          className,
+        )}
       >
         {showCheck ? (
-          <span className="flex size-6 items-center justify-center rounded-full bg-foreground text-background">
-            <Check className="size-3.5" strokeWidth={3} />
+          <span
+            className={cn(
+              "flex items-center justify-center rounded-full",
+              sm ? "size-5" : "size-6",
+              tone === "on-dark"
+                ? "bg-white text-black"
+                : "bg-foreground text-background",
+            )}
+          >
+            <Check className={sm ? "size-3" : "size-3.5"} strokeWidth={3} />
           </span>
         ) : (
           <CirclePlus
-            className="size-6 text-muted-foreground"
+            className={cn(
+              sm ? "size-[1.15rem]" : "size-6",
+              tone === "on-dark" ? "text-white/70" : "text-muted-foreground",
+            )}
             strokeWidth={1.5}
           />
         )}
@@ -238,6 +266,7 @@ export function MobileSaveButton({
         duration={duration}
         inLibrary={Boolean(alreadyInLibrary || onPolarr)}
         onPolarr={Boolean(onPolarr)}
+        seedLiked={liked || optimisticLiked}
         onDownload={onDownload}
         onChanged={() => {
           void refresh();
@@ -259,6 +288,7 @@ export function SavedInDrawer({
   duration,
   inLibrary,
   onPolarr,
+  seedLiked,
   onDownload,
   onChanged,
 }: {
@@ -272,11 +302,13 @@ export function SavedInDrawer({
   duration?: number;
   inLibrary?: boolean;
   onPolarr?: boolean;
+  /** Prefer showing Liked Songs as saved before / while membership loads. */
+  seedLiked?: boolean;
   onDownload?: () => void;
   onChanged?: () => void;
 }) {
   const [playlists, setPlaylists] = useState<PlaylistRow[]>([]);
-  const [liked, setLiked] = useState(false);
+  const [liked, setLiked] = useState(Boolean(seedLiked));
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -329,8 +361,9 @@ export function SavedInDrawer({
       setExpanded(false);
       return;
     }
+    if (seedLiked) setLiked(true);
     void load();
-  }, [open, load]);
+  }, [open, load, seedLiked]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -428,9 +461,6 @@ export function SavedInDrawer({
         liked: persisted,
         count: typeof data?.count === "number" ? data.count : undefined,
       });
-      toastHeart(
-        persisted ? "Saved to Liked Songs" : "Removed from Liked Songs",
-      );
       onChanged?.();
     } catch {
       setLiked(!next);
@@ -485,11 +515,11 @@ export function SavedInDrawer({
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogPortal>
-          <DialogOverlay className="z-[60] bg-black/55" />
+          <DialogOverlay className="z-[110] bg-black/55" />
           <DialogPrimitive.Content
             aria-describedby={undefined}
             className={cn(
-              "fixed inset-x-0 bottom-0 z-[60] flex max-h-[min(88vh,720px)] flex-col rounded-t-2xl border-t border-border bg-background text-foreground shadow-2xl outline-none",
+              "fixed inset-x-0 bottom-0 z-[110] flex max-h-[min(88vh,720px)] flex-col rounded-t-2xl border-t border-border bg-background text-foreground shadow-2xl outline-none",
               "data-[state=open]:animate-in data-[state=closed]:animate-out",
               "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
               "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",

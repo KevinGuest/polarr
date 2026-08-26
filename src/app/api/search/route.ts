@@ -12,7 +12,7 @@ import {
   type CatalogTrackHit,
 } from "@/lib/catalog-search";
 import { resolveArtistPortrait } from "@/lib/artist-portrait";
-import { LidarrClient } from "@/lib/lidarr";
+import { coverFromMap, getAlbumCoverMap, LidarrClient } from "@/lib/lidarr";
 import {
   namesMatch,
   normalizeArtistName,
@@ -39,20 +39,32 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
   });
 }
 
-function trackToHit(t: TrackRow): CatalogTrackHit {
+function trackToHit(
+  t: TrackRow,
+  covers?: Map<string, string>,
+): CatalogTrackHit {
+  const image = covers
+    ? coverFromMap(covers, t.artist, t.album, t.title, t.coverPath) || undefined
+    : t.coverPath && /^https?:\/\//i.test(t.coverPath)
+      ? t.coverPath
+      : undefined;
   return {
     id: t.id,
     title: t.title,
     artist: t.artist,
     album: t.album,
-    image: t.coverPath || undefined,
+    image,
     duration: t.duration || undefined,
     localTrackId: t.id,
     onPolarr: true,
   };
 }
 
-function albumsFromLocal(tracks: TrackRow[], q: string): CatalogAlbumHit[] {
+function albumsFromLocal(
+  tracks: TrackRow[],
+  q: string,
+  covers?: Map<string, string>,
+): CatalogAlbumHit[] {
   const byKey = new Map<string, CatalogAlbumHit & { score: number }>();
   for (const t of tracks) {
     const album = (t.album || "").trim();
@@ -66,11 +78,17 @@ function albumsFromLocal(tracks: TrackRow[], q: string): CatalogAlbumHit[] {
     );
     const prev = byKey.get(key);
     if (prev && prev.score >= score) continue;
+    const image =
+      (covers
+        ? coverFromMap(covers, t.artist, t.album, t.title, t.coverPath)
+        : null) ||
+      (t.coverPath && /^https?:\/\//i.test(t.coverPath) ? t.coverPath : null) ||
+      prev?.image;
     byKey.set(key, {
       id: `local:album:${key}`,
       title: album,
       artist,
-      image: t.coverPath || prev?.image,
+      image: image || undefined,
       alreadyInLibrary: true,
       score,
     });
@@ -100,6 +118,7 @@ function hydrateCatalogTracks(
   catalog: CatalogTrackHit[],
   local: TrackRow[],
   q: string,
+  covers?: Map<string, string>,
 ): CatalogTrackHit[] {
   const byKey = new Map<string, TrackRow>();
   for (const t of local) {
@@ -117,9 +136,14 @@ function hydrateCatalogTracks(
       const lk = trackMatchKey(lib.artist, lib.title) || k || hit.id;
       if (seen.has(lk)) continue;
       seen.add(lk);
+      const libCover = covers
+        ? coverFromMap(covers, lib.artist, lib.album, lib.title, lib.coverPath)
+        : lib.coverPath && /^https?:\/\//i.test(lib.coverPath)
+          ? lib.coverPath
+          : null;
       hydrated.push({
         ...hit,
-        image: hit.image || lib.coverPath || undefined,
+        image: hit.image || libCover || undefined,
         duration: hit.duration || lib.duration || undefined,
         localTrackId: lib.id,
         onPolarr: true,
@@ -138,7 +162,7 @@ function hydrateCatalogTracks(
     if (k) seen.add(k);
     else if (seen.has(t.id)) continue;
     else seen.add(t.id);
-    hydrated.push(trackToHit(t));
+    hydrated.push(trackToHit(t, covers));
   }
 
   return hydrated.sort(
@@ -199,14 +223,15 @@ export async function GET(req: Request) {
 
   const profiles = profileHits(q);
   const local = searchTracksLocal(q, 48);
-  const localAlbums = albumsFromLocal(local, q);
+  const covers = await getAlbumCoverMap();
+  const localAlbums = albumsFromLocal(local, q, covers);
   const localArtists = artistsFromLocal(local);
 
   if (libraryOnly) {
     return json({
       query: q,
       local,
-      tracks: local.map(trackToHit),
+      tracks: local.map((t) => trackToHit(t, covers)),
       albums: localAlbums,
       artists: localArtists,
       profiles,
@@ -325,7 +350,7 @@ export async function GET(req: Request) {
     }),
   );
 
-  const tracks = hydrateCatalogTracks(catalog.tracks, local, q);
+  const tracks = hydrateCatalogTracks(catalog.tracks, local, q, covers);
   const albums = markAlbumsInLibrary([...albumByKey.values()], local).sort(
     (a, b) => Number(Boolean(b.alreadyInLibrary)) - Number(Boolean(a.alreadyInLibrary)),
   );

@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { LikedSongsCover } from "@/components/liked-songs-cover";
 import { emitLikesChanged, emitLibraryChanged } from "@/lib/ui-events";
 import { cn } from "@/lib/utils";
-import { toastError, toastInfo, toastHeart, toastSuccess } from "@/lib/toast";
+import { toastError, toastInfo, toastSuccess } from "@/lib/toast";
 
 type PlaylistRow = {
   id: string;
@@ -224,9 +224,6 @@ export function AddToPlaylistMenu({
         liked: persisted,
         count: typeof data?.count === "number" ? data.count : undefined,
       });
-      toastHeart(
-        persisted ? "Saved to Liked Songs" : "Removed from Liked Songs",
-      );
     } catch {
       setLiked(!next);
       toastError("Couldn’t update Liked Songs");

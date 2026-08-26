@@ -1,22 +1,16 @@
 import { getAuthUser, json } from "@/lib/api";
 import { listOfflineTrackIds, listTracks, type TrackRow } from "@/lib/db";
 import { scanMusicLibrary } from "@/lib/library";
-import { albumCoverKey, getAlbumCoverMap } from "@/lib/lidarr";
+import { coverFromMap, getAlbumCoverMap } from "@/lib/lidarr";
 
 export const dynamic = "force-dynamic";
 
 async function tracksWithCovers(): Promise<TrackRow[]> {
   const covers = await getAlbumCoverMap();
   return listTracks(200).map((t) => {
-    const fromDb =
-      t.coverPath && /^https?:\/\//i.test(t.coverPath) ? t.coverPath : null;
-    const album = (t.album || t.title || "").trim();
-    const fromLidarr = album
-      ? covers.get(albumCoverKey(t.artist, album)) || null
-      : null;
     return {
       ...t,
-      coverPath: fromDb || fromLidarr || t.coverPath,
+      coverPath: coverFromMap(covers, t.artist, t.album, t.title, t.coverPath),
     };
   });
 }

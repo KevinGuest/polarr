@@ -211,7 +211,7 @@ export function LibrarySidebar({
       window.removeEventListener(LIBRARY_CHANGED_EVENT, onRefresh);
       window.removeEventListener(LIBRARY_PINS_CHANGED_EVENT, onRefresh);
     };
-  }, [pathname, refresh]);
+  }, [refresh]);
 
   const likedActive = pathname.startsWith("/library/liked");
   const isPage = variant === "page";

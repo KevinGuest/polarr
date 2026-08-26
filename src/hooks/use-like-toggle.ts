@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { toastApiError, toastError, toastHeart } from "@/lib/toast";
+import { toastApiError, toastError } from "@/lib/toast";
 import { emitLikesChanged } from "@/lib/ui-events";
 
 /** Optimistic per-track like toggle. */
@@ -52,9 +52,6 @@ export function useLikeToggle(
         liked: typeof data?.liked === "boolean" ? data.liked : next,
         count: typeof data?.count === "number" ? data.count : undefined,
       });
-      const saved =
-        typeof data?.liked === "boolean" ? data.liked : next;
-      toastHeart(saved ? "Saved to Liked Songs" : "Removed from Liked Songs");
     } catch {
       setLiked(prev);
       toastError("Couldn’t update Liked Songs");

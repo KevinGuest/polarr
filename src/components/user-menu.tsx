@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   Activity,
@@ -13,6 +13,7 @@ import {
   Shield,
   User,
 } from "lucide-react";
+import { useAuth } from "@/components/auth-provider";
 import { BanStatusBox } from "@/components/ban-status-box";
 import { Dialog, DialogOverlay, DialogPortal } from "@/components/ui/dialog";
 import {
@@ -24,59 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { UserAvatar } from "@/components/user-avatar";
-import { AVATAR_UPDATED_EVENT } from "@/lib/ui-events";
 import { cn } from "@/lib/utils";
-
-type AuthUser = {
-  publicId?: string;
-  username: string;
-  isAdmin: boolean;
-  role?: string;
-  avatarUrl?: string | null;
-};
-
-function useAuthUser() {
-  const pathname = usePathname();
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [avatarVer, setAvatarVer] = useState(0);
-
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetch("/api/auth/me", { cache: "no-store" });
-      const data = res.ok ? await res.json() : { user: null };
-      setUser(data.user ?? null);
-      if (data.user?.avatarUrl) setAvatarVer(Date.now());
-    } catch {
-      setUser(null);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [pathname, refresh]);
-
-  useEffect(() => {
-    function onAvatarUpdated() {
-      void refresh();
-    }
-    window.addEventListener(AVATAR_UPDATED_EVENT, onAvatarUpdated);
-    return () => {
-      window.removeEventListener(AVATAR_UPDATED_EVENT, onAvatarUpdated);
-    };
-  }, [refresh]);
-
-  const avatarSrc = user?.avatarUrl
-    ? `${user.avatarUrl}${user.avatarUrl.includes("?") ? "&" : "?"}v=${avatarVer || 1}`
-    : null;
-
-  const isStaff =
-    Boolean(user?.isAdmin) ||
-    user?.role === "owner" ||
-    user?.role === "admin" ||
-    user?.role === "moderator";
-
-  return { user, avatarSrc, isStaff, refresh };
-}
 
 export function UserMenu({
   variant = "icon",
@@ -85,10 +34,11 @@ export function UserMenu({
   variant?: "icon" | "sidebar";
 }) {
   const router = useRouter();
-  const { user, avatarSrc, isStaff } = useAuthUser();
+  const { user, avatarSrc, isStaff, clear } = useAuth();
 
   async function logout() {
     await fetch("/api/auth/me", { method: "DELETE" }).catch(() => null);
+    clear();
     router.replace("/login");
     router.refresh();
   }
@@ -230,12 +180,13 @@ export function ProfileDrawer({
   className?: string;
 }) {
   const router = useRouter();
-  const { user, avatarSrc, isStaff } = useAuthUser();
+  const { user, avatarSrc, isStaff, clear } = useAuth();
   const [open, setOpen] = useState(false);
 
   async function logout() {
     setOpen(false);
     await fetch("/api/auth/me", { method: "DELETE" }).catch(() => null);
+    clear();
     router.replace("/login");
     router.refresh();
   }

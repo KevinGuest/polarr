@@ -1,50 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
+import { useAuthOptional, type BanStatus } from "@/components/auth-provider";
 import { cn } from "@/lib/utils";
 
-export type BanStatus = {
-  stream: boolean;
-  download: boolean;
-  user: boolean;
-  expiresAt: string | null;
-  permanent: boolean;
-  label: string;
-  rickroll?: boolean;
-} | null;
+export type { BanStatus };
 
 /** Compact sidebar footer for active non–user-only bans. */
 export function BanStatusBox({ className }: { className?: string }) {
-  const [ban, setBan] = useState<BanStatus>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/auth/me", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { ban?: BanStatus } | null) => {
-        if (cancelled) return;
-        const b = data?.ban;
-        if (!b) {
-          setBan(null);
-          return;
-        }
-        // User-only bans block login — still hide if only user and no stream/download
-        if (!b.stream && !b.download) {
-          setBan(null);
-          return;
-        }
-        setBan(b);
-      })
-      .catch(() => {
-        if (!cancelled) setBan(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const auth = useAuthOptional();
+  const ban = auth?.ban ?? null;
 
   if (!ban) return null;
+  // User-only bans block login — still hide if only user and no stream/download
+  if (!ban.stream && !ban.download) return null;
 
   return (
     <div
@@ -77,17 +46,9 @@ function BanLine({ on, label }: { on: boolean; label: string }) {
       )}
     >
       {on ? (
-        <Check
-          className="size-3 shrink-0 text-emerald-400"
-          strokeWidth={2.5}
-          aria-hidden
-        />
+        <Check className="size-3.5 shrink-0" strokeWidth={2} aria-hidden />
       ) : (
-        <X
-          className="size-3 shrink-0 text-destructive"
-          strokeWidth={2.5}
-          aria-hidden
-        />
+        <X className="size-3.5 shrink-0" strokeWidth={2} aria-hidden />
       )}
       <span>{label}</span>
     </li>

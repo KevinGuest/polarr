@@ -4,12 +4,11 @@ import {
   libraryAlbumPinKey,
   libraryFolderPinKey,
   libraryPlaylistPinKey,
-  listLibraryNavItems,
   listLibraryPins,
   listPinnedAlbumNavItems,
   listPlaylistFolders,
   listUserPlaylistsInFolder,
-  topArtistsFromLibrary,
+  topArtistsFromUserLibrary,
 } from "@/lib/db";
 import {
   albumCoverKey,
@@ -44,7 +43,7 @@ export async function GET() {
       tracks: item.tracks,
       image: fromDb || fromLidarr,
       pinKey,
-      pinned: pinOrder.has(pinKey),
+      pinned: true,
       href: albumHref({ title: item.title, artist: item.artist }),
       updatedAt: 0,
     };
@@ -93,27 +92,8 @@ export async function GET() {
     return (b.updatedAt || 0) - (a.updatedAt || 0);
   });
 
-  const libraryAlbums = listLibraryNavItems(200).map((item) => {
-    const fromDb =
-      item.image && /^https?:\/\//i.test(item.image) ? item.image : null;
-    const fromLidarr =
-      covers.get(albumCoverKey(item.artist, item.title)) || null;
-    const pinKey = libraryAlbumPinKey(item.artist, item.title);
-    return {
-      type: "album" as const,
-      key: item.key,
-      title: item.title,
-      artist: item.artist,
-      tracks: item.tracks,
-      image: fromDb || fromLidarr,
-      pinKey,
-      pinned: pinOrder.has(pinKey),
-      href: albumHref({ title: item.title, artist: item.artist }),
-      updatedAt: 0,
-    };
-  });
-
-  const libraryArtists = topArtistsFromLibrary(200).map((row) => {
+  // Artists the user actually has in their library — not the full Lidarr scan.
+  const libraryArtists = topArtistsFromUserLibrary(user.id, 200).map((row) => {
     const name = row.artist;
     const qs = new URLSearchParams({ name });
     const image = artistCovers.get(artistCoverKey(name)) || null;
@@ -139,7 +119,8 @@ export async function GET() {
       pinned: pinOrder.has("liked"),
     },
     items,
-    albums: libraryAlbums,
+    // Only user-saved albums (same as album rows in items) — never the full scan.
+    albums,
     artists: libraryArtists,
     pins: pins.map((p) => p.itemKey),
   });

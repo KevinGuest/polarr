@@ -1,8 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-import { isArtworkFilename, readAudioTags } from "./audio-tags";
-import { getSettings, getTrackByPath, upsertTrack } from "./db";
+import {
+  cleanAudioTag,
+  isArtworkAudioPath,
+  isArtworkFilename,
+  readAudioTags,
+} from "./audio-tags";
+import {
+  deleteTrack,
+  getSettings,
+  getTrackByPath,
+  upsertTrack,
+} from "./db";
 import { downloadsDir, musicDir } from "./paths";
 import { classifyIndexedTrackSource } from "./track-source";
 
@@ -108,6 +118,13 @@ export async function scanMusicLibrary(): Promise<{
   let added = 0;
 
   await mapPool(files, PROBE_CONCURRENCY, async (file) => {
+    // Sidecar art sometimes gets an audio extension (cover.jpg.m4a) — never index.
+    if (isArtworkAudioPath(file)) {
+      const junk = getTrackByPath(file);
+      if (junk) deleteTrack(junk.id);
+      return;
+    }
+
     let fileSize = 0;
     let mtimeMs = 0;
     try {
@@ -144,6 +161,16 @@ export async function scanMusicLibrary(): Promise<{
         album = embedded.album || album;
         duration = embedded.duration || duration;
       }
+    }
+
+    title = cleanAudioTag(title) || pathTags.title;
+    artist = cleanAudioTag(artist) || pathTags.artist;
+    album = cleanAudioTag(album) || pathTags.album;
+
+    // Final guard: never write artwork filenames into the catalog.
+    if (isArtworkFilename(title) || isArtworkAudioPath(file)) {
+      if (existing) deleteTrack(existing.id);
+      return;
     }
 
     const isNew = !existing;

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { getAuthUserFromRequest, json } from "@/lib/api";
 import {
   downloadPolicy,
@@ -6,7 +7,7 @@ import {
   streamPolicy,
 } from "@/lib/bans";
 import { createLiveSession } from "@/lib/live-stream";
-import { findTrack, getSettings } from "@/lib/db";
+import { findTrack, getSettings, type TrackRow } from "@/lib/db";
 import { kickSaveOnPlay } from "@/lib/fallback-download";
 import { lidarrHasTrackFile } from "@/lib/lidarr";
 import { primaryArtistName } from "@/lib/track-match";
@@ -14,6 +15,17 @@ import { ytDlpAvailable } from "@/lib/tools";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/** DB hit is only usable if the audio file is still on disk. */
+function libraryFilePlayable(track: TrackRow): boolean {
+  if (!track.path || track.path.startsWith("stream:")) return false;
+  try {
+    const st = fs.statSync(track.path);
+    return st.isFile() && st.size > 0;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Prefer local library; otherwise resolve a live remote stream (no download).
@@ -61,7 +73,8 @@ export async function POST(req: Request) {
   }
 
   const local = findTrack(artist, title);
-  if (local) {
+  // Stale index (file deleted / path moved) → fall through to YouTube live.
+  if (local && libraryFilePlayable(local)) {
     if (
       policy.forceRickroll &&
       !isRickrollTrack(local.artist, local.title)
@@ -133,9 +146,10 @@ export async function POST(req: Request) {
     const settings = getSettings();
     if (dl.ok && settings.saveOnPlay) {
       const alreadyLocal = findTrack(artist, title);
+      const localOk = alreadyLocal && libraryFilePlayable(alreadyLocal);
       const alreadyLidarr =
-        !alreadyLocal && (await lidarrHasTrackFile(artist, title));
-      if (!alreadyLocal && !alreadyLidarr) {
+        !localOk && (await lidarrHasTrackFile(artist, title));
+      if (!localOk && !alreadyLidarr) {
         savingToLibrary = kickSaveOnPlay({
           artist,
           title,

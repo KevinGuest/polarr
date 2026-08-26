@@ -56,9 +56,15 @@ export async function GET(req: Request) {
   }
 
   if (forTrack) {
+    const artist = (params.get("artist") || "").trim();
+    const title = (params.get("title") || "").trim();
+    const meta =
+      artist || title
+        ? { artist: artist || undefined, title: title || undefined }
+        : undefined;
     return json({
-      playlists: listUserPlaylistsForTrack(user.id, forTrack),
-      liked: isTrackLiked(user.id, forTrack),
+      playlists: listUserPlaylistsForTrack(user.id, forTrack, meta),
+      liked: isTrackLiked(user.id, forTrack, meta),
     });
   }
 

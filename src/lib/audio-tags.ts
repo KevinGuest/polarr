@@ -24,14 +24,28 @@ type FfprobeJson = {
   }>;
 };
 
-/** Embedded cover art streams are often tagged title=cover.jpg. */
+/**
+ * Embedded cover streams / sidecar art often land as track titles
+ * (e.g. cover.jpg, folder.png). Never treat these as songs.
+ */
 const ARTWORK_FILENAME =
-  /^(cover|folder|front|back|albumart|album.?art|thumb|thumbnail|artwork|scan|booklet)([-_ ]?\d*)\.(jpe?g|png|webp|gif|bmp|tiff?)$/i;
+  /^(cover|folder|front|back|albumart|album.?art|thumb|thumbnail|artwork|scan|booklet|r[-_]?cover|cd(art)?|disc)([-_ .]?\d*)\.(jpe?g|png|webp|gif|bmp|tiff?)$/i;
 
 export function isArtworkFilename(value: string | null | undefined): boolean {
-  const t = String(value || "").trim();
+  const t = String(value || "")
+    .trim()
+    .replace(/^.*[/\\]/, ""); // strip path prefixes
   if (!t) return false;
   return ARTWORK_FILENAME.test(t);
+}
+
+/** True when a file stem/basename is album art (cover.jpg.m4a, folder.jpg, …). */
+export function isArtworkAudioPath(filePath: string | null | undefined): boolean {
+  const p = String(filePath || "").trim();
+  if (!p) return false;
+  const base = p.replace(/^.*[/\\]/, "");
+  const stem = base.replace(/\.[^.]+$/i, "");
+  return isArtworkFilename(base) || isArtworkFilename(stem);
 }
 
 /** Drop cover-art filenames so callers fall back to path / job metadata. */

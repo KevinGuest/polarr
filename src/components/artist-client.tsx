@@ -93,6 +93,7 @@ export function ArtistClient() {
       return;
     }
     setLoading(true);
+    setPopularExpanded(false);
     const qs = new URLSearchParams({ name });
     if (foreignArtistId) qs.set("foreignArtistId", foreignArtistId);
     if (imageParam) qs.set("image", imageParam);
@@ -149,7 +150,10 @@ export function ArtistClient() {
     statsParts.push(`${tracks.length} track${tracks.length === 1 ? "" : "s"}`);
   }
 
-  const popularTracks = popularExpanded ? tracks : tracks.slice(0, 10);
+  // Spotify/Apple: show top 5; See more expands to top 10 only.
+  const popularTracks = popularExpanded
+    ? tracks.slice(0, 10)
+    : tracks.slice(0, 5);
 
   function playTile(item: Extract<CatalogTile, { trackId: string }>) {
     const pt: PlayerTrack = {
@@ -355,7 +359,7 @@ export function ArtistClient() {
                   Popular
                 </h2>
                 <ul>{popularTracks.map((t, i) => renderPopularRow(t, i, true))}</ul>
-                {tracks.length > 10 ? (
+                {tracks.length > 5 ? (
                   <button
                     type="button"
                     onClick={() => setPopularExpanded((v) => !v)}
@@ -730,8 +734,17 @@ export function ArtistClient() {
               <section className="space-y-4">
                 <ShelfHeader title="Popular" />
                 <ul className="divide-y divide-border/60 rounded-lg border border-border">
-                  {tracks.slice(0, 10).map((t, i) => renderPopularRow(t, i, false))}
+                  {popularTracks.map((t, i) => renderPopularRow(t, i, false))}
                 </ul>
+                {tracks.length > 5 ? (
+                  <button
+                    type="button"
+                    onClick={() => setPopularExpanded((v) => !v)}
+                    className="mt-1 px-1 text-sm font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    {popularExpanded ? "See less" : "See more"}
+                  </button>
+                ) : null}
               </section>
             ) : null}
           </>

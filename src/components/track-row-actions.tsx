@@ -8,10 +8,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  LOCAL_SOURCE_AVAILABLE,
-  type LocalSourceBadge,
-} from "@/lib/track-source-badge";
 import { cn } from "@/lib/utils";
 
 /**
@@ -28,7 +24,7 @@ export function TrackRowActions({
   liked,
   inLibrary,
   onPolarr,
-  localSource = "lidarr",
+  showPolarrBadge = true,
   downloading,
   onDownload,
   onLikedChange,
@@ -43,10 +39,10 @@ export function TrackRowActions({
   liked?: boolean;
   /** Saved to a user playlist / Your Library — not “file exists on disk”. */
   inLibrary?: boolean;
-  /** Indexed on this server — show Lidarr or Polarr source badge. */
+  /** Indexed on this Polarr server — show Polarr badge (not Lidarr). */
   onPolarr?: boolean;
-  /** When onPolarr — Lidarr library vs Polarr fallback download. */
-  localSource?: LocalSourceBadge;
+  /** When false, caller renders availability next to the artist instead. */
+  showPolarrBadge?: boolean;
   downloading?: boolean;
   onDownload?: () => void;
   onLikedChange?: (liked: boolean) => void;
@@ -59,21 +55,15 @@ export function TrackRowActions({
         className,
       )}
     >
-      {onPolarr ? (
+      {showPolarrBadge && onPolarr ? (
         <TooltipProvider delayDuration={300}>
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="inline-flex shrink-0">
-                <StreamQualityBadge
-                  quality="local"
-                  localSource={localSource}
-                  available
-                />
+                <StreamQualityBadge quality="local" available />
               </span>
             </TooltipTrigger>
-            <TooltipContent>
-              {LOCAL_SOURCE_AVAILABLE[localSource]}
-            </TooltipContent>
+            <TooltipContent>Available on Polarr</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       ) : null}

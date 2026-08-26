@@ -66,7 +66,7 @@ function SingMicIcon({ className }: { className?: string }) {
 
 /**
  * Collapsed: frosted circle with mic+sparkles.
- * Expanded: vertical pill slider to blend vocals → instrumental.
+ * Expanded: vertical pill slider (PlayerSlider-style: no thumb; thickens while dragging).
  */
 function SingControl({
   compact,
@@ -87,12 +87,27 @@ function SingControl({
 }) {
   const singing = vocalLevel < 0.97;
   const [expanded, setExpanded] = useState(false);
+  const [scrubbing, setScrubbing] = useState(false);
   const preparing =
     karaokeStatus === "processing" || karaokeStatus === "queued";
+  const blocked =
+    karaokeStatus === "error" || karaokeStatus === "unavailable";
 
   useEffect(() => {
     if (singing) setExpanded(true);
+    else setExpanded(false);
   }, [singing]);
+
+  useEffect(() => {
+    if (!scrubbing) return;
+    const end = () => setScrubbing(false);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    return () => {
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+  }, [scrubbing]);
 
   if (!karaokeEligible) return null;
 
@@ -110,12 +125,12 @@ function SingControl({
           if (vocalLevel > 0.98) setVocalLevel(0.55);
         }}
         className={cn(
-          "absolute right-5 z-30 flex size-12 items-center justify-center rounded-full bg-white/15 text-white ring-1 ring-white/20 backdrop-blur-md transition-transform active:scale-95",
+          "absolute right-4 z-30 flex size-9 items-center justify-center rounded-full bg-white/15 text-white ring-1 ring-white/20 backdrop-blur-md transition-transform active:scale-95",
           compact ? "bottom-4" : "bottom-10",
           preparing && "animate-pulse",
         )}
       >
-        <SingMicIcon className="text-[1.35rem]" />
+        <SingMicIcon className="text-[0.95rem]" />
       </button>
     );
   }
@@ -123,12 +138,12 @@ function SingControl({
   return (
     <div
       className={cn(
-        "absolute right-5 z-30 flex flex-col items-center",
+        "absolute right-4 z-30 flex flex-col items-center",
         compact ? "bottom-4" : "bottom-10",
       )}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <div className="flex flex-col items-center rounded-full bg-white/15 px-2 py-2.5 ring-1 ring-white/20 backdrop-blur-md">
+      <div className="flex flex-col items-center rounded-full bg-white/15 px-1.5 py-2 ring-1 ring-white/20 backdrop-blur-md">
         <SliderPrimitive.Root
           orientation="vertical"
           value={[pct]}
@@ -139,12 +154,21 @@ function SingControl({
           max={100}
           step={1}
           aria-label="Vocal amount"
-          className="relative flex h-40 w-8 touch-none select-none flex-col items-center"
+          onPointerDown={() => setScrubbing(true)}
+          className="relative flex h-28 w-6 touch-none select-none flex-col items-center py-1"
         >
-          <SliderPrimitive.Track className="relative w-1 grow overflow-hidden rounded-full bg-white/25 data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1">
-            <SliderPrimitive.Range className="absolute bg-white/90 data-[orientation=vertical]:w-full" />
+          <SliderPrimitive.Track
+            className={cn(
+              "relative grow overflow-hidden rounded-full bg-white/25 transition-[width] duration-150 ease-out data-[orientation=vertical]:h-full",
+              scrubbing
+                ? "data-[orientation=vertical]:w-2.5"
+                : "data-[orientation=vertical]:w-1",
+            )}
+          >
+            <SliderPrimitive.Range className="absolute bg-white data-[orientation=vertical]:w-full" />
           </SliderPrimitive.Track>
-          <SliderPrimitive.Thumb className="block size-4 rounded-full bg-white shadow-md ring-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50" />
+          {/* Invisible thumb — same pattern as PlayerSlider / volume */}
+          <SliderPrimitive.Thumb className="block size-4 opacity-0" />
         </SliderPrimitive.Root>
         <button
           type="button"
@@ -160,19 +184,19 @@ function SingControl({
               setExpanded(false);
             }
           }}
-          className="mt-2 flex size-9 items-center justify-center rounded-full text-white"
+          className="mt-1.5 flex size-7 items-center justify-center rounded-full text-white"
         >
-          <SingMicIcon className="text-[1.15rem]" />
+          <SingMicIcon className="text-[0.85rem]" />
         </button>
       </div>
       {preparing ? (
-        <span className="mt-1.5 text-[10px] font-medium text-white/55">
+        <span className="mt-1 text-[9px] font-medium text-white/55">
           {Math.round((karaokeProgress || 0) * 100)}%
         </span>
       ) : null}
-      {karaokeStatus === "error" && karaokeError ? (
+      {blocked && karaokeError ? (
         <span
-          className="mt-1.5 max-w-[5rem] text-center text-[10px] text-red-300/90"
+          className="mt-1 max-w-[5rem] text-center text-[9px] text-red-300/90"
           title={karaokeError}
         >
           Unavailable
@@ -1138,9 +1162,6 @@ function MobileTransport({
   onNext: () => void;
   onVolume: (v: number) => void;
 }) {
-  const { vocalLevel, karaokeEligible } = usePlayer();
-  const singing = karaokeEligible && vocalLevel < 0.97;
-
   return (
     <div className="shrink-0 px-6 pt-2">
           <PlayerSlider
@@ -1153,15 +1174,11 @@ function MobileTransport({
           />
       <div className="relative mt-1.5 flex h-4 items-center justify-between text-[11px] tabular-nums text-white/55">
         <span>{formatDuration(progress)}</span>
-        <span className="absolute inset-x-0 text-center text-[11px] font-medium tracking-wide text-white/55">
-          {singing ? (
-            "Sing"
-          ) : (
-            <StreamQualityBadge
-              track={track}
-              className="bg-white/12 text-white/80"
-            />
-          )}
+        <span className="absolute inset-x-0 flex justify-center text-[11px] font-medium tracking-wide text-white/55">
+          <StreamQualityBadge
+            track={track}
+            className="bg-white/12 text-white/80"
+          />
         </span>
         <span>{formatRemaining(progress, duration)}</span>
       </div>

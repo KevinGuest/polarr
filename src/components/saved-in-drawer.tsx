@@ -85,7 +85,12 @@ function PlaylistRowButton({
 
 export function useTrackSavedStatus(
   trackId: string | undefined,
-  opts?: { onPolarr?: boolean; alreadyInLibrary?: boolean },
+  opts?: {
+    onPolarr?: boolean;
+    alreadyInLibrary?: boolean;
+    artist?: string;
+    title?: string;
+  },
 ) {
   const [liked, setLiked] = useState(false);
   const [inPlaylist, setInPlaylist] = useState(false);
@@ -95,10 +100,14 @@ export function useTrackSavedStatus(
     if (!trackId) return;
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/playlists?forTrack=${encodeURIComponent(trackId)}`,
-        { cache: "no-store" },
-      );
+      const qs = new URLSearchParams({ forTrack: trackId });
+      const artist = (opts?.artist || "").trim();
+      const title = (opts?.title || "").trim();
+      if (artist) qs.set("artist", artist);
+      if (title) qs.set("title", title);
+      const res = await fetch(`/api/playlists?${qs.toString()}`, {
+        cache: "no-store",
+      });
       if (!res.ok) return;
       const data = await res.json();
       setLiked(Boolean(data.liked));
@@ -107,7 +116,7 @@ export function useTrackSavedStatus(
     } finally {
       setLoading(false);
     }
-  }, [trackId]);
+  }, [trackId, opts?.artist, opts?.title]);
 
   useEffect(() => {
     void refresh();
@@ -161,6 +170,8 @@ export function MobileSaveButton({
   const { liked, inAnyPlaylist, refresh } = useTrackSavedStatus(trackId, {
     onPolarr,
     alreadyInLibrary,
+    artist,
+    title,
   });
 
   useEffect(() => {

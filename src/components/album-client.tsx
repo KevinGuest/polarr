@@ -3,16 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowDownCircle,
   Check,
   ChevronLeft,
   CirclePlus,
   Clock,
+  Pause,
   Play,
   Shuffle,
 } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
+import { MobileSaveButton } from "@/components/saved-in-drawer";
+import { NowPlayingBars } from "@/components/now-playing-bars";
+import { PolarrAvailabilityBadge } from "@/components/stream-quality-badge";
 import { TrackActionsDrawer } from "@/components/track-actions-drawer";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
@@ -34,7 +37,7 @@ import {
 } from "@/lib/ui-events";
 import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine } from "@/lib/utils";
 import type { LocalSourceBadge } from "@/lib/track-source-badge";
-import { toastError, toastSuccess, toastInfo, toastSavingToLibrary } from "@/lib/toast";
+import { toastError, toastSuccess, toastInfo } from "@/lib/toast";
 
 function shuffleArray<T>(items: T[]): T[] {
   const out = [...items];
@@ -81,7 +84,7 @@ function albumLibraryPinKey(artistName: string, albumTitle: string) {
 }
 
 export function AlbumClient({ albumId }: { albumId: string }) {
-  const { play, track, queue } = usePlayer();
+  const { play, toggle, track, queue, playing } = usePlayer();
   const router = useRouter();
   const ref = useMemo(() => decodeAlbumId(albumId), [albumId]);
 
@@ -273,12 +276,6 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         );
         return;
       }
-      if (live.savingToLibrary) {
-        toastSavingToLibrary(
-          live.track.artist || album?.artist || artist,
-          live.track.title || track.title,
-        );
-      }
       const pt: PlayerTrack = {
         id: live.track.id,
         title: live.track.title || track.title,
@@ -399,6 +396,31 @@ export function AlbumClient({ albumId }: { albumId: string }) {
       return;
     }
     play(first, albumQueue);
+  }
+
+  function rowIsCurrent(t: AlbumTrack): boolean {
+    const playerTrack = toPlayerTrack(t);
+    return isPlayerRowCurrent(
+      track,
+      {
+        id: playerTrack.id,
+        localTrackId: t.localTrackId,
+        streamId: `stream:${t.key}`,
+        title: t.title,
+        artist: album?.artist || artist || playerTrack.artist,
+      },
+      queue,
+    );
+  }
+
+  const inThisAlbum = Boolean(track && tracks.some((t) => rowIsCurrent(t)));
+
+  function onPlayClick() {
+    if (inThisAlbum) {
+      toggle();
+      return;
+    }
+    playAvailable();
   }
 
   async function toggleYourLibrary() {
@@ -634,12 +656,16 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => playAvailable()}
+                  onClick={onPlayClick}
                   disabled={!canPlay}
                   className="flex size-14 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-opacity hover:opacity-90 disabled:opacity-40"
-                  aria-label="Play album"
+                  aria-label={inThisAlbum && playing ? "Pause" : "Play album"}
                 >
-                  <Play className="size-6 translate-x-0.5" fill="currentColor" />
+                  {inThisAlbum && playing ? (
+                    <Pause className="size-6" fill="currentColor" />
+                  ) : (
+                    <Play className="size-6 translate-x-0.5" fill="currentColor" />
+                  )}
                 </button>
               </div>
             </div>
@@ -661,18 +687,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                   {tracks.map((t) => {
                     const busy = busyKey === t.key;
                     const playerTrack = toPlayerTrack(t);
-                    const streamId = `stream:${t.key}`;
-                    const isCurrent = isPlayerRowCurrent(
-                      track,
-                      {
-                        id: playerTrack.id,
-                        localTrackId: t.localTrackId,
-                        streamId,
-                        title: t.title,
-                        artist: playerTrack.artist,
-                      },
-                      queue,
-                    );
+                    const isCurrent = rowIsCurrent(t);
                     return (
                       <li key={t.key}>
                         <div className="flex w-full items-center gap-3 px-4 py-2.5">
@@ -684,7 +699,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                           >
                             <div
                               className={cn(
-                                "truncate text-[15px] font-medium",
+                                "flex min-w-0 items-center gap-2",
                                 isCurrent
                                   ? "text-primary"
                                   : t.available
@@ -692,21 +707,37 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                                     : "text-foreground/80",
                               )}
                             >
-                              {t.title}
+                              {isCurrent ? (
+                                <NowPlayingBars playing={playing} />
+                              ) : null}
+                              <span className="truncate text-[15px] font-medium">
+                                {t.title}
+                              </span>
                             </div>
                             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
-                              {t.available ? (
-                                <ArrowDownCircle
-                                  className="size-3.5 shrink-0 text-primary"
-                                  aria-label="In library"
-                                />
-                              ) : null}
+                              <PolarrAvailabilityBadge available={t.available} />
                               {t.explicit ? <ExplicitBadge /> : null}
                               <span className="truncate">
                                 {playerTrack.artist}
                               </span>
                             </div>
                           </button>
+                          <MobileSaveButton
+                            trackId={t.localTrackId || `stream:${t.key}`}
+                            artist={album?.artist || artist || playerTrack.artist}
+                            title={t.title}
+                            album={album?.title || title}
+                            coverPath={album?.image || null}
+                            duration={t.duration}
+                            onPolarr={t.available}
+                            alreadyInLibrary={t.available && Boolean(t.localTrackId)}
+                            onDownload={
+                              t.available
+                                ? undefined
+                                : () => void markDownloaded(t)
+                            }
+                            size="sm"
+                          />
                           <TrackActionsDrawer
                             track={playerTrack}
                             onPolarr={t.available}
@@ -785,12 +816,16 @@ export function AlbumClient({ albumId }: { albumId: string }) {
             <div className="flex flex-wrap items-center gap-3 pt-2">
               <button
                 type="button"
-                onClick={() => playAvailable()}
+                onClick={onPlayClick}
                 disabled={loading || (!tracks.length && !fallbackReady)}
                 className="flex size-14 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-40"
-                aria-label="Play"
+                aria-label={inThisAlbum && playing ? "Pause" : "Play"}
               >
-                <Play className="size-6 translate-x-0.5" fill="currentColor" />
+                {inThisAlbum && playing ? (
+                  <Pause className="size-6" fill="currentColor" />
+                ) : (
+                  <Play className="size-6 translate-x-0.5" fill="currentColor" />
+                )}
               </button>
               <button
                 type="button"
@@ -872,17 +907,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                     explicit: t.explicit,
                     duration: t.duration || undefined,
                   };
-                  const isCurrent = isPlayerRowCurrent(
-                    track,
-                    {
-                      id: playerTrack.id,
-                      localTrackId: t.localTrackId,
-                      streamId,
-                      title: t.title,
-                      artist: trackArtists,
-                    },
-                    queue,
-                  );
+                  const isCurrent = rowIsCurrent(t);
                   const row = (
                     <tr
                       draggable
@@ -899,6 +924,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                         <TrackRowIndex
                           n={t.trackNumber}
                           isCurrent={isCurrent}
+                          playing={playing}
                           busy={busy}
                         />
                       </td>
@@ -907,14 +933,17 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                           <div
                             className={cn(
                               "truncate font-medium",
-                              t.available
-                                ? "text-foreground"
-                                : "text-foreground/80",
+                              isCurrent
+                                ? "text-primary"
+                                : t.available
+                                  ? "text-foreground"
+                                  : "text-foreground/80",
                             )}
                           >
                             {t.title}
                           </div>
                           <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+                            <PolarrAvailabilityBadge available={t.available} />
                             {t.explicit ? <ExplicitBadge /> : null}
                             <span className="truncate">{trackArtists}</span>
                           </div>
@@ -922,14 +951,14 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                       </td>
                       <td className={trackRowMidCell(isCurrent, "py-3")}>
                         <TrackRowActions
-                          trackId={t.localTrackId || `catalog:${t.key}`}
-                          artist={trackArtists}
+                          trackId={t.localTrackId || `stream:${t.key}`}
+                          artist={album?.artist || artist || trackArtists}
                           title={t.title}
                           album={album?.title || title}
                           coverPath={album?.image || null}
                           duration={t.duration}
                           onPolarr={t.available}
-                          localSource={t.localSource ?? "lidarr"}
+                          showPolarrBadge={false}
                           downloading={busy}
                           onDownload={
                             t.available

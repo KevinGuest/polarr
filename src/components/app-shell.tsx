@@ -89,17 +89,17 @@ function PolarrMark({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        "relative inline-flex shrink-0 overflow-hidden rounded-md bg-black",
+        "relative inline-flex shrink-0 overflow-hidden rounded-[4px]",
         className,
       )}
     >
-      {/* Asset has generous padding; scale so the glyph matches wordmark weight. */}
+      {/* PNG has padding around the glyph — crop in so it matches wordmark weight. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/polarr-icon.png"
         alt=""
         aria-hidden
-        className="size-full scale-[1.32] object-cover"
+        className="size-full scale-[1.28] object-cover mix-blend-screen"
       />
     </span>
   );
@@ -270,14 +270,11 @@ function ShellInner({ children }: { children: React.ReactNode }) {
     <>
       <Link
         href="/admin"
-        className="mb-6 flex items-center gap-2.5 px-3 text-foreground"
+        className="mb-6 flex items-center px-3 text-foreground"
         aria-label="Polarr admin"
         onClick={closeAdminNav}
       >
         <PolarrMark className="size-8" />
-        <span className="text-lg font-semibold leading-none tracking-tight">
-          Polarr
-        </span>
       </Link>
       <div className="flex min-h-0 flex-1 flex-col">
         <ScrollArea className="min-h-0 flex-1">
@@ -311,13 +308,10 @@ function ShellInner({ children }: { children: React.ReactNode }) {
           </button>
           <Link
             href="/admin"
-            className="inline-flex min-w-0 items-center gap-2 text-foreground"
+            className="inline-flex shrink-0 items-center text-foreground"
             aria-label="Polarr admin"
           >
             <PolarrMark className="size-8" />
-            <span className="truncate text-base font-semibold leading-none tracking-tight">
-              Polarr
-            </span>
           </Link>
           <div className="ml-auto">
             <UserMenu />
@@ -332,13 +326,10 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             <Link
               href="/"
               onClick={dismissOverlays}
-              className="inline-flex w-fit items-center gap-2.5 justify-self-start text-foreground"
+              className="inline-flex w-fit items-center justify-self-start text-foreground"
               aria-label="Polarr home"
             >
               <PolarrMark className="size-8" />
-              <span className="text-lg font-semibold leading-none tracking-tight">
-                Polarr
-              </span>
             </Link>
             <div className="relative w-full justify-self-center">
               <Suspense
@@ -373,13 +364,11 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                 <Link
                   href="/"
                   aria-label="Polarr home"
-                  className="inline-flex min-w-0 flex-1 items-center gap-2.5"
+                  className="inline-flex shrink-0 items-center"
                 >
-                  <PolarrMark className="size-9 shrink-0" />
-                  <span className="truncate text-xl font-semibold leading-none tracking-tight">
-                    Polarr
-                  </span>
+                  <PolarrMark className="size-9" />
                 </Link>
+                <div className="min-w-0 flex-1" />
                 <div className="flex shrink-0 items-center gap-1">
                   {!isNotificationsPage ? (
                     <NotificationsLink unread={notificationUnread} />

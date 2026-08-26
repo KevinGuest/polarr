@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { findTrack, getTrack, type TrackRow } from "./db";
+import { remapForeignMusicPath } from "./music-roots";
 import { dataDir, musicDir } from "./paths";
 import { resolveFfmpeg } from "./tools";
 
@@ -262,6 +263,8 @@ function fileOnDisk(track: TrackRow | null | undefined): string | null {
       path.join(musicDir(), raw.slice("/music".length).replace(/^[\\/]+/, "")),
     );
   }
+  const remapped = remapForeignMusicPath(raw);
+  if (remapped) tries.push(remapped);
   const seen = new Set<string>();
   for (const p of tries) {
     if (!p || seen.has(p)) continue;

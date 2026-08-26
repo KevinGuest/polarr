@@ -4,6 +4,7 @@
  */
 
 import { listTracks, listTracksByArtist, type TrackRow } from "@/lib/db";
+import { isArtworkFilename } from "@/lib/audio-tags";
 import {
   artistCoverKey,
   coverFrom,
@@ -178,8 +179,12 @@ export function buildArtistCatalog(
   },
 ): ArtistCatalog {
   const name = artist.trim();
-  const own = listTracksByArtist(name, opts?.trackLimit ?? 200);
-  const featuresRaw = listTracksFeaturingArtist(name, 40);
+  const own = listTracksByArtist(name, opts?.trackLimit ?? 200).filter(
+    (t) => !isArtworkFilename(t.title),
+  );
+  const featuresRaw = listTracksFeaturingArtist(name, 40).filter(
+    (t) => !isArtworkFilename(t.title),
+  );
 
   const byAlbum = new Map<string, TrackRow[]>();
   for (const t of own) {

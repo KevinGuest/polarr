@@ -7,8 +7,9 @@ import { CoverArt } from "@/components/cover-art";
 import { UserAvatar } from "@/components/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { toastError } from "@/lib/toast";
+import { toastError, toastSuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import { emitLibraryChanged } from "@/lib/ui-events";
 
 type ActivityUser = {
   username: string;
@@ -118,6 +119,20 @@ export function RequestsClient() {
   const [page, setPage] = useState(1);
   const [forbidden, setForbidden] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<{
+    scanned: number;
+    added: number;
+    totalTracks: number;
+    newest: {
+      id: string;
+      title: string;
+      artist: string;
+      album: string;
+      available?: boolean;
+      coverPath?: string | null;
+    }[];
+  } | null>(null);
   async function refresh() {
     const [r, d] = await Promise.all([
       fetch("/api/requests"),
@@ -183,6 +198,45 @@ export function RequestsClient() {
       void refresh();
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function scanLibrary() {
+    setScanning(true);
+    try {
+      const res = await fetch("/api/admin/media", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "scan" }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        toastError(data?.error || "Scan failed");
+        return;
+      }
+      const added = Number(data?.added) || 0;
+      const scanned = Number(data?.scanned) || 0;
+      const totalTracks = Number(data?.totalTracks) || 0;
+      toastSuccess(
+        added > 0
+          ? `Scan complete · ${added} added · ${totalTracks} total`
+          : `Scan complete · ${scanned} files checked · ${totalTracks} total`,
+      );
+      const newestRes = await fetch(
+        "/api/admin/media?mode=tracks&page=1&limit=10",
+        { cache: "no-store" },
+      );
+      const newestData = await newestRes.json().catch(() => null);
+      setScanResult({
+        scanned,
+        added,
+        totalTracks,
+        newest: Array.isArray(newestData?.tracks) ? newestData.tracks : [],
+      });
+      emitLibraryChanged();
+      void refresh();
+    } finally {
+      setScanning(false);
     }
   }
 
@@ -322,24 +376,98 @@ export function RequestsClient() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
-      <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Requests</h1>
-        <p className="text-sm text-muted-foreground">
-          Downloads, streams, and failures.
-        </p>
-        {stats && (
-          <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-muted-foreground">
-            <span>{stats.tracks} tracks</span>
-            <span>·</span>
-            <span>{stats.total} requests</span>
-            {Object.entries(stats.byStatus).map(([status, n]) => (
-              <Badge key={status} variant="outline">
-                {status}: {n}
-              </Badge>
-            ))}
-          </div>
-        )}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="space-y-2">
+          <h1 className="text-2xl font-semibold tracking-tight">Requests</h1>
+          <p className="text-sm text-muted-foreground">
+            Downloads, streams, failures, and library scans.
+          </p>
+          {stats && (
+            <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-muted-foreground">
+              <span>{stats.tracks} tracks</span>
+              <span>·</span>
+              <span>{stats.total} requests</span>
+              {Object.entries(stats.byStatus).map(([status, n]) => (
+                <Badge key={status} variant="outline">
+                  {status}: {n}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={scanning}
+          onClick={() => void scanLibrary()}
+        >
+          <RefreshCw className={`size-3.5 ${scanning ? "animate-spin" : ""}`} />
+          {scanning ? "Scanning…" : "Scan library"}
+        </Button>
       </div>
+
+      {scanResult ? (
+        <section className="space-y-3 rounded-xl border border-border p-4">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold tracking-tight">
+                Last scan
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                {scanResult.scanned} files checked · {scanResult.added} new ·{" "}
+                {scanResult.totalTracks} in library
+              </p>
+            </div>
+            <Button asChild size="sm" variant="ghost" className="h-8 text-xs">
+              <Link href="/admin/tracks">View all tracks</Link>
+            </Button>
+          </div>
+          {scanResult.newest.length > 0 ? (
+            <ul className="divide-y divide-border/70 rounded-lg border border-border">
+              {scanResult.newest.map((t) => (
+                <li
+                  key={t.id}
+                  className="flex items-center gap-3 px-3 py-2.5"
+                >
+                  <CoverArt
+                    seed={`${t.artist}-${t.title}`}
+                    image={t.coverPath}
+                    className="size-9 shrink-0 rounded-sm"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{t.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {t.artist}
+                      {t.album ? ` · ${t.album}` : ""}
+                    </p>
+                  </div>
+                  {t.available ? (
+                    <Badge
+                      variant="outline"
+                      className="gap-1 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
+                    >
+                      <Check className="size-3" />
+                      On disk
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className="gap-1 border-destructive/30 text-destructive"
+                    >
+                      <X className="size-3" />
+                      Missing
+                    </Badge>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No library tracks indexed yet.
+            </p>
+          )}
+        </section>
+      ) : null}
 
       <div
         className="flex flex-wrap gap-1 border-b border-border pb-px"

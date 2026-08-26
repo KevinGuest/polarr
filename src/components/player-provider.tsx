@@ -398,7 +398,8 @@ function isEphemeralTrack(track: PlayerTrack): boolean {
  *
  * Library tracks skip the network — /api/stream/{id} is ready immediately.
  * Ban/rickroll is enforced on the stream endpoint; media errors force a
- * resolve so restricted accounts still get the rewrite.
+ * resolve so restricted accounts still get the rewrite — and so a missing
+ * local file can fall through to YouTube live.
  *
  * Ephemeral ids with a fresh /api/live URL are reused (search/album already
  * resolved). Re-POST only when streamUrl is missing, or opts.force (410 /
@@ -475,9 +476,10 @@ async function resolveIfNeeded(
       }
       return track;
     }
-    // Library OK path: only rewrite when server forces rickroll (or ephemeral)
+    // Healthy library play: keep the local id (unless force-recovering / rickroll).
     if (
       !ephemeral &&
+      !force &&
       !data.rickroll &&
       data.mode === "library" &&
       data.track?.id === track.id
@@ -488,20 +490,11 @@ async function resolveIfNeeded(
         quality: "local",
       };
     }
-    if (data.savingToLibrary) {
-      try {
-        const { toastSavingToLibrary } = await import("@/lib/toast");
-        toastSavingToLibrary(
-          data.track?.artist || track.artist,
-          data.track?.title || track.title,
-        );
-      } catch {
-        /* ignore */
-      }
-    }
-    if (!ephemeral && !data.rickroll) {
+    // Non-force library track that resolved to something else — don't swap mid-play.
+    if (!ephemeral && !force && !data.rickroll) {
       return track;
     }
+    // force / ephemeral / rickroll: adopt server answer (YouTube live or another file).
     const liveUrl = data.streamUrl || data.track?.streamUrl || null;
     const mode = data.mode === "library" ? "local" : "youtube";
     return {
@@ -599,6 +592,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   /** Demucs instrumental bus (full-quality stereo stem). */
   const instAudioRef = useRef<HTMLAudioElement | null>(null);
   const instReadyRef = useRef(false);
+  /** Bumps when karaoke prep is cancelled/superseded so aborted loads don't flash Unavailable. */
+  const karaokeGenRef = useRef(0);
+  const karaokeStatusRef = useRef<KaraokeUiStatus>("idle");
+  /** True while a prepareKaraoke poll loop owns this track (survives status→queued re-renders). */
+  const karaokePrepActiveRef = useRef(false);
   const queueRef = useRef<PlayerTrack[]>([]);
   /** Queue snapshot before first “add/drop replaces upcoming” — restored if liked empty. */
   const fallbackQueueRef = useRef<PlayerTrack[] | null>(null);
@@ -637,6 +635,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [karaokeStatus, setKaraokeStatus] = useState<KaraokeUiStatus>("idle");
   const [karaokeProgress, setKaraokeProgress] = useState(0);
   const [karaokeError, setKaraokeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    karaokeStatusRef.current = karaokeStatus;
+  }, [karaokeStatus]);
   const [shuffle, setShuffle] = useState(false);
   const [openPanels, setOpenPanelsState] = useState<OpenPanels>(DEFAULT_PANELS);
   const setOpenPanels = useCallback(
@@ -914,6 +916,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setProgress(0);
       progressRef.current = 0;
 
+      // Always leave karaoke when the song changes
+      karaokeGenRef.current += 1;
+      karaokePrepActiveRef.current = false;
+      vocalLevelRef.current = 1;
+      setVocalLevelState(1);
+
       // Reset instrumental bus until stem loads for this track
       instReadyRef.current = false;
       const inst = instAudioRef.current;
@@ -1069,11 +1077,31 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setQueue(nextQ);
         const el = audioRef.current;
         if (!el) return;
+        // Natural advance = new song — exit karaoke
+        karaokeGenRef.current += 1;
+        karaokePrepActiveRef.current = false;
+        vocalLevelRef.current = 1;
+        setVocalLevelState(1);
+        instReadyRef.current = false;
+        const inst = instAudioRef.current;
+        if (inst) {
+          inst.pause();
+          inst.removeAttribute("src");
+          try {
+            inst.load();
+          } catch {
+            /* ignore */
+          }
+        }
+        setKaraokeStatus("idle");
+        setKaraokeProgress(0);
+        setKaraokeError(null);
         setAudioSrc(el, audioSrcFor(ready));
         setProgress(0);
         progressRef.current = 0;
         trackRef.current = ready;
         setTrack(ready);
+        applyMixVolumes();
         const gen = ++playGenRef.current;
         const currentGen = () => gen === playGenRef.current;
         void (async () => {
@@ -1650,10 +1678,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const loadInstrumental = useCallback(
-    async (trackId: string, streamUrl: string) => {
+    async (trackId: string, streamUrl: string, gen: number) => {
       const inst = instAudioRef.current;
       const mix = audioRef.current;
       if (!inst || !mix) return;
+      if (gen !== karaokeGenRef.current) return;
 
       // Never leave the mix muted while we load
       instReadyRef.current = false;
@@ -1672,23 +1701,27 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setAudioSrc(inst, streamUrl);
       const ready = await waitForCanPlay(
         inst,
-        () => trackRef.current?.id === trackId,
+        () =>
+          gen === karaokeGenRef.current && trackRef.current?.id === trackId,
         20_000,
       );
+      if (gen !== karaokeGenRef.current) return;
       if (!ready || trackRef.current?.id !== trackId) {
-        const codes: Record<number, string> = {
-          1: "load aborted",
-          2: "network error",
-          3: "decode error",
-          4: "format not supported",
-        };
-        const detail = inst.error ? codes[inst.error.code] : null;
-        setKaraokeStatus("error");
-        setKaraokeError(
-          detail
-            ? `Instrumental failed to load (${detail}) — slide again to retry`
-            : "Instrumental failed to load — slide again to retry",
-        );
+        // Aborted / superseded prep — don't flash Unavailable for slider noise
+        if (inst.error && inst.error.code !== 1) {
+          const codes: Record<number, string> = {
+            2: "network error",
+            3: "decode error",
+            4: "format not supported",
+          };
+          const detail = codes[inst.error.code] || null;
+          setKaraokeStatus("error");
+          setKaraokeError(
+            detail
+              ? `Instrumental failed to load (${detail}) — slide again to retry`
+              : "Instrumental failed to load — slide again to retry",
+          );
+        }
         return;
       }
       if (!audioLooksPlayable(inst)) {
@@ -1721,11 +1754,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const prepareKaraoke = useCallback(
     (trackId: string, artist: string, title: string, album?: string) => {
+      const gen = ++karaokeGenRef.current;
       let cancelled = false;
       let timer: number | undefined;
 
       const poll = async () => {
-        if (cancelled) return;
+        if (cancelled || gen !== karaokeGenRef.current) return;
         try {
           const res = await fetch(
             `/api/karaoke/${encodeURIComponent(trackId)}`,
@@ -1742,7 +1776,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             error?: string;
             streamUrl?: string;
           };
-          if (cancelled || trackRef.current?.id !== trackId) return;
+          if (cancelled || gen !== karaokeGenRef.current) return;
+          if (trackRef.current?.id !== trackId) return;
           if (!isKaraokeEligible(trackRef.current)) return;
           const status = data.status ?? "error";
           setKaraokeStatus(status);
@@ -1750,7 +1785,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           setKaraokeError(data.error ?? null);
 
           if (status === "ready" && data.streamUrl) {
-            await loadInstrumental(trackId, data.streamUrl);
+            await loadInstrumental(trackId, data.streamUrl, gen);
             return;
           }
           if (status === "processing" || status === "queued") {
@@ -1760,10 +1795,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             timer = window.setTimeout(poll, 1500);
             return;
           }
+          // unavailable / error / idle — allow a later slider retry
+          karaokePrepActiveRef.current = false;
           instReadyRef.current = false;
           applyMixVolumes();
         } catch {
-          if (cancelled) return;
+          if (cancelled || gen !== karaokeGenRef.current) return;
+          karaokePrepActiveRef.current = false;
           setKaraokeStatus("error");
           setKaraokeError("Could not prepare instrumental");
           instReadyRef.current = false;
@@ -1792,11 +1830,31 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setVocalLevelState(next);
       vocalLevelRef.current = next;
 
-      // Slider gesture is a good moment to start the second audio element
+      // Failed prep: retry from the slider without thrashing every tick.
+      const st = karaokeStatusRef.current;
+      if (
+        next < 0.999 &&
+        !instReadyRef.current &&
+        !karaokePrepActiveRef.current &&
+        (st === "error" || st === "unavailable")
+      ) {
+        const t = trackRef.current;
+        setKaraokeStatus("idle");
+        setKaraokeError(null);
+        if (t && isKaraokeEligible(t)) {
+          karaokePrepActiveRef.current = true;
+          prepareKaraoke(
+            t.id,
+            t.artist,
+            t.title,
+            t.album || undefined,
+          );
+        }
+      }
+
       if (next < 0.999 && instReadyRef.current) {
         void ensureInstPlaying().then((ok) => {
           if (!ok) {
-            // Don't mute original
             applyMixVolumes();
             return;
           }
@@ -1806,7 +1864,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
       applyMixVolumes();
     },
-    [applyMixVolumes, ensureInstPlaying],
+    [applyMixVolumes, ensureInstPlaying, prepareKaraoke],
   );
 
   // Safety: if mix was faded but inst stalled, restore original
@@ -1830,26 +1888,32 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(id);
   }, [playing]);
 
-  // Demucs instrumental — library files only (YouTube/live mix is unsyncable)
+  const singingActive = vocalLevel < 0.999;
+
+  // Demucs instrumental — start once when sing mode engages for a library track.
+  // Do not restart on every slider tick (that aborted loads → Unavailable).
   useEffect(() => {
-    if (!track?.id) return;
-    if (!isKaraokeEligible(track)) return;
-    if (vocalLevel >= 0.999) return;
-    if (instReadyRef.current) return;
-    return prepareKaraoke(
+    if (!track?.id || !isKaraokeEligible(track) || !singingActive) {
+      if (!singingActive) karaokePrepActiveRef.current = false;
+      return;
+    }
+    if (instReadyRef.current || karaokePrepActiveRef.current) return;
+
+    karaokePrepActiveRef.current = true;
+    const stop = prepareKaraoke(
       track.id,
       track.artist,
       track.title,
       track.album || undefined,
     );
+    return () => {
+      stop();
+      karaokePrepActiveRef.current = false;
+      karaokeGenRef.current += 1;
+    };
   }, [
     track?.id,
-    track?.artist,
-    track?.title,
-    track?.album,
-    track?.quality,
-    track?.streamUrl,
-    vocalLevel,
+    singingActive,
     prepareKaraoke,
   ]);
 
@@ -1858,6 +1922,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (!track) return;
     if (isKaraokeEligible(track)) return;
 
+    karaokeGenRef.current += 1;
+    karaokePrepActiveRef.current = false;
     vocalLevelRef.current = 1;
     setVocalLevelState(1);
     instReadyRef.current = false;

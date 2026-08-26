@@ -1,7 +1,7 @@
 import { json } from "@/lib/api";
 import {
-  fetchArtistPopularityScores,
-  popularityForTrack,
+  fetchArtistPopularTracks,
+  hydratePopularWithLibrary,
 } from "@/lib/artist-popularity";
 import { buildArtistCatalog } from "@/lib/artist-catalog";
 import { resolveArtistPortrait } from "@/lib/artist-portrait";
@@ -138,14 +138,12 @@ export async function GET(req: Request) {
 
   const artistCovers = await getArtistCoverMap();
   // Prefer Deezer (fresher) over Lidarr MediaCover posters
-  const [fresh, popularityScores] = await Promise.all([
+  const [fresh, chartPopular] = await Promise.all([
     resolveArtistPortrait({
       artist,
       foreignArtistId,
     }).catch(() => null),
-    fetchArtistPopularityScores(artist).catch(
-      () => new Map<string, number>(),
-    ),
+    fetchArtistPopularTracks(artist, 10).catch(() => []),
   ]);
   let artistImage =
     fresh ||
@@ -191,6 +189,17 @@ export async function GET(req: Request) {
       coverPath: f.coverPath ?? null,
       artist: f.artist,
       album: f.album,
+    });
+  }
+
+  const popularHydrated = hydratePopularWithLibrary(chartPopular, artist);
+  for (const t of popularHydrated) {
+    if (coverJobs.some((c) => c.id === t.id)) continue;
+    coverJobs.push({
+      id: t.id,
+      coverPath: t.coverPath,
+      artist: t.artist,
+      album: t.album,
     });
   }
 
@@ -248,24 +257,22 @@ export async function GET(req: Request) {
     }),
     features: catalog.features,
     tiles,
-    tracks: catalog.tracks
-      .map((t, i) => ({
-        id: t.id,
-        title: t.title,
-        artist: formatTrackArtistLine(t.artist, t.title),
-        primaryArtist: t.artist,
-        album: t.album,
-        duration: t.duration,
-        coverPath: coverById.get(t.id) || t.coverPath,
-        source: t.source,
-        popularity: popularityForTrack(
-          popularityScores,
-          t.artist,
-          t.title,
-          i,
-          catalog.tracks.length,
-        ),
-      }))
-      .sort((a, b) => b.popularity - a.popularity),
+    // Spotify/Apple-style Popular: external chart top 10 only (not local library ranked).
+    tracks: popularHydrated.map((t) => ({
+      id: t.id,
+      title: t.title,
+      artist: formatTrackArtistLine(t.artist, t.title),
+      primaryArtist: t.primaryArtist,
+      album: t.album,
+      duration: t.duration,
+      coverPath:
+        (t.coverPath && /^https?:\/\//i.test(t.coverPath)
+          ? t.coverPath
+          : null) ||
+        coverById.get(t.id) ||
+        t.coverPath,
+      source: t.source,
+      popularity: t.popularity,
+    })),
   });
 }

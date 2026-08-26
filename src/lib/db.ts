@@ -26,6 +26,11 @@ import {
   type DownloadQuality,
 } from "./download-quality";
 import {
+  cleanAudioTag,
+  isArtworkAudioPath,
+  isArtworkFilename,
+} from "./audio-tags";
+import {
   parseEmailTemplatesJson,
   serializeEmailTemplateOverrides,
   type EmailTemplatesMap,
@@ -313,9 +318,9 @@ export function ensureHistoryTrack(input: {
   album?: string;
   coverPath?: string | null;
 }): TrackRow | null {
-  const title = input.title.trim();
-  const artist = input.artist.trim();
-  if (!title || !artist) return null;
+  const title = cleanAudioTag(input.title);
+  const artist = cleanAudioTag(input.artist) || input.artist.trim();
+  if (!title || !artist || isArtworkFilename(title)) return null;
 
   const local = findTrack(artist, title);
   if (local) return local;
@@ -323,22 +328,25 @@ export function ensureHistoryTrack(input: {
   const id = streamLikeId(artist, title);
   const existing = getTrack(id);
   if (existing) {
-    if (input.coverPath && !existing.coverPath) {
+    if (isArtworkFilename(existing.title)) {
+      deleteTrack(id);
+    } else if (input.coverPath && !existing.coverPath) {
       upsertTrack({
         ...existing,
         coverPath: input.coverPath,
         album: input.album?.trim() || existing.album,
       });
       return getTrack(id);
+    } else {
+      return existing;
     }
-    return existing;
   }
 
   upsertTrack({
     id,
     title,
     artist,
-    album: input.album?.trim() || title,
+    album: cleanAudioTag(input.album) || input.album?.trim() || title,
     duration: 0,
     path: `stream://${id}`,
     coverPath: input.coverPath || null,
@@ -365,6 +373,74 @@ function backfillTrackMatchKeys(database: Database.Database) {
     }
   });
   tx();
+}
+
+function titleFromAudioPath(filePath: string): string {
+  const base = path.basename(filePath, path.extname(filePath)).trim();
+  if (!base || isArtworkFilename(base)) return "";
+  const cleaned = base.replace(/^\d{1,3}(\s*[-.]\s*|\s+)/, "").trim();
+  if (cleaned.includes(" - ")) {
+    const [, ...rest] = cleaned.split(" - ");
+    const title = rest.join(" - ").trim();
+    if (title && !isArtworkFilename(title)) return title;
+  }
+  return cleaned;
+}
+
+/**
+ * Remove or repair tracks whose title/path is album artwork (cover.jpg, …).
+ * Safe to re-run. Uses the open Database handle (startup migrate).
+ */
+function purgeArtworkNamedTracks(database: Database.Database) {
+  const rows = database
+    .prepare(`SELECT id, title, artist, album, path FROM tracks`)
+    .all() as {
+    id: string;
+    title: string;
+    artist: string;
+    album: string;
+    path: string;
+  }[];
+  if (!rows.length) return;
+
+  const delRelated = database.transaction((id: string) => {
+    database.prepare(`DELETE FROM play_history WHERE track_id = ?`).run(id);
+    database.prepare(`DELETE FROM offline_marks WHERE track_id = ?`).run(id);
+    database.prepare(`DELETE FROM playlist_tracks WHERE track_id = ?`).run(id);
+    try {
+      database.prepare(`DELETE FROM listening_feed WHERE track_id = ?`).run(id);
+    } catch {
+      /* table may not exist yet on older paths */
+    }
+    database.prepare(`DELETE FROM tracks WHERE id = ?`).run(id);
+  });
+
+  const repair = database.prepare(
+    `UPDATE tracks SET title = ?, match_key = ?, updated_at = ? WHERE id = ?`,
+  );
+
+  for (const row of rows) {
+    const titleJunk = isArtworkFilename(row.title);
+    const pathJunk = isArtworkAudioPath(row.path);
+    if (!titleJunk && !pathJunk) continue;
+
+    if (pathJunk || row.path.startsWith("stream:") || row.path.startsWith("stream://")) {
+      delRelated(row.id);
+      continue;
+    }
+
+    const fixed = titleFromAudioPath(row.path);
+    if (!fixed) {
+      delRelated(row.id);
+      continue;
+    }
+    repair.run(
+      fixed,
+      trackMatchKey(row.artist, fixed),
+      new Date().toISOString(),
+      row.id,
+    );
+  }
 }
 
 /**
@@ -884,6 +960,9 @@ function migrate(database: Database.Database) {
   `);
 
   backfillTrackMatchKeys(database);
+
+  // Drop / repair cover.jpg etc. wrongly stored as tracks (one-shot + idempotent).
+  purgeArtworkNamedTracks(database);
 
   // Single-user installs are the server owner
   const userCount = database
@@ -2448,8 +2527,46 @@ export function searchPublicProfiles(
   return rows.map(mapPublicProfile);
 }
 
+/**
+ * Sidecar / embedded artwork wrongly indexed as tracks (title or path stem
+ * like cover.jpg). Keep out of every library listing.
+ * @param alias table alias with trailing dot, e.g. "t." — or "" for bare tracks.
+ */
+function notArtworkTrackSql(alias = ""): string {
+  const c = alias;
+  return `NOT (
+  lower(trim(${c}title)) IN (
+    'cover.jpg','cover.jpeg','cover.png','cover.webp','cover.gif',
+    'folder.jpg','folder.jpeg','folder.png','front.jpg','front.jpeg',
+    'back.jpg','albumart.jpg','albumart.jpeg','albumart.png',
+    'thumb.jpg','thumbnail.jpg','artwork.jpg','artwork.png','r-cover.jpg'
+  )
+  OR lower(trim(${c}title)) GLOB 'cover*.jp*g'
+  OR lower(trim(${c}title)) GLOB 'cover*.png'
+  OR lower(trim(${c}title)) GLOB 'cover*.webp'
+  OR lower(trim(${c}title)) GLOB 'folder*.jp*g'
+  OR lower(trim(${c}title)) GLOB 'folder*.png'
+  OR lower(trim(${c}title)) GLOB 'front*.jp*g'
+  OR lower(trim(${c}title)) GLOB 'back*.jp*g'
+  OR lower(trim(${c}title)) GLOB 'albumart*.jp*g'
+  OR lower(trim(${c}title)) GLOB 'album?art*.jp*g'
+  OR lower(trim(${c}title)) GLOB 'thumb*.jp*g'
+  OR lower(trim(${c}title)) GLOB 'thumbnail*.jp*g'
+  OR lower(trim(${c}title)) GLOB 'artwork*.jp*g'
+  OR lower(trim(${c}title)) GLOB 'artwork*.png'
+  OR lower(${c}path) GLOB '*[/\\\\]cover.jp*g'
+  OR lower(${c}path) GLOB '*[/\\\\]folder.jp*g'
+  OR lower(${c}path) GLOB '*[/\\\\]cover.jp*g.*'
+  OR lower(${c}path) GLOB '*[/\\\\]folder.jp*g.*'
+)`;
+}
+
 /** Real library files only — excludes stream history stubs used for Recently played. */
-const LIBRARY_TRACK_FILTER = `source != 'stream' AND path NOT LIKE 'stream:%' AND path NOT LIKE 'stream://%'`;
+const LIBRARY_TRACK_FILTER = `source != 'stream' AND path NOT LIKE 'stream:%' AND path NOT LIKE 'stream://%' AND ${notArtworkTrackSql()}`;
+
+/** Stream stubs + library, still hide artwork-named junk. */
+const NON_ARTWORK_TRACK_FILTER = notArtworkTrackSql();
+const NON_ARTWORK_TRACK_FILTER_T = notArtworkTrackSql("t.");
 
 /** Artist frequency from shared library — used on public profiles. */
 export function topArtistsFromLibrary(limit = 12): {
@@ -2707,6 +2824,50 @@ function parseLibraryAlbumPinKey(
   const album = rest.slice(sep + 2);
   if (!artist || !album) return null;
   return { artist, album };
+}
+
+/**
+ * Artists in *this user's* library (liked songs + pinned albums) — not the
+ * full scanned catalog. Used by Your Library → Artists on mobile.
+ */
+export function topArtistsFromUserLibrary(
+  userId: string,
+  limit = 200,
+): { artist: string; tracks: number }[] {
+  if (!userId) return [];
+  const counts = new Map<string, { artist: string; tracks: number }>();
+  const add = (artist: string, n = 1) => {
+    const name = artist.trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    const prev = counts.get(key);
+    if (prev) prev.tracks += n;
+    else counts.set(key, { artist: name, tracks: n });
+  };
+
+  const liked = getDb()
+    .prepare(
+      `SELECT coalesce(nullif(t.artist, ''), nullif(l.artist, ''), '') as artist,
+              COUNT(*) as tracks
+       FROM track_likes l
+       LEFT JOIN tracks t ON t.id = l.track_id
+       WHERE l.user_id = ?
+       GROUP BY lower(coalesce(nullif(t.artist, ''), nullif(l.artist, ''), ''))`,
+    )
+    .all(userId) as { artist: string; tracks: number }[];
+  for (const row of liked) add(row.artist, Number(row.tracks) || 0);
+
+  for (const pin of listLibraryPins(userId)) {
+    const parsed = parseLibraryAlbumPinKey(pin.itemKey);
+    if (parsed?.artist) add(parsed.artist, 1);
+  }
+
+  return [...counts.values()]
+    .filter((r) => r.artist)
+    .sort(
+      (a, b) => b.tracks - a.tracks || a.artist.localeCompare(b.artist),
+    )
+    .slice(0, limit);
 }
 
 /**
@@ -3076,6 +3237,51 @@ export function countTracks(): number {
   return row.c;
 }
 
+export type AlbumListRow = {
+  artist: string;
+  title: string;
+  trackCount: number;
+  coverPath: string | null;
+  addedAt: string;
+};
+
+/** Distinct albums from library tracks, newest activity first. */
+export function listAlbumsPaginated(
+  limit = 10,
+  offset = 0,
+): AlbumListRow[] {
+  return getDb()
+    .prepare(
+      `SELECT
+         artist as artist,
+         album as title,
+         COUNT(*) as trackCount,
+         MAX(cover_path) as coverPath,
+         MAX(added_at) as addedAt
+       FROM tracks
+       WHERE ${LIBRARY_TRACK_FILTER}
+         AND album IS NOT NULL AND trim(album) != ''
+       GROUP BY lower(artist), lower(album)
+       ORDER BY MAX(added_at) DESC, album ASC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(limit, offset) as AlbumListRow[];
+}
+
+export function countAlbums(): number {
+  const row = getDb()
+    .prepare(
+      `SELECT COUNT(*) as c FROM (
+         SELECT 1 FROM tracks
+         WHERE ${LIBRARY_TRACK_FILTER}
+           AND album IS NOT NULL AND trim(album) != ''
+         GROUP BY lower(artist), lower(album)
+       )`,
+    )
+    .get() as { c: number };
+  return row.c;
+}
+
 const SEARCH_STOP = new Set([
   "the",
   "a",
@@ -3255,8 +3461,21 @@ export function upsertTrack(
     mtimeMs?: number;
   },
 ) {
+  // Never persist album-art filenames as playable tracks.
+  if (isArtworkAudioPath(track.path)) return;
+
+  let title = cleanAudioTag(track.title) || track.title.trim();
+  if (isArtworkFilename(title)) {
+    title = titleFromAudioPath(track.path);
+  }
+  if (!title || isArtworkFilename(title)) return;
+
+  const artist =
+    cleanAudioTag(track.artist) || track.artist.trim() || "Unknown Artist";
+  const album = cleanAudioTag(track.album) || track.album.trim() || "";
+
   const ts = nowIso();
-  const matchKey = trackMatchKey(track.artist, track.title);
+  const matchKey = trackMatchKey(artist, title);
   getDb()
     .prepare(
       `INSERT INTO tracks(
@@ -3281,9 +3500,9 @@ export function upsertTrack(
     )
     .run({
       id: track.id,
-      title: track.title,
-      artist: track.artist,
-      album: track.album,
+      title,
+      artist,
+      album,
       duration: track.duration,
       path: track.path,
       coverPath: track.coverPath,
@@ -3297,7 +3516,7 @@ export function upsertTrack(
     });
 
   // Library import may satisfy open requests
-  markMatchingRequestsAvailable(track.artist, track.album, track.title);
+  markMatchingRequestsAvailable(artist, album, title);
 }
 
 // ─── Requests ───────────────────────────────────────────────────────────────
@@ -4335,6 +4554,7 @@ export function listPlaylistTracksById(playlistId: string): TrackRow[] {
          FROM playlist_tracks pt
          INNER JOIN tracks ON tracks.id = pt.track_id
          WHERE pt.playlist_id = ?
+           AND ${notArtworkTrackSql("tracks.")}
          ORDER BY pt.position ASC`,
       )
       .all(id) as Record<string, unknown>[]
@@ -4625,8 +4845,14 @@ export function removeTrackFromPlaylist(
 export function listUserPlaylistsForTrack(
   userId: string,
   trackId: string,
+  meta?: LikeMeta,
 ): (PlaylistRow & { contains: boolean })[] {
   if (!userId) return [];
+  const ids = likeCandidateIds(trackId, meta);
+  if (ids.length === 0) {
+    return listUserPlaylists(userId).map((p) => ({ ...p, contains: false }));
+  }
+  const placeholders = ids.map(() => "?").join(", ");
   return (
     getDb()
       .prepare(
@@ -4637,13 +4863,13 @@ export function listUserPlaylistsForTrack(
                 (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlist_id = p.id) as trackCount,
                 EXISTS(
                   SELECT 1 FROM playlist_tracks pt
-                  WHERE pt.playlist_id = p.id AND pt.track_id = ?
+                  WHERE pt.playlist_id = p.id AND pt.track_id IN (${placeholders})
                 ) as contains
          FROM playlists p
          WHERE p.user_id = ?
          ORDER BY p.updated_at DESC`,
       )
-      .all(trackId, userId) as Record<string, unknown>[]
+      .all(...ids, userId) as Record<string, unknown>[]
   ).map((row) => ({
     ...mapPlaylistRow(row),
     contains: Boolean(row.contains),
@@ -4673,6 +4899,7 @@ export function listPlaylistTracks(
          FROM playlist_tracks pt
          INNER JOIN tracks ON tracks.id = pt.track_id
          WHERE pt.playlist_id = ?
+           AND ${notArtworkTrackSql("tracks.")}
          ORDER BY pt.position ASC`,
       )
       .all(id) as Record<string, unknown>[]
@@ -4879,6 +5106,7 @@ export function listTracksForAlbumIncludingStream(
       .prepare(
         `${TRACK_SELECT}
          WHERE lower(artist) = ? AND lower(album) = ?
+           AND ${NON_ARTWORK_TRACK_FILTER}
          ORDER BY
            CASE WHEN source = 'stream' OR path LIKE 'stream:%' OR path LIKE 'stream://%'
              THEN 1 ELSE 0 END,
@@ -5208,6 +5436,7 @@ export function listRecentPlays(
        INNER JOIN tracks t ON t.id = p.track_id
        WHERE p.user_id = ?
          AND (p.listened_seconds IS NULL OR p.listened_seconds >= 15)
+         AND ${NON_ARTWORK_TRACK_FILTER_T}
        GROUP BY p.track_id
        ORDER BY playedAt DESC
        LIMIT ?`,

@@ -99,16 +99,6 @@ function sortNavItems(items: NavItem[], sort: LibrarySort): NavItem[] {
   });
 }
 
-function mergeAlbumItems(primary: NavItem[], allAlbums: NavItem[]): NavItem[] {
-  const seen = new Set<string>();
-  const merged: NavItem[] = [];
-  for (const item of [...primary, ...allAlbums]) {
-    if (item.type !== "album" || seen.has(item.key)) continue;
-    seen.add(item.key);
-    merged.push(item);
-  }
-  return merged;
-}
 function PlaylistPlaceholder({ className }: { className?: string }) {
   return (
     <div
@@ -165,7 +155,6 @@ export function LibrarySidebar({
   const [likedTracks, setLikedTracks] = useState(0);
   const [likedPinned, setLikedPinned] = useState(false);
   const [items, setItems] = useState<NavItem[]>([]);
-  const [albums, setAlbums] = useState<NavItem[]>([]);
   const [artists, setArtists] = useState<NavItem[]>([]);
   const [filter, setFilter] = useState<LibraryFilter>("all");
   const [sort, setSort] = useState<LibrarySort>("recents");
@@ -180,7 +169,6 @@ export function LibrarySidebar({
       setLikedTracks(Number(data.liked?.tracks) || 0);
       setLikedPinned(Boolean(data.liked?.pinned));
       setItems(Array.isArray(data.items) ? data.items : []);
-      setAlbums(Array.isArray(data.albums) ? data.albums : []);
       setArtists(Array.isArray(data.artists) ? data.artists : []);
     } catch {
       /* ignore */
@@ -227,16 +215,15 @@ export function LibrarySidebar({
       return {
         showLiked: true,
         visibleItems: sortNavItems(
-          items.filter((item) => item.type !== "album"),
+          items.filter((item) => item.type !== "album" && item.type !== "artist"),
           sort,
         ),
       };
     }
 
     if (filter === "albums") {
-      const albumRows = albums.length
-        ? albums
-        : items.filter((item) => item.type === "album");
+      // Only albums the user saved — never the full scanned catalog.
+      const albumRows = items.filter((item) => item.type === "album");
       return {
         showLiked: false,
         visibleItems: sortNavItems(albumRows, sort),
@@ -250,16 +237,11 @@ export function LibrarySidebar({
       };
     }
 
-    const nonAlbum = items.filter((item) => item.type !== "album");
-    const allAlbums = mergeAlbumItems(
-      items.filter((item) => item.type === "album"),
-      albums,
-    );
     return {
       showLiked: true,
-      visibleItems: sortNavItems([...nonAlbum, ...allAlbums], sort),
+      visibleItems: sortNavItems(items, sort),
     };
-  }, [albums, artists, filter, isPage, items, sort]);
+  }, [artists, filter, isPage, items, sort]);
 
   function renderNavItem(item: NavItem) {
     const href =

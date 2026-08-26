@@ -278,44 +278,40 @@ export function HomeClient({
         <p className="text-sm text-destructive">Lidarr: {lidarrError}</p>
       )}
 
-      <MediaShelfRow
-        title="What others are listening to"
-        itemCount={others.length}
-        fillRow={false}
-        mobileTileSize="compact"
-        empty={
-          <p className="text-sm text-muted-foreground">
-            Tracks other people on this server play for 15+ seconds show up
-            here. Your own plays stay in Recently played.
-          </p>
-        }
-      >
-        {(visible) =>
-          others.slice(0, visible).map((item, i) => (
-            <TrackContextMenu key={item.id} track={item}>
-              <div className="min-w-0">
-                <MediaTileShell
-                  title={item.title}
-                  subtitle={formatTrackArtistLine(item.artist, item.title)}
-                  ariaLabel={`Play ${item.title}`}
-                  onOpen={() => playOthersTrack(item)}
-                  compact
-                  cover={
-                    <ListeningCover
-                      title={item.title}
-                      coverPath={item.coverPath}
-                      listenedBy={item.listenedBy}
-                      avatarUrl={item.listenedByAvatarUrl}
-                      listeners={item.listeners}
-                      delayMs={(i % 5) * 700}
-                    />
-                  }
-                />
-              </div>
-            </TrackContextMenu>
-          ))
-        }
-      </MediaShelfRow>
+      {others.length > 0 ? (
+        <MediaShelfRow
+          title="What others are listening to"
+          itemCount={others.length}
+          fillRow={false}
+          mobileTileSize="compact"
+        >
+          {(visible) =>
+            others.slice(0, visible).map((item, i) => (
+              <TrackContextMenu key={item.id} track={item}>
+                <div className="min-w-0">
+                  <MediaTileShell
+                    title={item.title}
+                    subtitle={formatTrackArtistLine(item.artist, item.title)}
+                    ariaLabel={`Play ${item.title}`}
+                    onOpen={() => playOthersTrack(item)}
+                    compact
+                    cover={
+                      <ListeningCover
+                        title={item.title}
+                        coverPath={item.coverPath}
+                        listenedBy={item.listenedBy}
+                        avatarUrl={item.listenedByAvatarUrl}
+                        listeners={item.listeners}
+                        delayMs={(i % 5) * 700}
+                      />
+                    }
+                  />
+                </div>
+              </TrackContextMenu>
+            ))
+          }
+        </MediaShelfRow>
+      ) : null}
 
       <MediaShelfRow
         title="Latest releases"

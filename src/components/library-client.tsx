@@ -30,7 +30,6 @@ import {
   trackRowStartCell,
 } from "@/lib/player-row";
 import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine, titleLooksExplicit } from "@/lib/utils";
-import { localSourceBadge } from "@/lib/track-source-badge";
 
 type Track = PlayerTrack & {
   source: string;
@@ -511,7 +510,6 @@ export function LibraryClient({
                           duration={t.duration}
                           liked={likedIds.has(t.id) || Boolean(t.liked)}
                           onPolarr={!t.streamOnly}
-                          localSource={localSourceBadge(t.source)}
                           onDownload={
                             t.streamOnly
                               ? () => void downloadTrack(t)
@@ -650,7 +648,6 @@ export function LibraryClient({
                             Boolean(t.liked)
                           }
                           onPolarr={!t.streamOnly}
-                          localSource={localSourceBadge(t.source)}
                           onDownload={
                             t.streamOnly
                               ? () => void downloadTrack(t)

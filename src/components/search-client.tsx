@@ -30,7 +30,6 @@ import { TrackRowActions } from "@/components/track-row-actions";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
 import { formatTrackArtistLine, titleLooksExplicit } from "@/lib/utils";
 import type { LocalSourceBadge } from "@/lib/track-source-badge";
-import { toastSavingToLibrary } from "@/lib/toast";
 import { RECENT_PLAYED_CHANGED_EVENT } from "@/lib/ui-events";
 import { MobileSearchHeader } from "@/components/mobile-search-header";
 import { MobileSaveButton } from "@/components/saved-in-drawer";
@@ -318,12 +317,6 @@ export function SearchClient() {
       if (!liveRes.ok || !live?.track?.id) {
         setMessage(live?.error || "Couldn’t start playback");
         return;
-      }
-      if (live.savingToLibrary) {
-        toastSavingToLibrary(
-          live.track.artist || hit.artist,
-          live.track.title || hit.title,
-        );
       }
       const pt: PlayerTrack = {
         id: live.track.id,
@@ -823,7 +816,6 @@ export function SearchClient() {
               coverPath={t.image}
               duration={t.duration}
               onPolarr={Boolean(t.onPolarr)}
-              localSource={t.localSource ?? "lidarr"}
             />
             <Button
               size="sm"

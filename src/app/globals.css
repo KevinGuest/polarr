@@ -164,6 +164,29 @@
   animation: polarr-listener-drift 4.5s ease-in-out infinite;
 }
 
+/* Spotify-style equalizer bars on the active track row */
+@keyframes now-playing-bar {
+  0%,
+  100% {
+    height: 3px;
+  }
+  50% {
+    height: 12px;
+  }
+}
+
+.now-playing-bar {
+  height: 3px;
+  animation: now-playing-bar 0.85s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .now-playing-bar {
+    animation: none;
+    height: 8px;
+  }
+}
+
 /* Holographic “Feeling lucky” ban lift */
 @keyframes ban-holo-wave {
   0%,

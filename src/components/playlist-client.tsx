@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  ArrowDownCircle,
   ArrowDownUp,
   Camera,
   ChevronLeft,
@@ -23,6 +22,9 @@ import {
 } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CoverArt } from "@/components/cover-art";
+import { MobileSaveButton } from "@/components/saved-in-drawer";
+import { NowPlayingBars } from "@/components/now-playing-bars";
+import { PolarrAvailabilityBadge } from "@/components/stream-quality-badge";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { TrackActionsDrawer } from "@/components/track-actions-drawer";
 import { TrackContextMenu } from "@/components/track-context-menu";
@@ -1292,24 +1294,35 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                         <div className="min-w-0 flex-1">
                           <div
                             className={cn(
-                              "truncate text-[15px] font-medium",
+                              "flex min-w-0 items-center gap-2",
                               isCurrent ? "text-primary" : "text-foreground",
                             )}
                           >
-                            {t.title}
+                            {isCurrent ? (
+                              <NowPlayingBars playing={playing} />
+                            ) : null}
+                            <span className="truncate text-[15px] font-medium">
+                              {t.title}
+                            </span>
                           </div>
                           <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
-                            {t.path ? (
-                              <ArrowDownCircle
-                                className="size-3.5 shrink-0 text-primary"
-                                aria-label="In library"
-                              />
-                            ) : null}
+                            <PolarrAvailabilityBadge available={Boolean(t.path)} />
                             {explicit ? <ExplicitBadge /> : null}
                             <span className="truncate">{t.artist}</span>
                           </div>
                         </div>
                       </button>
+                      <MobileSaveButton
+                        trackId={trackId}
+                        artist={t.artist}
+                        title={t.title}
+                        album={t.album}
+                        coverPath={t.coverPath}
+                        duration={t.duration}
+                        onPolarr={Boolean(t.path)}
+                        alreadyInLibrary={Boolean(t.path)}
+                        size="sm"
+                      />
                       <TrackActionsDrawer
                         track={playerTrack}
                         onPolarr={Boolean(t.path)}
@@ -1615,7 +1628,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                           "py-2.5 pl-3 tabular-nums text-muted-foreground",
                         )}
                       >
-                        <TrackRowIndex n={i + 1} isCurrent={isCurrent} />
+                        <TrackRowIndex n={i + 1} isCurrent={isCurrent} playing={playing} />
                       </td>
                       <td className={trackRowMidCell(isCurrent, "py-2.5 pr-4")}>
                         <div className="flex min-w-0 items-center gap-3">
@@ -1629,6 +1642,9 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                               {t.title}
                             </div>
                             <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+                              <PolarrAvailabilityBadge
+                                available={Boolean(t.path)}
+                              />
                               {explicit ? <ExplicitBadge /> : null}
                               <span className="truncate">{t.artist}</span>
                             </div>
@@ -1675,6 +1691,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                           coverPath={t.coverPath}
                           duration={t.duration}
                           onPolarr={Boolean(t.path)}
+                          showPolarrBadge={false}
                         />
                       </td>
                       <td

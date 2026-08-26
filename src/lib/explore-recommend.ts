@@ -152,6 +152,17 @@ async function resolveDeezerArtistId(name: string): Promise<number | null> {
   return id;
 }
 
+/** Public: related artist names for playlist / seed expansion. */
+export async function relatedArtistNames(
+  seedName: string,
+  limit = 5,
+): Promise<string[]> {
+  const id = await resolveDeezerArtistId(seedName);
+  if (id == null) return [];
+  const related = await fetchRelatedDeezerArtists(id, limit);
+  return related.map((r) => r.name).filter(Boolean);
+}
+
 async function fetchRelatedDeezerArtists(
   artistId: number,
   limit = 6,

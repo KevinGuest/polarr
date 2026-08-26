@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell } from "lucide-react";
+import Link from "next/link";
 import { CoverArt } from "@/components/cover-art";
 import { cn } from "@/lib/utils";
 import {
@@ -13,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-type NotifItem = {
+export type NotifItem = {
   id: string;
   kind: string;
   actorLabel: string;
@@ -27,7 +28,7 @@ type NotifItem = {
   unread: boolean;
 };
 
-function relativeTime(iso: string): string {
+export function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
   if (!Number.isFinite(then)) return "";
   const sec = Math.max(0, Math.floor((Date.now() - then) / 1000));
@@ -73,17 +74,9 @@ function CoverRing({
   );
 }
 
-export function NotificationsBell({
-  align = "end",
-  side = "bottom",
-}: {
-  align?: "start" | "center" | "end";
-  side?: "top" | "right" | "bottom" | "left";
-}) {
-  const router = useRouter();
+export function useNotifications() {
   const [items, setItems] = useState<NotifItem[]>([]);
   const [unread, setUnread] = useState(0);
-  const [open, setOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -99,6 +92,13 @@ export function NotificationsBell({
 
   const markAllRead = useCallback(async () => {
     setUnread(0);
+    setItems((prev) =>
+      prev.map((n) => ({
+        ...n,
+        unread: false,
+        readAt: n.readAt || new Date().toISOString(),
+      })),
+    );
     try {
       await fetch("/api/notifications", {
         method: "POST",
@@ -116,6 +116,107 @@ export function NotificationsBell({
     return () => clearInterval(t);
   }, [refresh]);
 
+  return { items, unread, refresh, markAllRead };
+}
+
+export function NotificationsList({
+  items,
+  onNavigate,
+}: {
+  items: NotifItem[];
+  onNavigate?: (href: string | null) => void;
+}) {
+  const router = useRouter();
+
+  if (items.length === 0) {
+    return (
+      <div className="px-4 py-12 text-center text-sm text-muted-foreground">
+        No notifications yet
+      </div>
+    );
+  }
+
+  return (
+    <ul className="divide-y divide-border/60">
+      {items.map((n) => (
+        <li key={n.id}>
+          <button
+            type="button"
+            className={cn(
+              "flex w-full items-start gap-3 px-1 py-3 text-left transition-colors",
+              "hover:bg-muted/40",
+              n.unread && "bg-muted/20",
+            )}
+            onClick={() => {
+              onNavigate?.(n.href);
+              if (n.href) router.push(n.href);
+            }}
+          >
+            <CoverRing
+              seed={n.imageSeed || n.actorLabel || n.message}
+              image={n.image}
+              unread={n.unread}
+              round={n.mediaType === "artist"}
+            />
+            <div className="min-w-0 flex-1 pt-0.5">
+              <p className="text-sm leading-snug text-foreground">
+                <span className="font-semibold">{n.actorLabel}</span>{" "}
+                <span className="font-normal text-foreground/90">
+                  {n.message}
+                </span>
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {relativeTime(n.createdAt)}
+              </p>
+            </div>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function NotificationsLink({
+  unread,
+  className,
+}: {
+  unread: number;
+  className?: string;
+}) {
+  return (
+    <Link
+      href="/notifications"
+      aria-label={
+        unread > 0 ? `Notifications, ${unread} unread` : "Notifications"
+      }
+      className={cn(
+        "relative flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground",
+        className,
+      )}
+    >
+      <Bell className="size-5" strokeWidth={1.75} />
+      {unread > 0 ? (
+        <span className="absolute right-0.5 top-0.5 flex size-4 items-center justify-center rounded-full bg-destructive text-[10px] font-semibold leading-none text-destructive-foreground">
+          {unread > 9 ? "9+" : unread}
+        </span>
+      ) : null}
+    </Link>
+  );
+}
+
+export function NotificationsBell({
+  align = "end",
+  side = "bottom",
+  onNavigate,
+}: {
+  align?: "start" | "center" | "end";
+  side?: "top" | "right" | "bottom" | "left";
+  onNavigate?: () => void;
+}) {
+  const router = useRouter();
+  const { items, unread, refresh, markAllRead } = useNotifications();
+  const [open, setOpen] = useState(false);
+
   return (
     <DropdownMenu
       open={open}
@@ -124,13 +225,6 @@ export function NotificationsBell({
         if (next) {
           void markAllRead();
         } else {
-          setItems((prev) =>
-            prev.map((n) => ({
-              ...n,
-              unread: false,
-              readAt: n.readAt || new Date().toISOString(),
-            })),
-          );
           void refresh();
         }
       }}
@@ -183,6 +277,7 @@ export function NotificationsBell({
                   )}
                   onClick={() => {
                     setOpen(false);
+                    onNavigate?.();
                     if (n.href) router.push(n.href);
                   }}
                 >

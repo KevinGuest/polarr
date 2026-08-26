@@ -223,8 +223,8 @@ export function ProfileClient({
 
   if (loading) {
     return (
-      <div className="-mx-6 -mt-6 space-y-10 md:-mx-8 lg:-mx-10" aria-busy="true">
-        <div className="border-b border-border px-6 pb-8 pt-10 md:px-8 md:pb-10 md:pt-14 lg:px-10">
+      <div className="-mx-4 -mt-4 space-y-10 md:-mx-8 lg:-mx-10" aria-busy="true">
+        <div className="border-b border-border px-4 pb-8 pt-10 md:px-8 md:pb-10 md:pt-14 lg:px-10">
           <div className="flex flex-col items-start gap-6 sm:flex-row sm:items-end">
             <Skeleton className="size-28 shrink-0 rounded-full sm:size-36" />
             <div className="min-w-0 flex-1 space-y-3">
@@ -233,7 +233,7 @@ export function ProfileClient({
             </div>
           </div>
         </div>
-        <div className="space-y-3 px-6 md:px-8 lg:px-10">
+        <div className="space-y-3 px-4 md:px-8 lg:px-10">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="flex items-center gap-3">
               <Skeleton className="size-11 shrink-0 rounded-md" />
@@ -275,9 +275,9 @@ export function ProfileClient({
   const bannerColors = liveBanner ?? profile.bannerColors;
 
   return (
-    <div className="-mx-6 -mt-6 space-y-10 pb-8 md:-mx-8 lg:-mx-10">
+    <div className="-mx-4 -mt-4 space-y-10 pb-8 md:-mx-8 lg:-mx-10">
       <section
-        className="relative overflow-hidden border-b border-border px-6 pb-8 pt-10 md:px-8 md:pb-10 md:pt-14 lg:px-10"
+        className="relative overflow-hidden border-b border-border px-4 pb-8 pt-10 md:px-8 md:pb-10 md:pt-14 lg:px-10"
         style={bannerStyle(bannerColors)}
       >
         <div className="relative flex flex-col items-start gap-6 sm:flex-row sm:items-end">
@@ -352,7 +352,7 @@ export function ProfileClient({
         </div>
       </section>
 
-      <div className="space-y-10 px-6 md:px-8 lg:px-10">
+      <div className="space-y-10 px-4 md:px-8 lg:px-10">
         <section className="space-y-4">
           <div className="flex items-end justify-between gap-3">
             <div>

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Children,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -9,6 +10,20 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
+import { ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+/** Large carousel tile — ~2.2 covers + peek. */
+const MOBILE_TILE_LARGE =
+  "w-[calc((100%-0.75rem)/2.35)] max-w-[9.75rem] shrink-0 snap-start";
+
+/** Compact carousel tile — ~3.2 covers + peek. */
+const MOBILE_TILE_COMPACT =
+  "w-[calc((100%-1.5rem)/3.25)] max-w-[6.75rem] shrink-0 snap-start";
+
+function mobileTileClass(size: "large" | "compact") {
+  return size === "compact" ? MOBILE_TILE_COMPACT : MOBILE_TILE_LARGE;
+}
 
 /** How many equal-width tiles fit in one row (no horizontal scroll). */
 export function useFitCount(minItemPx = 128, gapPx = 16) {
@@ -58,39 +73,67 @@ export function ShelfHeader({
   titleAs?: "h1" | "h2";
 }) {
   const Title = titleAs;
+  const titleClass =
+    titleAs === "h1"
+      ? "truncate text-xl font-bold tracking-tight text-foreground lg:font-semibold md:text-2xl"
+      : eyebrow
+        ? "truncate text-lg font-bold leading-tight text-foreground lg:text-xl lg:font-semibold"
+        : "truncate text-lg font-bold leading-tight text-foreground lg:text-lg lg:font-semibold";
+  const chevron =
+    showSeeAll ? (
+      <ChevronRight
+        className="size-5 shrink-0 text-muted-foreground max-lg:hidden"
+        aria-hidden
+      />
+    ) : null;
+
   return (
     <div className="flex items-end justify-between gap-3">
       <div className="flex min-w-0 items-center gap-3">
         {leading}
         <div className="min-w-0">
           {eyebrow ? (
-            <p className="text-xs font-medium text-muted-foreground">{eyebrow}</p>
+            <p className="text-[11px] font-medium leading-none text-muted-foreground lg:text-xs">
+              {eyebrow}
+            </p>
           ) : null}
-          <Title
-            className={
-              titleAs === "h1"
-                ? "truncate text-xl font-semibold tracking-tight text-foreground md:text-2xl"
-                : eyebrow
-                  ? "truncate text-xl font-semibold tracking-tight text-foreground"
-                  : "truncate text-lg font-semibold tracking-tight text-foreground"
-            }
-          >
-            {title}
-          </Title>
+          <div className="flex min-w-0 items-center gap-0.5">
+            <Title className={titleClass}>{title}</Title>
+            {showSeeAll && seeAllHref ? (
+              <Link
+                href={seeAllHref}
+                className="max-lg:hidden"
+                aria-label={`Show all ${title}`}
+              >
+                {chevron}
+              </Link>
+            ) : showSeeAll && onSeeAll ? (
+              <button
+                type="button"
+                onClick={onSeeAll}
+                className="max-lg:hidden"
+                aria-label={`Show all ${title}`}
+              >
+                {chevron}
+              </button>
+            ) : (
+              chevron
+            )}
+          </div>
         </div>
       </div>
       {showSeeAll && onSeeAll ? (
         <button
           type="button"
           onClick={onSeeAll}
-          className="shrink-0 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+          className="shrink-0 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground lg:text-sm lg:font-medium"
         >
           Show all
         </button>
       ) : showSeeAll && seeAllHref ? (
         <Link
           href={seeAllHref}
-          className="shrink-0 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+          className="shrink-0 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground lg:text-sm lg:font-medium"
         >
           Show all
         </Link>
@@ -110,6 +153,7 @@ export function MediaShelfRow({
   minItemPx = 128,
   gapPx = 16,
   fillRow = true,
+  mobileTileSize = "large",
   empty,
   children,
 }: {
@@ -127,6 +171,8 @@ export function MediaShelfRow({
    * When false, keep a full set of columns so a short list stays compact.
    */
   fillRow?: boolean;
+  /** Mobile horizontal scroll tile width — large (~2+peek) or compact (~3+peek). */
+  mobileTileSize?: "large" | "compact";
   empty?: ReactNode;
   children: (visible: number) => ReactNode;
 }) {
@@ -134,9 +180,12 @@ export function MediaShelfRow({
   const visible = Math.min(count, Math.max(itemCount, 0));
   const columns = fillRow ? Math.max(visible, 1) : count;
   const showSeeAll = Boolean((seeAllHref || onSeeAll) && itemCount > 0);
+  const items = itemCount > 0 ? children(visible) : null;
+  const mobileItems =
+    itemCount > 0 ? children(Math.min(itemCount, 24)) : null;
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-2.5 lg:space-y-4">
       <ShelfHeader
         title={title}
         eyebrow={eyebrow}
@@ -148,16 +197,31 @@ export function MediaShelfRow({
       {itemCount === 0 ? (
         empty
       ) : (
-        <div
-          ref={ref}
-          className="grid w-full"
-          style={{
-            gap: gapPx,
-            gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-          }}
-        >
-          {children(visible)}
-        </div>
+        <>
+          <div
+            className={cn(
+              "-mr-4 flex gap-3 overflow-x-auto overscroll-x-contain pr-4 pb-0.5",
+              "snap-x snap-mandatory [scrollbar-width:none] lg:hidden",
+              "[&::-webkit-scrollbar]:hidden",
+            )}
+          >
+            {Children.toArray(mobileItems).map((child, i) => (
+              <div key={i} className={mobileTileClass(mobileTileSize)}>
+                {child}
+              </div>
+            ))}
+          </div>
+          <div
+            ref={ref}
+            className="hidden w-full lg:grid"
+            style={{
+              gap: gapPx,
+              gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+            }}
+          >
+            {items}
+          </div>
+        </>
       )}
     </section>
   );
@@ -192,6 +256,7 @@ export function MediaTileShell({
   badge,
   playButton,
   coverShape = "square",
+  compact = false,
 }: {
   cover: ReactNode;
   title: string;
@@ -202,9 +267,11 @@ export function MediaTileShell({
   playButton?: ReactNode;
   /** Artist tiles use circle — avoids square frame around a round face. */
   coverShape?: "square" | "circle";
+  /** Tighter text for compact mobile carousels (~3 across). */
+  compact?: boolean;
 }) {
   return (
-    <div className="min-w-0 space-y-2.5">
+    <div className="min-w-0 space-y-2 lg:space-y-2.5">
       <div className="relative">
         <button
           type="button"
@@ -226,10 +293,24 @@ export function MediaTileShell({
         onClick={onOpen}
         className="block w-full space-y-0.5 text-left"
       >
-        <div className="line-clamp-1 text-sm font-semibold leading-snug tracking-tight text-foreground">
+        <div
+          className={cn(
+            "font-medium leading-snug text-foreground",
+            compact
+              ? "line-clamp-1 text-[13px] lg:line-clamp-1 lg:text-sm"
+              : "line-clamp-2 text-[13px] lg:line-clamp-1 lg:text-sm",
+          )}
+        >
           {title}
         </div>
-        <div className="line-clamp-2 text-xs leading-snug text-muted-foreground">
+        <div
+          className={cn(
+            "leading-snug text-muted-foreground",
+            compact
+              ? "line-clamp-1 text-[11px] lg:text-xs"
+              : "line-clamp-2 text-xs",
+          )}
+        >
           {subtitle}
         </div>
       </button>

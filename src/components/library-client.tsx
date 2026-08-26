@@ -5,12 +5,12 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Clock,
-  Heart,
   Play,
   RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CoverArt } from "@/components/cover-art";
+import { LikedSongsCover, likedSongsGradientStyle } from "@/components/liked-songs-cover";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
 import { TrackRowIndex } from "@/components/track-row-index";
@@ -104,6 +104,26 @@ export function LibraryClient({
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const [scanning, setScanning] = useState(false);
   const [root, setRoot] = useState<string | null>(null);
+  const [likedSeed, setLikedSeed] = useState("liked");
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/auth/me", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        const u = data?.user;
+        const seed =
+          (typeof u?.publicId === "string" && u.publicId) ||
+          (typeof u?.username === "string" && u.username) ||
+          "liked";
+        setLikedSeed(seed);
+      })
+      .catch(() => null);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function loadLibrary(scan = false) {
     setScanning(scan);
@@ -325,30 +345,37 @@ export function LibraryClient({
     <div className="flex min-h-full flex-col">
       <section
         className={cn(
-          "relative -mx-6 -mt-6 border-b border-border px-6 pb-8 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10",
+          "relative -mx-4 -mt-4 border-b border-border px-4 pb-8 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10",
           albumView && "pb-10",
         )}
       >
         <div
-          className="pointer-events-none absolute inset-0 opacity-35"
+          className="pointer-events-none absolute inset-0 opacity-40"
           style={{
             background:
               mode === "liked"
-                ? "linear-gradient(180deg, hsl(265 80% 28%) 0%, hsl(var(--background)) 100%)"
+                ? likedSongsGradientStyle(likedSeed).backgroundImage
                 : albumView
                   ? "linear-gradient(180deg, hsl(20 18% 22%) 0%, hsl(var(--background)) 100%)"
                   : "linear-gradient(180deg, hsl(0 0% 18%) 0%, hsl(var(--background)) 100%)",
+            ...(mode === "liked"
+              ? {
+                  maskImage:
+                    "linear-gradient(180deg, black 0%, transparent 100%)",
+                  WebkitMaskImage:
+                    "linear-gradient(180deg, black 0%, transparent 100%)",
+                }
+              : null),
           }}
           aria-hidden
         />
         <div className="relative flex flex-col gap-6 sm:flex-row sm:items-end">
           {mode === "liked" ? (
-            <div
-              className="flex size-40 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[#450af5] via-[#8e2de2] to-[#c44cff] sm:size-44"
-              aria-hidden
-            >
-              <Heart className="size-16 fill-white text-white" strokeWidth={0} />
-            </div>
+            <LikedSongsCover
+              className="size-40 shrink-0 rounded-lg shadow-lg sm:size-44"
+              heartClassName="size-16"
+              seed={likedSeed}
+            />
           ) : (
             <CoverArt
               seed={featured?.title || "Library"}

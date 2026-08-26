@@ -26,6 +26,7 @@ import {
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { MiniplayerClient } from "@/components/miniplayer-client";
+import { PlayerSlider } from "@/components/player-slider";
 import { StreamQualityBadge } from "@/components/stream-quality-badge";
 import { TrackLikeButton } from "@/components/track-like-button";
 import { TrackContextMenu } from "@/components/track-context-menu";
@@ -185,7 +186,6 @@ export function NowPlayingBar() {
       : null;
   }
 
-  const pct = duration ? (progress / duration) * 100 : 0;
   const VolumeIcon =
     volume === 0 ? VolumeX : volume < 0.45 ? Volume1 : Volume2;
   const muteLabel = volume === 0 ? "Unmute" : "Mute";
@@ -198,7 +198,9 @@ export function NowPlayingBar() {
   return (
     <>
     <TooltipProvider delayDuration={300}>
-      <div className="shrink-0 border-t border-border bg-background px-3 py-2.5 md:px-4">
+      <div className="hidden shrink-0 border-t border-border bg-background lg:block">
+        {/* Desktop bar */}
+        <div className="px-3 py-2.5 md:px-4">
         <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,42%)_minmax(0,1fr)] items-center gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <TrackContextMenu track={track}>
@@ -307,15 +309,13 @@ export function NowPlayingBar() {
               <span className="w-9 text-right text-[11px] tabular-nums text-muted-foreground">
                 {formatDuration(progress)}
               </span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={0.1}
-                value={pct}
-                onChange={(e) => seek(Number(e.target.value) / 100)}
+              <PlayerSlider
+                value={duration ? progress / duration : 0}
+                onChange={seek}
                 aria-label="Seek"
-                className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-muted accent-foreground"
+                variant="progress"
+                tone="default"
+                className="-my-3 flex-1"
               />
               <span className="w-9 text-[11px] tabular-nums text-muted-foreground">
                 {formatDuration(duration)}
@@ -323,7 +323,7 @@ export function NowPlayingBar() {
             </div>
           </div>
 
-          <div className="hidden items-center justify-end gap-1 sm:flex">
+          <div className="hidden items-center justify-end gap-1 lg:flex">
             <BarTooltip label="Save to Liked Songs">
               <span className="inline-flex">
                 <TrackLikeButton
@@ -379,15 +379,13 @@ export function NowPlayingBar() {
                   <VolumeIcon className="size-3.5" />
                 </button>
               </BarTooltip>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={1}
-                value={Math.round(volume * 100)}
-                onChange={(e) => setVolume(Number(e.target.value) / 100)}
+              <PlayerSlider
+                value={volume}
+                onChange={setVolume}
                 aria-label="Volume"
-                className="h-1 w-[93px] cursor-pointer appearance-none rounded-full bg-muted accent-foreground"
+                variant="volume"
+                tone="default"
+                className="-my-2 w-[93px]"
               />
             </div>
             <BarTooltip label="Open Miniplayer">
@@ -418,6 +416,7 @@ export function NowPlayingBar() {
               </button>
             </BarTooltip>
           </div>
+        </div>
         </div>
       </div>
     </TooltipProvider>

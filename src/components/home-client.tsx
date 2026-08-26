@@ -106,21 +106,47 @@ function packMoreFromRows(shelves: MoreFromShelf[]) {
   return rows;
 }
 
-function ShelfSkeleton({ count = 8 }: { count?: number }) {
+function ShelfSkeleton({
+  count = 6,
+  size = "large",
+}: {
+  count?: number;
+  size?: "large" | "compact";
+}) {
+  const tileClass =
+    size === "compact"
+      ? "w-[calc((100%-1.5rem)/3.25)] max-w-[6.75rem] shrink-0 space-y-2"
+      : "w-[calc((100%-0.75rem)/2.35)] max-w-[9.75rem] shrink-0 space-y-2";
   return (
-    <div
-      className="grid w-full gap-4"
-      style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}
-      aria-busy
-    >
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="min-w-0 space-y-2.5">
-          <Skeleton className="aspect-square w-full rounded-md" />
-          <Skeleton className="h-3.5 w-4/5" />
-          <Skeleton className="h-3 w-3/5" />
-        </div>
-      ))}
-    </div>
+    <>
+      <div
+        className="-mr-4 flex gap-3 overflow-hidden pr-4 lg:hidden"
+        aria-busy
+      >
+        {Array.from({ length: Math.min(count, size === "compact" ? 5 : 4) }).map(
+          (_, i) => (
+            <div key={i} className={tileClass}>
+              <Skeleton className="aspect-square w-full rounded-md" />
+              <Skeleton className="h-3.5 w-4/5" />
+              <Skeleton className="h-3 w-3/5" />
+            </div>
+          ),
+        )}
+      </div>
+      <div
+        className="hidden w-full gap-4 lg:grid"
+        style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}
+        aria-busy
+      >
+        {Array.from({ length: count }).map((_, i) => (
+          <div key={i} className="min-w-0 space-y-2.5">
+            <Skeleton className="aspect-square w-full rounded-md" />
+            <Skeleton className="h-3.5 w-4/5" />
+            <Skeleton className="h-3 w-3/5" />
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -142,9 +168,12 @@ export function HomeClient() {
       });
       if (!res.ok) return;
       const data = await res.json();
-      setOthers(Array.isArray(data.items) ? data.items : []);
+      const next = Array.isArray(data.items) ? data.items : [];
+      // Keep last good shelf if a poll returns empty while we already had items
+      // (transient glitch). First load / true empty still shows the empty copy.
+      setOthers((prev) => (next.length === 0 && prev.length > 0 ? prev : next));
     } catch {
-      /* ignore */
+      /* keep previous */
     }
   }, []);
 
@@ -209,7 +238,7 @@ export function HomeClient() {
     router.push(`/artist?${qs.toString()}`);
   }
 
-  function releaseTiles(list: Release[], visible: number) {
+  function releaseTiles(list: Release[], visible: number, compact = false) {
     return list.slice(0, visible).map((r) => {
       const href = catalogAlbumHref(r);
       return (
@@ -219,6 +248,7 @@ export function HomeClient() {
           subtitle={r.artist}
           ariaLabel={`Open ${r.title}`}
           onOpen={() => router.push(href)}
+          compact={compact}
           cover={
             <CoverArt seed={r.title} image={r.image} className="size-full" />
           }
@@ -228,7 +258,7 @@ export function HomeClient() {
   }
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-8 lg:space-y-10">
       {lidarrError && (
         <p className="text-sm text-destructive">Lidarr: {lidarrError}</p>
       )}
@@ -237,6 +267,7 @@ export function HomeClient() {
         title="What others are listening to"
         itemCount={others.length}
         fillRow={false}
+        mobileTileSize="compact"
         empty={
           <p className="text-sm text-muted-foreground">
             Tracks other people on this server play for 15+ seconds show up
@@ -253,6 +284,7 @@ export function HomeClient() {
                   subtitle={formatTrackArtistLine(item.artist, item.title)}
                   ariaLabel={`Play ${item.title}`}
                   onOpen={() => playOthersTrack(item)}
+                  compact
                   cover={
                     <ListeningCover
                       title={item.title}
@@ -274,9 +306,10 @@ export function HomeClient() {
         title="Latest releases"
         seeAllHref="/browse/releases"
         itemCount={releases.length}
+        mobileTileSize="compact"
         empty={
           loading ? (
-            <ShelfSkeleton />
+            <ShelfSkeleton size="compact" />
           ) : (
             <p className="text-sm text-muted-foreground">
               New albums from Lidarr and MusicBrainz show up here.
@@ -284,16 +317,17 @@ export function HomeClient() {
           )
         }
       >
-        {(visible) => releaseTiles(releases, visible)}
+        {(visible) => releaseTiles(releases, visible, true)}
       </MediaShelfRow>
 
       <MediaShelfRow
         title="Explore"
         seeAllHref="/browse/explore"
         itemCount={catalog.length}
+        mobileTileSize="compact"
         empty={
           loading ? (
-            <ShelfSkeleton />
+            <ShelfSkeleton size="compact" />
           ) : (
             <p className="text-sm text-muted-foreground">
               What’s trending, nudged by what you play and like.
@@ -301,16 +335,17 @@ export function HomeClient() {
           )
         }
       >
-        {(visible) => releaseTiles(catalog, visible)}
+        {(visible) => releaseTiles(catalog, visible, true)}
       </MediaShelfRow>
 
       <MediaShelfRow
         title="Artists"
         seeAllHref="/browse/artists"
         itemCount={artists.length}
+        mobileTileSize="compact"
         empty={
           loading ? (
-            <ShelfSkeleton />
+            <ShelfSkeleton size="compact" />
           ) : (
             <p className="text-sm text-muted-foreground">
               Artists you play, like, or keep in the library show up here —
@@ -328,6 +363,7 @@ export function HomeClient() {
               ariaLabel={`Open ${a.name}`}
               onOpen={() => openArtist(a)}
               coverShape="circle"
+              compact
               cover={
                 <CoverArt
                   seed={a.name}
@@ -341,9 +377,9 @@ export function HomeClient() {
       </MediaShelfRow>
 
       {loading && moreFrom.length === 0 ? (
-        <div className="grid gap-10 lg:grid-cols-2">
+        <div className="space-y-9 lg:grid lg:grid-cols-2 lg:gap-10">
           {Array.from({ length: 2 }).map((_, i) => (
-            <div key={i} className="space-y-4">
+            <div key={i} className="space-y-3 lg:space-y-4">
               <div className="flex items-center gap-3">
                 <Skeleton className="size-12 shrink-0 rounded-full" />
                 <div className="space-y-2">
@@ -360,16 +396,17 @@ export function HomeClient() {
       {packMoreFromRows(moreFrom).map((row) => (
         <div
           key={row.map((s) => s.artist).join("|")}
-          className={row.length > 1 ? "grid gap-10 lg:grid-cols-2" : undefined}
+          className={row.length > 1 ? "space-y-9 lg:grid lg:grid-cols-2 lg:gap-10 lg:space-y-0" : undefined}
         >
           {row.map((shelf) => (
             <MediaShelfRow
               key={shelf.artist}
-              eyebrow="More from"
+              eyebrow="More like"
               title={shelf.artist}
               seeAllHref={`/artist?name=${encodeURIComponent(shelf.artist)}`}
               itemCount={shelf.items.length}
               fillRow={row.length === 1}
+              mobileTileSize="large"
               leading={
                 <button
                   type="button"

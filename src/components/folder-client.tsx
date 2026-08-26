@@ -126,7 +126,7 @@ export function FolderClient({ folderId }: { folderId: string }) {
 
   return (
     <div className="flex min-h-full flex-col">
-      <section className="relative -mx-6 -mt-6 border-b border-border px-6 pb-10 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10">
+      <section className="relative -mx-4 -mt-4 border-b border-border px-4 pb-10 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10">
         <div
           className="pointer-events-none absolute inset-0 opacity-35"
           style={{

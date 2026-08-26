@@ -2,7 +2,7 @@ manifestVersion: 1
 id: polarr
 category: media
 name: Polarr
-version: "0.6.9"
+version: "0.6.10"
 tagline: Discover, request, and stream your homeserver music
 description: >-
   Polarr is a self-hosted music hub for umbrelOS. Point it at Lidarr (the same
@@ -33,9 +33,9 @@ description: >-
   Polarr does not ship Lidarr itself; install Lidarr from the Umbrel App Store
   first if you want automated *arr-style acquisition.
 releaseNotes: >-
-  Track titles no longer become cover.jpg from embedded artwork.
-  What others are listening to shows other people, not your own plays.
-  Rescan the library to restore existing cover.jpg titles.
+  Mobile album and playlist pages, side account menu from the home avatar,
+  playlist recommendations from tracks on the list, and a durable
+  “what others are listening to” shelf that stays until someone listens.
 developer: Polarr
 website: https://github.com/KevinGuest/polarr
 dependencies:

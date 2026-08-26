@@ -11,6 +11,7 @@ import {
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { StreamQualityBadge } from "@/components/stream-quality-badge";
+import { PlayerSlider } from "@/components/player-slider";
 import { TrackLikeButton } from "@/components/track-like-button";
 import { usePlayer } from "@/components/player-provider";
 import { albumHref } from "@/lib/album-ref";
@@ -50,7 +51,6 @@ export function MiniplayerClient({
     );
   }
 
-  const pct = duration ? (progress / duration) * 100 : 0;
   const albumPath = albumHref({
     title: (track.album || track.title).trim() || track.title,
     artist: track.artist,
@@ -149,15 +149,13 @@ export function MiniplayerClient({
             <span className="w-9 text-right text-[10px] tabular-nums text-muted-foreground">
               {formatDuration(progress)}
             </span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={0.1}
-              value={pct}
-              onChange={(e) => seek(Number(e.target.value) / 100)}
+            <PlayerSlider
+              value={duration ? progress / duration : 0}
+              onChange={seek}
               aria-label="Seek"
-              className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-muted accent-foreground"
+              variant="progress"
+              tone="default"
+              className="-my-3 flex-1"
             />
             <span className="w-9 text-[10px] tabular-nums text-muted-foreground">
               {formatDuration(duration)}

@@ -4,12 +4,19 @@ import {
   libraryAlbumPinKey,
   libraryFolderPinKey,
   libraryPlaylistPinKey,
+  listLibraryNavItems,
   listLibraryPins,
   listPinnedAlbumNavItems,
   listPlaylistFolders,
   listUserPlaylistsInFolder,
+  topArtistsFromLibrary,
 } from "@/lib/db";
-import { albumCoverKey, getAlbumCoverMap } from "@/lib/lidarr";
+import {
+  albumCoverKey,
+  artistCoverKey,
+  getAlbumCoverMap,
+  getArtistCoverMap,
+} from "@/lib/lidarr";
 import { albumHref } from "@/lib/album-ref";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +26,7 @@ export async function GET() {
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
 
   const covers = await getAlbumCoverMap();
+  const artistCovers = await getArtistCoverMap();
   const pins = listLibraryPins(user.id);
   const pinOrder = new Map(pins.map((p, i) => [p.itemKey, i]));
 
@@ -85,6 +93,44 @@ export async function GET() {
     return (b.updatedAt || 0) - (a.updatedAt || 0);
   });
 
+  const libraryAlbums = listLibraryNavItems(200).map((item) => {
+    const fromDb =
+      item.image && /^https?:\/\//i.test(item.image) ? item.image : null;
+    const fromLidarr =
+      covers.get(albumCoverKey(item.artist, item.title)) || null;
+    const pinKey = libraryAlbumPinKey(item.artist, item.title);
+    return {
+      type: "album" as const,
+      key: item.key,
+      title: item.title,
+      artist: item.artist,
+      tracks: item.tracks,
+      image: fromDb || fromLidarr,
+      pinKey,
+      pinned: pinOrder.has(pinKey),
+      href: albumHref({ title: item.title, artist: item.artist }),
+      updatedAt: 0,
+    };
+  });
+
+  const libraryArtists = topArtistsFromLibrary(200).map((row) => {
+    const name = row.artist;
+    const qs = new URLSearchParams({ name });
+    const image = artistCovers.get(artistCoverKey(name)) || null;
+    return {
+      type: "artist" as const,
+      key: `artist:${name.trim().toLowerCase()}`,
+      title: name,
+      artist: "Artist",
+      tracks: row.tracks,
+      image,
+      pinKey: "",
+      pinned: false,
+      href: `/artist?${qs.toString()}`,
+      updatedAt: row.tracks,
+    };
+  });
+
   return json({
     liked: {
       title: "Liked Songs",
@@ -93,6 +139,8 @@ export async function GET() {
       pinned: pinOrder.has("liked"),
     },
     items,
+    albums: libraryAlbums,
+    artists: libraryArtists,
     pins: pins.map((p) => p.itemKey),
   });
 }

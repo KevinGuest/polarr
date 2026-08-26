@@ -2,12 +2,14 @@
 
 import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Folder, Music2, Plus, Users, X } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogOverlay, DialogPortal } from "@/components/ui/dialog";
 import {
   Tooltip,
   TooltipContent,
@@ -51,10 +53,124 @@ function CreateItem({
   );
 }
 
-export function LibraryCreateMenu() {
+function CreateOptions({
+  busy,
+  onCreatePlaylist,
+  onCreateFolder,
+  onJam,
+}: {
+  busy: boolean;
+  onCreatePlaylist: () => void;
+  onCreateFolder: () => void;
+  onJam: () => void;
+}) {
+  return (
+    <>
+      <CreateItem
+        title="Playlist"
+        description="Create a playlist with songs"
+        onSelect={onCreatePlaylist}
+      >
+        <CreateIcon>
+          <span className="relative inline-flex">
+            <Music2 className="size-5" strokeWidth={1.75} />
+            <Plus
+              className="absolute -bottom-1 -right-1.5 size-3"
+              strokeWidth={2.5}
+            />
+          </span>
+        </CreateIcon>
+      </CreateItem>
+      <CreateItem
+        title="Folder"
+        description="Organize your playlists"
+        onSelect={onCreateFolder}
+      >
+        <CreateIcon>
+          <Folder className="size-5" strokeWidth={1.75} />
+        </CreateIcon>
+      </CreateItem>
+      <CreateItem
+        title="Jam"
+        description="Listen together from anywhere"
+        onSelect={onJam}
+      >
+        <CreateIcon>
+          <Users className="size-5" strokeWidth={1.75} />
+        </CreateIcon>
+      </CreateItem>
+      {busy ? (
+        <p className="px-2 py-1 text-xs text-[#b3b3b3]">Creating…</p>
+      ) : null}
+    </>
+  );
+}
+
+function MobileCreateDrawer({
+  open,
+  onOpenChange,
+  busy,
+  onCreatePlaylist,
+  onCreateFolder,
+  onJam,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  busy: boolean;
+  onCreatePlaylist: () => void;
+  onCreateFolder: () => void;
+  onJam: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogPortal>
+        <DialogOverlay className="z-[60] bg-black/60" />
+        <DialogPrimitive.Content
+          aria-describedby={undefined}
+          className={cn(
+            "fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl border-t border-white/10 bg-[#282828] px-3 pb-[max(1rem,var(--safe-bottom))] pt-2 text-white shadow-2xl outline-none",
+            "data-[state=open]:animate-in data-[state=closed]:animate-out",
+            "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+            "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
+            "duration-300",
+          )}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+        >
+          <div
+            className="mx-auto mb-3 mt-1 h-1 w-10 shrink-0 rounded-full bg-white/25"
+            aria-hidden
+          />
+          <CreateOptions
+            busy={busy}
+            onCreatePlaylist={onCreatePlaylist}
+            onCreateFolder={onCreateFolder}
+            onJam={onJam}
+          />
+        </DialogPrimitive.Content>
+      </DialogPortal>
+    </Dialog>
+  );
+}
+
+type LibraryCreateMenuProps = {
+  /** Sidebar icon, mobile library header, or bottom dock tab */
+  variant?: "sidebar" | "header" | "dock";
+  onOpenChange?: (open: boolean) => void;
+};
+
+export function LibraryCreateMenu({
+  variant = "sidebar",
+  onOpenChange,
+}: LibraryCreateMenuProps = {}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const useDrawer = variant === "header" || variant === "dock";
+
+  function setMenuOpen(next: boolean) {
+    setOpen(next);
+    onOpenChange?.(next);
+  }
 
   async function createPlaylist() {
     if (busy) return;
@@ -71,7 +187,7 @@ export function LibraryCreateMenu() {
         return;
       }
       emitLibraryChanged();
-      setOpen(false);
+      setMenuOpen(false);
       router.push(`/playlist/${encodeURIComponent(data.playlist.id)}`);
     } catch {
       toastError("Couldn’t create playlist");
@@ -95,7 +211,7 @@ export function LibraryCreateMenu() {
         return;
       }
       emitLibraryChanged();
-      setOpen(false);
+      setMenuOpen(false);
       router.push(`/folder/${encodeURIComponent(data.folder.id)}`);
     } catch {
       toastError("Couldn’t create folder");
@@ -104,8 +220,59 @@ export function LibraryCreateMenu() {
     }
   }
 
+  function openJam() {
+    setMenuOpen(false);
+    router.push("/jam");
+  }
+
+  const optionHandlers = {
+    busy,
+    onCreatePlaylist: () => void createPlaylist(),
+    onCreateFolder: () => void createFolder(),
+    onJam: openJam,
+  };
+
+  if (useDrawer) {
+    return (
+      <>
+        {variant === "header" ? (
+          <button
+            type="button"
+            aria-label="Create"
+            aria-expanded={open}
+            onClick={() => setMenuOpen(true)}
+            className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          >
+            <Plus className="size-5" strokeWidth={2} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-label="Create"
+            aria-expanded={open}
+            onClick={() => setMenuOpen(true)}
+            className={cn(
+              "flex min-h-[44px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 py-1 text-[10px] font-medium transition-colors",
+              open
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Plus className="size-5" strokeWidth={open ? 2.25 : 1.75} />
+            Create
+          </button>
+        )}
+        <MobileCreateDrawer
+          open={open}
+          onOpenChange={setMenuOpen}
+          {...optionHandlers}
+        />
+      </>
+    );
+  }
+
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu open={open} onOpenChange={setMenuOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
@@ -122,7 +289,7 @@ export function LibraryCreateMenu() {
       </Tooltip>
       <DropdownMenuContent
         align="start"
-        side="bottom"
+        side="top"
         sideOffset={8}
         className={cn(
           "w-[22rem] rounded-xl border-0 bg-[#282828] p-2 text-white shadow-2xl",
@@ -134,49 +301,14 @@ export function LibraryCreateMenu() {
           <button
             type="button"
             aria-label="Close"
-            onClick={() => setOpen(false)}
+            onClick={() => setMenuOpen(false)}
             className="rounded-full p-1.5 text-[#b3b3b3] transition-colors hover:bg-white/10 hover:text-white"
           >
             <X className="size-4" strokeWidth={2} />
           </button>
           <div className="px-1 text-[15px] font-bold text-white">Create</div>
         </div>
-        <CreateItem
-          title="Playlist"
-          description="Create a playlist with songs"
-          onSelect={() => void createPlaylist()}
-        >
-          <CreateIcon>
-            <span className="relative inline-flex">
-              <Music2 className="size-5" strokeWidth={1.75} />
-              <Plus
-                className="absolute -bottom-1 -right-1.5 size-3"
-                strokeWidth={2.5}
-              />
-            </span>
-          </CreateIcon>
-        </CreateItem>
-        <CreateItem
-          title="Folder"
-          description="Organize your playlists"
-          onSelect={() => void createFolder()}
-        >
-          <CreateIcon>
-            <Folder className="size-5" strokeWidth={1.75} />
-          </CreateIcon>
-        </CreateItem>
-        <CreateItem
-          title="Jam"
-          description="Listen together from anywhere"
-          onSelect={() => {
-            setOpen(false);
-            router.push("/jam");
-          }}
-        >
-          <CreateIcon>
-            <Users className="size-5" strokeWidth={1.75} />
-          </CreateIcon>
-        </CreateItem>
+        <CreateOptions {...optionHandlers} />
       </DropdownMenuContent>
     </DropdownMenu>
   );

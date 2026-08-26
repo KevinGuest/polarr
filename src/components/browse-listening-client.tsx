@@ -33,7 +33,8 @@ export function BrowseListeningClient() {
       const res = await fetch("/api/listening?limit=48", { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
-      setItems(Array.isArray(data.items) ? data.items : []);
+      const next = Array.isArray(data.items) ? data.items : [];
+      setItems((prev) => (next.length === 0 && prev.length > 0 ? prev : next));
     } finally {
       setLoading(false);
     }

@@ -4,10 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  ArrowDownCircle,
+  ArrowDownUp,
   Camera,
+  ChevronLeft,
   Clock,
   Copy,
   Ellipsis,
+  ListFilter,
   Music2,
   Pause,
   Pencil,
@@ -20,6 +24,7 @@ import {
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
+import { TrackActionsDrawer } from "@/components/track-actions-drawer";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
 import { TrackRowIndex } from "@/components/track-row-index";
@@ -37,6 +42,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -93,6 +99,21 @@ type AddCandidate = {
   album: string;
   duration: number;
   coverPath: string | null;
+};
+
+type RecommendHit = AddCandidate & {
+  score?: number;
+  reason?: string;
+};
+
+type SortMode = "custom" | "title" | "artist" | "album" | "recent";
+
+const SORT_LABELS: Record<SortMode, string> = {
+  custom: "Custom order",
+  title: "Title",
+  artist: "Artist",
+  album: "Album",
+  recent: "Date added",
 };
 
 function shuffleCopy<T>(items: T[]): T[] {
@@ -491,6 +512,13 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [sortMode, setSortMode] = useState<SortMode>("custom");
+  const [showStickyTitle, setShowStickyTitle] = useState(false);
+  const [recommended, setRecommended] = useState<RecommendHit[]>([]);
+  const [recommendLoading, setRecommendLoading] = useState(false);
+  const [addingRecId, setAddingRecId] = useState<string | null>(null);
+  const [recommendNonce, setRecommendNonce] = useState(0);
+  const heroSentinelRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -548,12 +576,92 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
     [tracks],
   );
 
+  const existingIdsKey = useMemo(
+    () => [...existingIds].sort().join("|"),
+    [existingIds],
+  );
+
+  const sortedTracks = useMemo(() => {
+    if (sortMode === "custom") return tracks;
+    const copy = [...tracks];
+    const cmp = (a: string, b: string) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" });
+    copy.sort((a, b) => {
+      if (sortMode === "title") return cmp(a.title, b.title);
+      if (sortMode === "artist") {
+        const c = cmp(a.artist, b.artist);
+        return c !== 0 ? c : cmp(a.title, b.title);
+      }
+      if (sortMode === "album") {
+        const c = cmp(a.album || "", b.album || "");
+        return c !== 0 ? c : cmp(a.title, b.title);
+      }
+      // recent
+      return (b.addedAt || "").localeCompare(a.addedAt || "");
+    });
+    return copy;
+  }, [tracks, sortMode]);
+
+  useEffect(() => {
+    const el = heroSentinelRef.current;
+    if (!el || loading) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => setShowStickyTitle(!entry?.isIntersecting),
+      { threshold: 0, rootMargin: "-56px 0px 0px 0px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [loading, playlist?.id, playlist?.name]);
+
+  useEffect(() => {
+    if (!playlistId || tracks.length === 0) {
+      setRecommended([]);
+      setRecommendLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setRecommendLoading(true);
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/playlists/${encodeURIComponent(playlistId)}/recommend?limit=12`,
+          { cache: "no-store", credentials: "same-origin" },
+        );
+        const data = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (!res.ok || !Array.isArray(data?.tracks)) {
+          setRecommended([]);
+          return;
+        }
+        setRecommended(
+          data.tracks.map((t: RecommendHit) => ({
+            id: t.id,
+            title: t.title,
+            artist: t.artist,
+            album: t.album || "",
+            duration: t.duration || 0,
+            coverPath: t.coverPath || null,
+            score: t.score,
+            reason: t.reason,
+          })),
+        );
+      } catch {
+        if (!cancelled) setRecommended([]);
+      } finally {
+        if (!cancelled) setRecommendLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [playlistId, tracks.length, recommendNonce, existingIdsKey]);
+
   const queue: PlayerTrack[] = useMemo(
     () =>
-      tracks.map((t) =>
+      sortedTracks.map((t) =>
         toPlayerTrack(t, playlist?.name || "", playlist?.coverUrl || null),
       ),
-    [tracks, playlist],
+    [sortedTracks, playlist],
   );
 
   const inThisPlaylist = Boolean(
@@ -664,6 +772,29 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
     }
   }
 
+  async function addRecommended(hit: RecommendHit) {
+    setAddingRecId(hit.id);
+    try {
+      const res = await fetch("/api/playlists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playlistId, trackId: hit.id }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        toastError(data?.error || "Couldn’t add to playlist");
+        return;
+      }
+      setRecommended((prev) => prev.filter((t) => t.id !== hit.id));
+      await load();
+      toastSuccess(`Added “${hit.title}”`);
+    } catch {
+      toastError("Couldn’t add to playlist");
+    } finally {
+      setAddingRecId(null);
+    }
+  }
+
   async function copyPlaylistLink() {
     const url =
       typeof window !== "undefined"
@@ -707,7 +838,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
   if (loading && !playlist) {
     return (
       <div className="flex min-h-full flex-col">
-        <section className="relative -mx-6 -mt-6 border-b border-border px-6 pb-10 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10">
+        <section className="relative -mx-4 -mt-4 border-b border-border px-4 pb-10 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10">
           <div className="relative flex flex-col gap-6 sm:flex-row sm:items-end">
             <Skeleton className="size-44 shrink-0 rounded-lg sm:size-52 md:size-56" />
             <div className="min-w-0 flex-1 space-y-3">
@@ -745,10 +876,461 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
   const empty = tracks.length === 0;
   const ownerName = playlist?.ownerUsername || "You";
   const playLabel = inThisPlaylist && playing ? "Pause" : "Play";
+  const metaLine = [
+    `${tracks.length} song${tracks.length === 1 ? "" : "s"}`,
+    tracks.length > 0 ? formatAlbumLength(totalSeconds) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const pillClass =
+    "inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-muted/30 px-3.5 py-2 text-sm font-medium text-foreground";
+
+  function SortPill() {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button type="button" className={pillClass} aria-label="Sort playlist">
+            <ArrowDownUp className="size-4" />
+            Sort
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-48">
+          {(Object.keys(SORT_LABELS) as SortMode[]).map((mode) => (
+            <DropdownMenuCheckboxItem
+              key={mode}
+              checked={sortMode === mode}
+              onCheckedChange={() => setSortMode(mode)}
+            >
+              {SORT_LABELS[mode]}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
+  function RecommendedSection() {
+    if (tracks.length === 0) return null;
+    return (
+      <section className="mt-10 pb-8">
+        <h2 className="px-4 text-2xl font-bold tracking-tight lg:px-0">
+          Recommended songs
+        </h2>
+        <p className="mt-1 px-4 text-sm text-muted-foreground lg:px-0">
+          Based on the songs in this playlist
+        </p>
+        {recommendLoading && recommended.length === 0 ? (
+          <div className="mt-4 space-y-2 px-4 lg:px-0" aria-busy="true">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-14 w-full rounded-md" />
+            ))}
+          </div>
+        ) : recommended.length === 0 ? (
+          <p className="mt-6 px-4 text-sm text-muted-foreground lg:px-0">
+            No library matches yet — add more songs or grow your library.
+          </p>
+        ) : (
+          <ul className="mt-4">
+            {recommended.map((hit) => {
+              const explicit = titleLooksExplicit(hit.title);
+              const busy = addingRecId === hit.id;
+              return (
+                <li key={hit.id}>
+                  <div className="flex w-full items-center gap-3 px-4 py-2.5 lg:px-0">
+                    <CoverArt
+                      seed={`${hit.artist}-${hit.title}`}
+                      image={hit.coverPath}
+                      className="size-12 shrink-0 rounded-md"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[15px] font-medium">
+                        {hit.title}
+                      </div>
+                      <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+                        {explicit ? <ExplicitBadge /> : null}
+                        <span className="truncate">{hit.artist}</span>
+                      </div>
+                    </div>
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void addRecommended(hit)}
+                        className="flex size-9 shrink-0 items-center justify-center rounded-full border border-foreground/70 text-foreground disabled:opacity-40"
+                        aria-label={`Add ${hit.title}`}
+                      >
+                        <Plus className="size-5" />
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {recommended.length > 0 || recommendLoading ? (
+          <div className="mt-6 flex justify-center px-4 lg:px-0">
+            <button
+              type="button"
+              disabled={recommendLoading}
+              onClick={() => setRecommendNonce((n) => n + 1)}
+              className="rounded-full bg-foreground px-6 py-2.5 text-sm font-semibold text-background disabled:opacity-50"
+            >
+              {recommendLoading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+        ) : null}
+      </section>
+    );
+  }
 
   return (
-    <div className="flex min-h-full flex-col">
-      <section className="relative -mx-6 -mt-6 border-b border-border px-6 pb-10 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10">
+    <>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          void onCoverFile(file);
+        }}
+      />
+
+      {/* Mobile — Spotify-style playlist */}
+      <div className="lg:hidden">
+        <div
+          className={cn(
+            "fixed inset-x-0 top-0 z-30 border-b border-border/40 bg-background/75 backdrop-blur-md transition-opacity duration-200",
+            showStickyTitle
+              ? "pointer-events-auto opacity-100"
+              : "pointer-events-none opacity-0",
+          )}
+        >
+          <div className="flex items-center gap-2 px-3 pb-2 pt-[max(0.5rem,var(--safe-top))]">
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="rounded-full p-1.5 text-foreground"
+              aria-label="Go back"
+            >
+              <ChevronLeft className="size-6" />
+            </button>
+            <h1 className="min-w-0 flex-1 truncate text-center text-base font-semibold">
+              {displayTitle}
+            </h1>
+            <div className="size-9" aria-hidden />
+          </div>
+          <div className="flex items-center gap-2 overflow-x-auto px-3 pb-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {canEdit ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setAddOpen(true)}
+                  className={pillClass}
+                >
+                  <Plus className="size-4" />
+                  Add
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openDetails()}
+                  className={pillClass}
+                >
+                  <ListFilter className="size-4" />
+                  Edit
+                </button>
+                <SortPill />
+              </>
+            ) : null}
+            <div className="min-w-0 flex-1" />
+            <button
+              type="button"
+              onClick={() => onPlayClick()}
+              disabled={empty}
+              className="flex size-12 shrink-0 items-center justify-center rounded-full bg-foreground text-background shadow-lg disabled:opacity-40"
+              aria-label={playLabel}
+            >
+              {inThisPlaylist && playing ? (
+                <Pause className="size-5" fill="currentColor" />
+              ) : (
+                <Play className="size-5 translate-x-0.5" fill="currentColor" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="relative pb-1 pt-[max(0.5rem,var(--safe-top))]">
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                "linear-gradient(180deg, hsl(20 22% 34%) 0%, hsl(20 16% 20%) 55%, hsl(var(--background)) 100%)",
+            }}
+            aria-hidden
+          />
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="absolute left-3 top-[max(0.5rem,var(--safe-top))] z-10 rounded-full bg-black/35 p-1.5 text-white backdrop-blur-sm"
+            aria-label="Go back"
+          >
+            <ChevronLeft className="size-6" />
+          </button>
+          <div className="relative mx-auto aspect-square w-[calc(100%-3rem)] max-w-[18rem] overflow-hidden rounded-md shadow-2xl">
+            {coverImage ? (
+              <CoverArt
+                seed={playlist?.id || displayTitle}
+                image={coverImage}
+                className="size-full"
+              />
+            ) : (
+              <div
+                className="flex size-full items-center justify-center bg-[#282828] text-[#7f7f7f]"
+                aria-hidden
+              >
+                <Music2 className="size-16" strokeWidth={1.25} />
+              </div>
+            )}
+          </div>
+          <div ref={heroSentinelRef} className="relative h-px" aria-hidden />
+
+          <div className="relative space-y-2 px-4 pb-2 pt-4">
+            <h1 className="text-[1.75rem] font-bold leading-tight tracking-tight">
+              {displayTitle}
+            </h1>
+            {playlist?.description ? (
+              <p className="text-sm text-muted-foreground line-clamp-2">
+                {playlist.description}
+              </p>
+            ) : null}
+            <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+              <UserAvatar
+                username={ownerName}
+                avatarUrl={playlist?.ownerAvatarUrl}
+                className="size-6 shrink-0 rounded-full"
+                textClassName="text-[10px]"
+              />
+              <span className="truncate font-semibold text-foreground">
+                {ownerName}
+              </span>
+            </div>
+            {metaLine ? (
+              <p className="text-sm text-muted-foreground">{metaLine}</p>
+            ) : null}
+          </div>
+
+          <div className="relative flex items-center gap-3 px-4 py-3">
+          <button
+            type="button"
+            onClick={() => toggleShuffle()}
+            className={cn(
+              "rounded-full p-2",
+              shuffle
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            aria-label="Shuffle"
+            aria-pressed={shuffle}
+          >
+            <Shuffle className="size-6" />
+          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="rounded-full p-2 text-muted-foreground hover:text-foreground"
+                aria-label="More options"
+              >
+                <Ellipsis className="size-6" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-48">
+              {canEdit ? (
+                <>
+                  <DropdownMenuItem
+                    className="gap-2"
+                    onSelect={() => setAddOpen(true)}
+                  >
+                    <Plus className="size-4" />
+                    Add songs
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="gap-2"
+                    onSelect={() => openDetails()}
+                  >
+                    <Pencil className="size-4" />
+                    Edit details
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+              <DropdownMenuItem
+                className="gap-2"
+                onSelect={() => void copyPlaylistLink()}
+              >
+                <Copy className="size-4" />
+                Copy link
+              </DropdownMenuItem>
+              {canEdit ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
+                    onSelect={() => {
+                      setTimeout(() => setDeleteOpen(true), 0);
+                    }}
+                  >
+                    <Trash2 className="size-4" />
+                    Delete
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <div className="min-w-0 flex-1" />
+          <button
+            type="button"
+            onClick={() => onPlayClick()}
+            disabled={empty}
+            className="flex size-14 items-center justify-center rounded-full bg-foreground text-background shadow-lg disabled:opacity-40"
+            aria-label={playLabel}
+          >
+            {inThisPlaylist && playing ? (
+              <Pause className="size-6" fill="currentColor" />
+            ) : (
+              <Play className="size-6 translate-x-0.5" fill="currentColor" />
+            )}
+          </button>
+        </div>
+        </div>
+
+        {canEdit ? (
+          <div className="flex gap-2 overflow-x-auto px-4 pb-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <button
+              type="button"
+              onClick={() => setAddOpen(true)}
+              className={pillClass}
+            >
+              <Plus className="size-4" />
+              Add
+            </button>
+            <button
+              type="button"
+              onClick={() => openDetails()}
+              className={pillClass}
+            >
+              <ListFilter className="size-4" />
+              Edit
+            </button>
+            <SortPill />
+          </div>
+        ) : null}
+
+        <section className="pt-1">
+          {empty ? (
+            <div className="px-4 py-10">
+              <h2 className="text-2xl font-bold tracking-tight">
+                {canEdit
+                  ? "Let's find something for your playlist"
+                  : "This playlist is empty"}
+              </h2>
+              {canEdit ? (
+                <>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Search your library and add songs.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setAddOpen(true)}
+                    className="mt-6 inline-flex items-center gap-1.5 rounded-full bg-foreground px-5 py-2.5 text-sm font-semibold text-background"
+                  >
+                    Add songs
+                  </button>
+                </>
+              ) : null}
+            </div>
+          ) : (
+            <ul>
+              {sortedTracks.map((t) => {
+                const playerTrack = toPlayerTrack(
+                  t,
+                  playlist?.name || "",
+                  playlist?.coverUrl || null,
+                );
+                const trackId = t.localTrackId || t.id;
+                const isCurrent = isPlayerRowCurrent(
+                  track,
+                  {
+                    id: playerTrack.id,
+                    localTrackId: t.localTrackId,
+                    streamId: t.id.startsWith("stream:") ? t.id : null,
+                    title: t.title,
+                    artist: t.artist,
+                  },
+                  playerQueue,
+                );
+                const explicit = t.explicit ?? titleLooksExplicit(t.title);
+                return (
+                  <li key={trackId}>
+                    <div className="flex w-full items-center gap-3 px-4 py-2.5">
+                      <button
+                        type="button"
+                        onClick={() => playTrack(t)}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                      >
+                        <CoverArt
+                          seed={`${t.artist}-${t.title}`}
+                          image={t.coverPath || playlist?.coverUrl}
+                          className="size-12 shrink-0 rounded-md"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div
+                            className={cn(
+                              "truncate text-[15px] font-medium",
+                              isCurrent ? "text-primary" : "text-foreground",
+                            )}
+                          >
+                            {t.title}
+                          </div>
+                          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+                            {t.path ? (
+                              <ArrowDownCircle
+                                className="size-3.5 shrink-0 text-primary"
+                                aria-label="In library"
+                              />
+                            ) : null}
+                            {explicit ? <ExplicitBadge /> : null}
+                            <span className="truncate">{t.artist}</span>
+                          </div>
+                        </div>
+                      </button>
+                      <TrackActionsDrawer
+                        track={playerTrack}
+                        onPolarr={Boolean(t.path)}
+                        inLibrary={Boolean(t.path)}
+                        playlistId={canEdit ? playlistId : undefined}
+                        onRemovedFromPlaylist={
+                          canEdit
+                            ? () => void removeFromPlaylist(trackId)
+                            : undefined
+                        }
+                      />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        <RecommendedSection />
+      </div>
+
+      {/* Desktop */}
+      <div className="hidden min-h-full flex-col lg:flex">
+      <section className="relative -mx-4 -mt-4 border-b border-border px-4 pb-10 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10">
         <div
           className="pointer-events-none absolute inset-0 opacity-35"
           style={{
@@ -758,17 +1340,6 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
           aria-hidden
         />
         <div className="relative flex flex-col gap-6 sm:flex-row sm:items-end">
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/gif"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              void onCoverFile(file);
-            }}
-          />
           {canEdit ? (
           <button
             type="button"
@@ -947,8 +1518,10 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
             onClick={() => openDetails()}
             className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
           >
-            Name & details
+            <ListFilter className="size-4" />
+            Edit
           </button>
+          <SortPill />
         </div>
         ) : null}
       </section>
@@ -1001,7 +1574,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                 </tr>
               </thead>
               <tbody>
-                {tracks.map((t, i) => {
+                {sortedTracks.map((t, i) => {
                   const playerTrack = toPlayerTrack(
                     t,
                     playlist?.name || "",
@@ -1133,6 +1706,9 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
         )}
       </section>
 
+      <RecommendedSection />
+      </div>
+
       <AddTracksDialog
         open={addOpen}
         onOpenChange={setAddOpen}
@@ -1165,6 +1741,6 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
           onConfirm={() => void deleteThisPlaylist()}
         />
       ) : null}
-    </div>
+    </>
   );
 }

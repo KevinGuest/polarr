@@ -3,17 +3,26 @@
 import { toastInfo } from "@/lib/toast";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import * as SliderPrimitive from "@radix-ui/react-slider";
+import { PlayerGlassBackdrop } from "@/components/player-glass-backdrop";
+import { PlayerSlider } from "@/components/player-slider";
+import { TrackActionsDrawer } from "@/components/track-actions-drawer";
 import {
   Laptop,
+  ListMusic,
+  MessageSquareQuote,
   Mic2,
   MonitorSpeaker,
   Music2,
   Pause,
   Play,
+  Shuffle,
   SkipBack,
   SkipForward,
+  Volume1,
+  Volume2,
   Wifi,
   X,
 } from "lucide-react";
@@ -27,32 +36,49 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { albumHref } from "@/lib/album-ref";
 import { getDragTrack, POLARR_TRACK_MIME } from "@/lib/drag-track";
+import {
+  assignLyricSides,
+  duoArtists,
+  isDualLyricLayout,
+} from "@/lib/lyrics/lyric-sides";
 import { LISTEN_CREDITED_EVENT } from "@/lib/ui-events";
 import { cn, formatDuration } from "@/lib/utils";
 import { KaraokeLyricLine } from "@/components/karaoke-lyric-line";
 import { useKaraokeSession } from "@/components/use-karaoke-session";
 
-/** Dark saturated backdrop from track seed — always readable with white text. */
-function lyricsBackdrop(seed: string): string {
-  let h = 2166136261;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  const hue = Math.abs(h) % 360;
-  // Low lightness + medium-high saturation so white/bold lyrics stay crisp
-  return `hsl(${hue} 42% 18%)`;
+function formatRemaining(progress: number, duration: number): string {
+  const rem = Math.max(0, duration - progress);
+  return `-${formatDuration(rem)}`;
 }
 
-function LyricsPanel() {
+function subscribeLg(onChange: () => void) {
+  const mq = window.matchMedia("(min-width: 1024px)");
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
+function getLgSnapshot() {
+  return window.matchMedia("(min-width: 1024px)").matches;
+}
+function getLgServerSnapshot() {
+  return true;
+}
+function useIsLg() {
+  return useSyncExternalStore(subscribeLg, getLgSnapshot, getLgServerSnapshot);
+}
+
+function LyricsBody({
+  open,
+  compact,
+}: {
+  open: boolean;
+  compact?: boolean;
+}) {
   const {
     track,
     playing,
     progress,
     duration,
     seek,
-    isPanelOpen,
-    closePanel,
     vocalLevel,
     setVocalLevel,
     karaokeStatus,
@@ -62,10 +88,9 @@ function LyricsPanel() {
   } = usePlayer();
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const activeRef = useRef<HTMLButtonElement | null>(null);
-  const lyricsOpen = isPanelOpen("lyrics");
 
   const session = useKaraokeSession({
-    open: lyricsOpen,
+    open,
     artist: track?.artist,
     title: track?.title,
     album: track?.album,
@@ -77,36 +102,42 @@ function LyricsPanel() {
     const scroller = scrollerRef.current;
     const active = activeRef.current;
     if (!scroller || !active || !session.synced) return;
-    // Pin the singing line near the top (Apple Music karaoke), not centered.
-    const topPin = 80;
+    const topPin = compact ? 48 : 80;
     scroller.scrollTo({
       top: Math.max(0, active.offsetTop - topPin),
       behavior: "smooth",
     });
-  }, [session.activeIndex, session.synced]);
+  }, [session.activeIndex, session.synced, compact]);
 
-  if (!lyricsOpen || !track) return null;
+  const sidedLines = useMemo(
+    () =>
+      assignLyricSides(
+        session.lines,
+        track?.artist || "",
+        track?.title || "",
+      ),
+    [session.lines, track?.artist, track?.title],
+  );
+  const dual = isDualLyricLayout(sidedLines);
+  const duo = useMemo(
+    () => (track ? duoArtists(track.artist, track.title) : null),
+    [track],
+  );
 
-  const bg = lyricsBackdrop(`${track.id}:${track.artist}:${track.title}`);
+  if (!open || !track) return null;
+
   const canSeek = session.synced && duration > 0;
 
   return (
-    <div
-      className="pointer-events-auto absolute inset-0 z-20 flex flex-col"
-      style={{ backgroundColor: bg }}
-    >
-      <button
-        type="button"
-        aria-label="Close lyrics"
-        onClick={() => closePanel("lyrics")}
-        className="absolute right-5 top-5 z-10 rounded-md p-2 text-white/55 transition-colors hover:text-white"
-      >
-        <X className="size-5" />
-      </button>
-
+    <div className="relative flex min-h-0 flex-1 flex-col">
       <div
         ref={scrollerRef}
-        className="min-h-0 flex-1 overflow-y-auto px-8 pb-[70vh] pt-20 md:px-16 lg:px-24 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+        className={cn(
+          "min-h-0 flex-1 overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden",
+          compact
+            ? "px-5 pb-8 pt-2"
+            : "px-8 pb-[70vh] pt-20 md:px-16 lg:px-24",
+        )}
       >
         {session.status === "loading" && (
           <p className="text-lg font-bold text-white/50">Loading lyrics…</p>
@@ -123,12 +154,19 @@ function LyricsPanel() {
               : "No lyrics found for this track."}
           </p>
         )}
+        {session.status === "ready" && dual && duo ? (
+          <div className="mb-4 flex items-baseline justify-between gap-4 px-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40">
+            <span className="min-w-0 truncate">{duo.left}</span>
+            <span className="min-w-0 truncate text-right">{duo.right}</span>
+          </div>
+        ) : null}
         {session.status === "ready" &&
-          session.lines.map((line, i) => {
+          sidedLines.map((line, i) => {
             const active = session.synced && i === session.activeIndex;
             const near =
               session.synced && Math.abs(i - session.activeIndex) <= 1;
             const isGap = line.text === "♪" || line.text === "♫";
+            const renderLine = { ...line, text: line.displayText };
 
             return (
               <button
@@ -142,10 +180,13 @@ function LyricsPanel() {
                   seek(Math.min(1, Math.max(0, t / duration)));
                 }}
                 className={cn(
-                  "block max-w-3xl py-3 text-left leading-snug tracking-tight transition-[color,filter,font-size,opacity] duration-300",
+                  "block w-full max-w-3xl py-3 leading-snug tracking-tight transition-[color,filter,font-size,opacity] duration-300",
+                  dual && line.side === "left" && "mr-auto text-left",
+                  dual && line.side === "right" && "ml-auto text-right",
+                  dual && line.side === "center" && "mx-auto text-center",
+                  !dual && "text-left",
                   canSeek && "cursor-pointer hover:text-white hover:blur-none",
                   !canSeek && "cursor-default",
-                  // Plain session: all lines readable, equal weight (no fake sync)
                   !session.synced &&
                     "text-2xl font-semibold text-white/75 md:text-3xl",
                   session.synced &&
@@ -166,18 +207,19 @@ function LyricsPanel() {
                     i > session.activeIndex &&
                     "text-2xl font-semibold text-white/20 blur-[2.5px] md:text-3xl",
                   isGap && "tracking-widest",
+                  dual && line.side !== "center" && "max-w-[88%]",
                 )}
               >
                 {active ? (
                   <KaraokeLyricLine
-                    line={line}
+                    line={renderLine}
                     lines={session.lines}
                     index={i}
                     clockSec={session.clockSec}
                     playing={playing}
                   />
                 ) : (
-                  line.text
+                  line.displayText
                 )}
               </button>
             );
@@ -189,9 +231,13 @@ function LyricsPanel() {
         )}
       </div>
 
-      {/* Bottom-right: full mix ↔ Demucs instrumental (downloaded tracks only) */}
       {karaokeEligible ? (
-      <div className="absolute bottom-8 right-6 z-20 flex flex-col items-center gap-2 rounded-full bg-black/45 px-2.5 py-3.5 ring-1 ring-white/12 backdrop-blur-md">
+      <div
+        className={cn(
+          "absolute right-5 z-20 flex flex-col items-center gap-2 rounded-full bg-black/45 px-2.5 py-3.5 ring-1 ring-white/12 backdrop-blur-md",
+          compact ? "bottom-3" : "bottom-8",
+        )}
+      >
         <button
           type="button"
           aria-label="Full original mix"
@@ -265,6 +311,74 @@ function LyricsPanel() {
   );
 }
 
+function LyricsPanel() {
+  const { track, isPanelOpen, closePanel } = usePlayer();
+  const lyricsOpen = isPanelOpen("lyrics");
+  if (!lyricsOpen || !track) return null;
+
+  const cover =
+    track.coverPath && /^https?:\/\//i.test(track.coverPath)
+      ? track.coverPath
+      : undefined;
+
+  return (
+    <div className="pointer-events-auto absolute inset-0 z-20 flex flex-col overflow-hidden">
+      <PlayerGlassBackdrop
+        image={cover}
+        seed={`${track.id}:${track.artist}:${track.title}`}
+      />
+      <button
+        type="button"
+        aria-label="Close lyrics"
+        onClick={() => closePanel("lyrics")}
+        className="absolute right-5 top-5 z-10 rounded-md p-2 text-white/55 transition-colors hover:text-white"
+      >
+        <X className="size-5" />
+      </button>
+      <div className="relative z-[1] flex min-h-0 flex-1 flex-col">
+        <LyricsBody open={lyricsOpen} />
+      </div>
+    </div>
+  );
+}
+
+function ConnectBody() {
+  return (
+    <div className="px-4 pb-6">
+      <div className="flex items-center gap-3 rounded-xl bg-muted/50 px-4 py-3.5">
+        <Laptop className="size-5 shrink-0 text-foreground" />
+        <div className="min-w-0 text-sm font-semibold text-foreground">
+          This web browser
+        </div>
+      </div>
+
+      <h3 className="mt-6 text-sm font-semibold">No other devices found</h3>
+
+      <ul className="mt-4 space-y-4">
+        <li className="flex gap-3">
+          <Wifi className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 space-y-0.5">
+            <p className="text-sm font-medium">Check your WiFi</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Connect the devices you’re using to the same WiFi.
+            </p>
+          </div>
+        </li>
+        <li className="flex gap-3">
+          <MonitorSpeaker className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 space-y-0.5">
+            <p className="text-sm font-medium">Play from another device</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Open Polarr in another browser on this network — it’ll show up
+              here.
+            </p>
+          </div>
+        </li>
+      </ul>
+    </div>
+  );
+}
+
 function DevicesPanel() {
   const { isPanelOpen, closePanel } = usePlayer();
   if (!isPanelOpen("devices")) return null;
@@ -284,38 +398,7 @@ function DevicesPanel() {
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
-        <div className="px-4 pb-6">
-        <div className="flex items-center gap-3 rounded-xl bg-muted/50 px-4 py-3.5">
-          <Laptop className="size-5 shrink-0 text-foreground" />
-          <div className="min-w-0 text-sm font-semibold text-foreground">
-            This web browser
-          </div>
-        </div>
-
-        <h3 className="mt-6 text-sm font-semibold">No other devices found</h3>
-
-        <ul className="mt-4 space-y-4">
-          <li className="flex gap-3">
-            <Wifi className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 space-y-0.5">
-              <p className="text-sm font-medium">Check your WiFi</p>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                Connect the devices you’re using to the same WiFi.
-              </p>
-            </div>
-          </li>
-          <li className="flex gap-3">
-            <MonitorSpeaker className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 space-y-0.5">
-              <p className="text-sm font-medium">Play from another device</p>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                Open Polarr in another browser on this network — it’ll show up
-                here.
-              </p>
-            </div>
-          </li>
-        </ul>
-        </div>
+        <ConnectBody />
       </ScrollArea>
     </div>
   );
@@ -333,11 +416,11 @@ function NowPlayingPopup() {
     seek,
     next,
     prev,
+    togglePanel,
   } = usePlayer();
 
   if (!isPanelOpen("nowPlaying") || !track) return null;
 
-  const pct = duration ? (progress / duration) * 100 : 0;
   const albumPath = albumHref({
     title: (track.album || track.title).trim() || track.title,
     artist: track.artist,
@@ -346,9 +429,6 @@ function NowPlayingPopup() {
   return (
     <div className="pointer-events-auto absolute inset-0 z-40 flex flex-col bg-background">
       <div className="flex items-center justify-between px-6 py-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Now playing
-        </p>
         <button
           type="button"
           aria-label="Close now playing"
@@ -357,6 +437,10 @@ function NowPlayingPopup() {
         >
           <X className="size-5" />
         </button>
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Now playing
+        </p>
+        <span className="size-9" aria-hidden />
       </div>
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-8 px-8 pb-10">
         <TrackContextMenu track={track}>
@@ -373,7 +457,7 @@ function NowPlayingPopup() {
                   ? track.coverPath
                   : undefined
               }
-              className="aspect-square w-full rounded-lg shadow-lg"
+              className="aspect-square w-full max-w-[min(100%,24rem)] rounded-lg shadow-lg"
             />
             <div className="flex w-full items-center justify-center gap-2 text-center">
               <div className="min-w-0 space-y-1">
@@ -395,39 +479,37 @@ function NowPlayingPopup() {
             <span className="w-10 text-right text-[11px] tabular-nums text-muted-foreground">
               {formatDuration(progress)}
             </span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={0.1}
-              value={pct}
-              onChange={(e) => seek(Number(e.target.value) / 100)}
+            <PlayerSlider
+              value={duration ? progress / duration : 0}
+              onChange={(ratio) => seek(ratio)}
               aria-label="Seek"
-              className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-border accent-foreground"
+              variant="progress"
+              tone="default"
+              className="-my-3 flex-1"
             />
             <span className="w-10 text-[11px] tabular-nums text-muted-foreground">
               {formatDuration(duration)}
             </span>
           </div>
-          <div className="flex items-center justify-center gap-6">
+          <div className="flex items-center justify-center gap-8">
             <button
               type="button"
               onClick={prev}
               className="text-muted-foreground transition-colors hover:text-foreground"
               aria-label="Previous"
             >
-              <SkipBack className="size-5" />
+              <SkipBack className="size-7" fill="currentColor" />
             </button>
             <button
               type="button"
               onClick={toggle}
-              className="flex size-12 items-center justify-center rounded-full border border-border transition-colors hover:bg-foreground hover:text-background"
+              className="flex size-14 items-center justify-center rounded-full bg-foreground text-background"
               aria-label={playing ? "Pause" : "Play"}
             >
               {playing ? (
-                <Pause className="size-5" fill="currentColor" />
+                <Pause className="size-6" fill="currentColor" />
               ) : (
-                <Play className="size-5" fill="currentColor" />
+                <Play className="size-6 translate-x-px" fill="currentColor" />
               )}
             </button>
             <button
@@ -436,7 +518,31 @@ function NowPlayingPopup() {
               className="text-muted-foreground transition-colors hover:text-foreground"
               aria-label="Next"
             >
-              <SkipForward className="size-5" />
+              <SkipForward className="size-7" fill="currentColor" />
+            </button>
+          </div>
+          <div className="flex items-center justify-between px-2">
+            <TrackLikeButton
+              key={track.id}
+              trackId={track.id}
+              artist={track.artist}
+              title={track.title}
+              album={track.album}
+              coverPath={track.coverPath}
+            />
+            <button
+              type="button"
+              onClick={() => togglePanel("lyrics")}
+              className={cn(
+                "rounded-md p-2 transition-colors",
+                isPanelOpen("lyrics")
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              aria-label="Lyrics"
+              aria-pressed={isPanelOpen("lyrics")}
+            >
+              <Mic2 className="size-5" />
             </button>
           </div>
         </div>
@@ -445,7 +551,7 @@ function NowPlayingPopup() {
   );
 }
 
-function QueuePanel() {
+function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
   const {
     track,
     queue,
@@ -455,6 +561,8 @@ function QueuePanel() {
     addToQueue,
     queueTab,
     setQueueTab,
+    shuffle,
+    toggleShuffle,
   } = usePlayer();
   const [recent, setRecent] = useState<
     (PlayerTrack & { playedAt: string; liked?: boolean })[]
@@ -528,7 +636,10 @@ function QueuePanel() {
   return (
     <aside
       className={cn(
-        "flex h-full w-80 shrink-0 flex-col border-l border-border bg-background lg:w-96",
+        "flex h-full min-h-0 flex-col",
+        variant === "rail" &&
+          "w-80 shrink-0 border-l border-border bg-background lg:w-96",
+        variant === "sheet" && "w-full bg-transparent",
         dragOver && "ring-2 ring-inset ring-foreground/30",
       )}
       onDragOver={(e) => {
@@ -550,7 +661,28 @@ function QueuePanel() {
         toastInfo("Queue updated", { description: "Cleared upcoming tracks" });
       }}
     >
-      <div className="flex shrink-0 items-center gap-2 px-4 py-3">
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-2 px-4 py-3",
+          variant === "sheet" && "flex-wrap gap-2 px-3 py-2",
+        )}
+      >
+        {variant === "sheet" ? (
+          <button
+            type="button"
+            onClick={toggleShuffle}
+            aria-label="Shuffle"
+            aria-pressed={shuffle}
+            className={cn(
+              "flex size-11 items-center justify-center rounded-full transition-colors",
+              shuffle
+                ? "bg-foreground/15 text-foreground"
+                : "bg-muted/60 text-muted-foreground",
+            )}
+          >
+            <Shuffle className="size-4" />
+          </button>
+        ) : null}
         <div
           className="flex min-w-0 items-center gap-1"
           role="tablist"
@@ -588,7 +720,7 @@ function QueuePanel() {
         <div className="px-2 pb-4">
         {queueTab === "queue" ? (
           <>
-            {track ? (
+            {track && variant === "rail" ? (
               <section className="space-y-2 px-2 pb-4">
                 <p className="text-[11px] font-medium text-muted-foreground">
                   Now playing
@@ -615,16 +747,32 @@ function QueuePanel() {
                   </div>
                 </TrackContextMenu>
               </section>
-            ) : (
+            ) : !track ? (
               <p className="px-3 py-2 text-sm text-muted-foreground">
                 Nothing playing yet.
               </p>
-            )}
+            ) : null}
 
             <section className="space-y-1 px-2">
-              <p className="px-1 text-[11px] font-medium text-muted-foreground">
-                {nextFrom ? `Next from: ${nextFrom}` : "Next up"}
+              <p
+                className={cn(
+                  "px-1 font-medium text-muted-foreground",
+                  variant === "sheet"
+                    ? "text-base font-bold text-foreground"
+                    : "text-[11px]",
+                )}
+              >
+                {variant === "sheet"
+                  ? "Continue Playing"
+                  : nextFrom
+                    ? `Next from: ${nextFrom}`
+                    : "Next up"}
               </p>
+              {variant === "sheet" && nextFrom ? (
+                <p className="px-1 text-xs text-muted-foreground">
+                  From {nextFrom}
+                </p>
+              ) : null}
               {upcoming.length === 0 ? (
                 <p className="px-1 py-2 text-sm text-muted-foreground">
                   Queue is empty. Right-click a track to add more.
@@ -658,7 +806,12 @@ function QueuePanel() {
                           <button
                             type="button"
                             aria-label="Remove from queue"
-                            className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+                            className={cn(
+                              "rounded p-1 text-muted-foreground transition-opacity hover:text-foreground",
+                              variant === "sheet"
+                                ? "opacity-100"
+                                : "opacity-0 group-hover:opacity-100",
+                            )}
                             onClick={() => removeFromQueue(t.id)}
                           >
                             <X className="size-3.5" />
@@ -748,19 +901,480 @@ function QueuePanel() {
   );
 }
 
-/** Permanent queue / recently-played rail. */
+type MobileSheetView = "player" | "lyrics" | "queue" | "devices";
+
+function SheetMoreButton({ track }: { track: PlayerTrack }) {
+  return <TrackActionsDrawer track={track} />;
+}
+
+function MobileSheetHeader({ track }: { track: PlayerTrack }) {
+  const cover =
+    track.coverPath && /^https?:\/\//i.test(track.coverPath)
+      ? track.coverPath
+      : undefined;
+  return (
+    <div className="flex shrink-0 items-center gap-3 px-4 py-2">
+      <CoverArt
+        seed={track.album || track.title}
+        image={cover}
+        className="size-12 shrink-0 rounded-lg shadow-md ring-1 ring-white/15"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[15px] font-semibold text-white">
+          {track.title}
+        </div>
+        <div className="flex min-w-0 items-center gap-1.5 text-sm text-white/65">
+          {track.explicit ? <ExplicitBadge /> : null}
+          <span className="truncate">{track.artist}</span>
+        </div>
+      </div>
+      <TrackLikeButton
+        key={track.id}
+        trackId={track.id}
+        artist={track.artist}
+        title={track.title}
+        album={track.album}
+        coverPath={track.coverPath}
+        size="md"
+        className="size-11 text-white"
+      />
+      <SheetMoreButton track={track} />
+    </div>
+  );
+}
+
+function MobileTransport({
+  track,
+  playing,
+  progress,
+  duration,
+  volume,
+  onSeek,
+  onToggle,
+  onPrev,
+  onNext,
+  onVolume,
+}: {
+  track: PlayerTrack;
+  playing: boolean;
+  progress: number;
+  duration: number;
+  volume: number;
+  onSeek: (ratio: number) => void;
+  onToggle: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+  onVolume: (v: number) => void;
+}) {
+  return (
+    <div className="shrink-0 px-6 pt-2">
+          <PlayerSlider
+            value={duration ? progress / duration : 0}
+            onChange={onSeek}
+            aria-label="Seek"
+            variant="progress"
+            tone="on-dark"
+            className="-my-3"
+          />
+      <div className="mt-1.5 flex items-center justify-between text-[11px] tabular-nums text-white/55">
+        <span>{formatDuration(progress)}</span>
+        <StreamQualityBadge track={track} className="bg-white/12 text-white/80" />
+        <span>{formatRemaining(progress, duration)}</span>
+      </div>
+      <div className="flex items-center justify-center gap-10 py-3">
+        <button
+          type="button"
+          onClick={onPrev}
+          className="flex size-11 items-center justify-center text-white"
+          aria-label="Previous"
+        >
+          <SkipBack className="size-8" fill="currentColor" />
+        </button>
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex size-14 items-center justify-center text-white"
+          aria-label={playing ? "Pause" : "Play"}
+        >
+          {playing ? (
+            <Pause className="size-10" fill="currentColor" />
+          ) : (
+            <Play className="size-10 translate-x-0.5" fill="currentColor" />
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={onNext}
+          className="flex size-11 items-center justify-center text-white"
+          aria-label="Next"
+        >
+          <SkipForward className="size-8" fill="currentColor" />
+        </button>
+      </div>
+      <div className="flex min-h-[44px] items-center gap-3 px-1">
+        <Volume1 className="size-4 shrink-0 text-white/50" aria-hidden />
+        <PlayerSlider
+          value={volume}
+          onChange={onVolume}
+          aria-label="Volume"
+          variant="volume"
+          tone="on-dark"
+          className="-my-2 flex-1"
+        />
+        <Volume2 className="size-5 shrink-0 text-white/50" aria-hidden />
+      </div>
+    </div>
+  );
+}
+
+function MobileTrio({
+  view,
+  onLyrics,
+  onDevices,
+  onQueue,
+}: {
+  view: MobileSheetView;
+  onLyrics: () => void;
+  onDevices: () => void;
+  onQueue: () => void;
+}) {
+  const items = [
+    {
+      id: "lyrics" as const,
+      label: "Lyrics",
+      icon: MessageSquareQuote,
+      onClick: onLyrics,
+    },
+    {
+      id: "devices" as const,
+      label: "Connect",
+      icon: MonitorSpeaker,
+      onClick: onDevices,
+    },
+    {
+      id: "queue" as const,
+      label: "Queue",
+      icon: ListMusic,
+      onClick: onQueue,
+    },
+  ];
+  return (
+    <div className="flex shrink-0 items-center justify-around px-8 pb-[max(0.75rem,var(--safe-bottom))] pt-1">
+      {items.map((item) => {
+        const active = view === item.id;
+        const Icon = item.icon;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={item.onClick}
+            aria-label={item.label}
+            aria-pressed={active}
+            className={cn(
+              "flex size-11 items-center justify-center rounded-full transition-colors",
+              active
+                ? "bg-white/15 text-white"
+                : "text-white/50 hover:text-white",
+            )}
+          >
+            <Icon className="size-5" strokeWidth={1.75} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function MobilePlayerSheet() {
+  const {
+    track,
+    playing,
+    progress,
+    duration,
+    volume,
+    isPanelOpen,
+    setPanel,
+    closePanel,
+    toggle,
+    seek,
+    next,
+    prev,
+    setVolume,
+  } = usePlayer();
+  const [queueView, setQueueView] = useState(false);
+  const [dragY, setDragY] = useState(0);
+  const [lyricsControlsVisible, setLyricsControlsVisible] = useState(true);
+  const [mounted, setMounted] = useState(false);
+  const startY = useRef<number | null>(null);
+  const skipHandleClick = useRef(false);
+  const hideControlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    function onOpenQueue() {
+      setQueueView(true);
+      closePanel("lyrics");
+      closePanel("devices");
+      setPanel("nowPlaying");
+    }
+    window.addEventListener("polarr:open-queue", onOpenQueue);
+    return () => window.removeEventListener("polarr:open-queue", onOpenQueue);
+  }, [closePanel, setPanel]);
+
+  const lyricsOpen = isPanelOpen("lyrics");
+  const devicesOpen = isPanelOpen("devices");
+  const nowPlayingOpen = isPanelOpen("nowPlaying");
+  const open = nowPlayingOpen || lyricsOpen || devicesOpen;
+  const lyricsImmersive = lyricsOpen && !queueView;
+
+  const bumpLyricsControls = () => {
+    setLyricsControlsVisible(true);
+    if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
+    hideControlsTimer.current = setTimeout(() => {
+      setLyricsControlsVisible(false);
+    }, 3000);
+  };
+
+  useEffect(() => {
+    if (!lyricsImmersive) {
+      setLyricsControlsVisible(true);
+      if (hideControlsTimer.current) {
+        clearTimeout(hideControlsTimer.current);
+        hideControlsTimer.current = null;
+      }
+      return;
+    }
+    bumpLyricsControls();
+    return () => {
+      if (hideControlsTimer.current) {
+        clearTimeout(hideControlsTimer.current);
+        hideControlsTimer.current = null;
+      }
+    };
+  }, [lyricsImmersive]);
+
+  if (!open || !track || !mounted) return null;
+
+  const view: MobileSheetView = queueView
+    ? "queue"
+    : lyricsOpen
+      ? "lyrics"
+      : devicesOpen
+        ? "devices"
+        : "player";
+
+  const cover =
+    track.coverPath && /^https?:\/\//i.test(track.coverPath)
+      ? track.coverPath
+      : undefined;
+  const showTransport = view !== "lyrics" || lyricsControlsVisible;
+
+  function dismiss() {
+    setQueueView(false);
+    setDragY(0);
+    setPanel("none");
+  }
+
+  function showPlayer() {
+    setQueueView(false);
+    closePanel("lyrics");
+    closePanel("devices");
+  }
+
+  function showLyrics() {
+    if (view === "lyrics") {
+      showPlayer();
+      return;
+    }
+    setQueueView(false);
+    closePanel("devices");
+    setPanel("lyrics");
+  }
+
+  function showQueue() {
+    if (view === "queue") {
+      showPlayer();
+      return;
+    }
+    closePanel("lyrics");
+    closePanel("devices");
+    setQueueView(true);
+  }
+
+  function showDevices() {
+    if (view === "devices") {
+      showPlayer();
+      return;
+    }
+    setQueueView(false);
+    closePanel("lyrics");
+    setPanel("devices");
+  }
+
+  const sheet = (
+    <div
+      className="pointer-events-auto fixed inset-0 z-[100] flex h-dvh min-h-dvh w-full flex-col overflow-hidden text-white"
+      style={{
+        transform: dragY > 0 ? `translateY(${dragY}px)` : undefined,
+        transition: startY.current == null ? "transform 0.2s ease-out" : undefined,
+      }}
+      onPointerDown={() => {
+        if (view === "lyrics") bumpLyricsControls();
+      }}
+      onTouchMove={(e) => {
+        if (startY.current == null) return;
+        const y = e.touches[0]?.clientY ?? startY.current;
+        const delta = y - startY.current;
+        if (delta > 0) setDragY(delta);
+      }}
+      onTouchEnd={() => {
+        if (startY.current == null) return;
+        const y = dragY;
+        startY.current = null;
+        if (y > 24) skipHandleClick.current = true;
+        if (y > 110) {
+          dismiss();
+          return;
+        }
+        setDragY(0);
+      }}
+    >
+      {/* Opaque base — no app chrome peeks through glass edges */}
+      <div className="absolute inset-0 bg-black" aria-hidden />
+      <PlayerGlassBackdrop
+        image={cover}
+        seed={`${track.id}:${track.artist}:${track.title}`}
+      />
+
+      <button
+        type="button"
+        aria-label="Close now playing"
+        onClick={() => {
+          if (skipHandleClick.current) {
+            skipHandleClick.current = false;
+            return;
+          }
+          dismiss();
+        }}
+        onTouchStart={(e) => {
+          startY.current = e.touches[0]?.clientY ?? null;
+        }}
+        className="relative z-[1] flex w-full shrink-0 justify-center pt-[max(0.65rem,var(--safe-top))] pb-2"
+      >
+        <span className="h-1 w-10 rounded-full bg-white/35" />
+      </button>
+
+      <div className="relative z-[1] flex min-h-0 flex-1 flex-col">
+        {view === "player" ? (
+          <div className="flex min-h-0 flex-1 flex-col px-6">
+            <div className="flex min-h-0 flex-1 items-center justify-center py-2">
+              <CoverArt
+                seed={track.album || track.title}
+                image={cover}
+                className="aspect-square w-full max-w-[min(100%,22rem)] rounded-2xl shadow-2xl"
+              />
+            </div>
+            <div className="flex shrink-0 items-center gap-3 pb-2">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-2xl font-bold tracking-tight text-white">
+                  {track.title}
+                </div>
+                <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[15px] text-white/70">
+                  {track.explicit ? <ExplicitBadge /> : null}
+                  <span className="truncate">{track.artist}</span>
+                </div>
+              </div>
+              <TrackLikeButton
+                key={track.id}
+                trackId={track.id}
+                artist={track.artist}
+                title={track.title}
+                album={track.album}
+                coverPath={track.coverPath}
+                size="md"
+                className="size-11 text-white"
+              />
+              <SheetMoreButton track={track} />
+            </div>
+          </div>
+        ) : (
+          <>
+            <MobileSheetHeader track={track} />
+            {view === "lyrics" ? (
+              <LyricsBody open compact />
+            ) : view === "queue" ? (
+              <div className="min-h-0 flex-1">
+                <QueuePanel variant="sheet" />
+              </div>
+            ) : (
+              <ScrollArea className="min-h-0 flex-1">
+                <ConnectBody />
+              </ScrollArea>
+            )}
+          </>
+        )}
+
+        <div
+          className={cn(
+            "shrink-0 transition-[opacity,transform,max-height] duration-300 ease-out",
+            showTransport
+              ? "pointer-events-auto max-h-[28rem] translate-y-0 opacity-100"
+              : "pointer-events-none max-h-0 translate-y-4 overflow-hidden opacity-0",
+          )}
+        >
+          <div>
+            <MobileTransport
+              track={track}
+              playing={playing}
+              progress={progress}
+              duration={duration}
+              volume={volume}
+              onSeek={seek}
+              onToggle={toggle}
+              onPrev={prev}
+              onNext={next}
+              onVolume={setVolume}
+            />
+            <MobileTrio
+              view={view}
+              onLyrics={showLyrics}
+              onDevices={showDevices}
+              onQueue={showQueue}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return createPortal(sheet, document.body);
+}
+
+/** Permanent queue / recently-played rail (desktop). */
 export function PlayerQueueRail() {
-  return <QueuePanel />;
+  return (
+    <div className="hidden h-full lg:flex">
+      <QueuePanel />
+    </div>
+  );
 }
 
 /** Overlays for lyrics, devices, and now-playing popup. */
 export function PlayerPanels() {
   const { isPanelOpen } = usePlayer();
+  const isLg = useIsLg();
   const anyOpen =
     isPanelOpen("lyrics") ||
     isPanelOpen("devices") ||
     isPanelOpen("nowPlaying");
   if (!anyOpen) return null;
+
+  if (!isLg) {
+    return <MobilePlayerSheet />;
+  }
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10">

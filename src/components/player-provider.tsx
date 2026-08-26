@@ -11,6 +11,7 @@ import {
 } from "react";
 import { usePathname } from "next/navigation";
 import { primaryArtistName } from "@/lib/track-match";
+import { pushRecentPlayedTrack } from "@/lib/recent-searches";
 import { formatDuration, titleLooksExplicit } from "@/lib/utils";
 import { emitListenCredited } from "@/lib/ui-events";
 
@@ -1441,6 +1442,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const play = useCallback(
     (next: PlayerTrack, nextQueue?: PlayerTrack[]) => {
       const gen = ++playGenRef.current;
+      pushRecentPlayedTrack({
+        id: next.id,
+        title: next.title,
+        artist: next.resolveArtist || primaryArtistName(next.artist) || next.artist,
+        album: next.album,
+        coverPath: next.coverPath,
+        quality: next.quality ?? undefined,
+        localTrackId:
+          next.quality === "local" &&
+          !next.id.startsWith("stream:") &&
+          !next.id.startsWith("live:")
+            ? next.id
+            : undefined,
+        onPolarr: next.quality === "local",
+      });
       // Library tracks: set src + play() in this tick (no /api/live wait).
       if (!isEphemeralTrack(next)) {
         const ready =

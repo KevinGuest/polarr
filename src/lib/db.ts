@@ -449,6 +449,58 @@ function migrateOfflineMarksV2(database: Database.Database) {
   `);
 }
 
+/**
+ * Seed durable household listening shelf from existing ≥15s plays (once).
+ * Survives later play_history pruning so “others listening” doesn’t vanish.
+ */
+function backfillListeningFeed(database: Database.Database) {
+  try {
+    const row = database
+      .prepare(`SELECT COUNT(*) as c FROM listening_feed`)
+      .get() as { c: number };
+    if (Number(row?.c) > 0) return;
+  } catch {
+    return;
+  }
+  database.exec(`
+    INSERT OR IGNORE INTO listening_feed(user_id, track_id, played_at)
+    SELECT p.user_id, p.track_id, MAX(p.played_at)
+    FROM play_history p
+    WHERE p.listened_seconds IS NULL OR p.listened_seconds >= 15
+    GROUP BY p.user_id, p.track_id
+  `);
+}
+
+/** Cap for the durable household listening shelf (not per-user history). */
+const LISTENING_FEED_CAP = 500;
+
+function upsertListeningFeed(
+  userId: string,
+  trackId: string,
+  playedAt: string,
+) {
+  if (!userId || !trackId) return;
+  getDb()
+    .prepare(
+      `INSERT INTO listening_feed(user_id, track_id, played_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(user_id, track_id) DO UPDATE SET
+         played_at = excluded.played_at`,
+    )
+    .run(userId, trackId, playedAt);
+
+  getDb()
+    .prepare(
+      `DELETE FROM listening_feed
+       WHERE rowid IN (
+         SELECT rowid FROM listening_feed
+         ORDER BY played_at DESC
+         LIMIT -1 OFFSET ?
+       )`,
+    )
+    .run(LISTENING_FEED_CAP);
+}
+
 function migrate(database: Database.Database) {
   database.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -777,6 +829,19 @@ function migrate(database: Database.Database) {
       PRIMARY KEY (user_id, item_key),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    -- Durable household “what others are listening to” feed (survives play_history prune).
+    CREATE TABLE IF NOT EXISTS listening_feed (
+      user_id TEXT NOT NULL,
+      track_id TEXT NOT NULL,
+      played_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, track_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_listening_feed_played
+      ON listening_feed(played_at DESC);
   `);
   ensureColumn(
     database,
@@ -797,6 +862,8 @@ function migrate(database: Database.Database) {
 
   // v2: offline marks are per-user, not global
   migrateOfflineMarksV2(database);
+
+  backfillListeningFeed(database);
 
   // Backfill missing updated_at / normalized_key
   database.exec(`
@@ -4749,6 +4816,7 @@ export function recordPlay(userId: string, trackId: string) {
       )
       .run(newId(), userId, trackId, at, 15);
   }
+  upsertListeningFeed(userId, trackId, at);
   // Cap history size per user
   getDb()
     .prepare(
@@ -4819,11 +4887,13 @@ export function creditTrackListen(
     | undefined;
 
   const at = nowIso();
+  let qualified = false;
   if (existing) {
     const prev = Number(existing.listenedSeconds) || 0;
     const next = prev + add;
     // Bump played_at whenever this listen qualifies (or already had).
     const bumpPlayedAt = next >= 15 || prev >= 15;
+    qualified = bumpPlayedAt;
     getDb()
       .prepare(
         `UPDATE play_history
@@ -4839,6 +4909,11 @@ export function creditTrackListen(
          VALUES (?, ?, ?, ?, ?)`,
       )
       .run(newId(), userId, resolvedId, at, add);
+    qualified = add >= 15;
+  }
+
+  if (qualified) {
+    upsertListeningFeed(userId, resolvedId, at);
   }
 
   getDb()
@@ -4968,6 +5043,8 @@ function promoteListeningRow(entry: TrackRow, next: TrackRow) {
  * Recent listens from other people on this homeserver (unique songs via
  * trackMatchKey). The viewer’s own plays never appear — adding or previewing
  * a file is not “someone else listening.”
+ *
+ * Reads the durable listening_feed so entries survive play_history pruning.
  */
 export function listOthersListening(
   viewerUserId: string,
@@ -4991,16 +5068,15 @@ export function listOthersListening(
               t.cover_path as coverPath, t.source, t.external_id as externalId,
               t.file_size as fileSize, t.mtime_ms as mtimeMs,
               t.added_at as addedAt, t.updated_at as updatedAt,
-              p.played_at as playedAt,
+              f.played_at as playedAt,
               u.id as listenedByUserId,
               u.username as listenedBy,
               u.avatar_path as listenedByAvatarPath
-       FROM play_history p
-       INNER JOIN tracks t ON t.id = p.track_id
-       INNER JOIN users u ON u.id = p.user_id
-       WHERE (p.listened_seconds IS NULL OR p.listened_seconds >= 15)
-         AND p.user_id != ?
-       ORDER BY p.played_at DESC
+       FROM listening_feed f
+       INNER JOIN tracks t ON t.id = f.track_id
+       INNER JOIN users u ON u.id = f.user_id
+       WHERE f.user_id != ?
+       ORDER BY f.played_at DESC
        LIMIT ?`,
     )
     .all(viewerUserId || "", fetchN) as Record<string, unknown>[];
@@ -5049,6 +5125,10 @@ export function listOthersListening(
       order.push(key);
     } else {
       promoteListeningRow(entry, track);
+      // Keep newest playedAt for the shelf ordering key already set
+      if (String(row.playedAt) > entry.playedAt) {
+        entry.playedAt = String(row.playedAt);
+      }
     }
 
     if (entry.userSeen.has(userId)) continue;

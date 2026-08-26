@@ -1,7 +1,6 @@
-import type { Metadata } from "next";
-import { Toaster } from "sonner";
+import type { Metadata, Viewport } from "next";
 import { AppShell } from "@/components/app-shell";
-import { TOAST_CLASS_NAMES } from "@/lib/toast-styles";
+import { AppToaster } from "@/components/app-toaster";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,19 +9,19 @@ export const metadata: Metadata = {
     "Self-hosted music discovery, Lidarr requests, and homeserver streaming.",
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#0c0b12",
+};
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className="dark h-full">
       <body className="min-h-full">
         <AppShell>{children}</AppShell>
-        <Toaster
-          theme="dark"
-          closeButton
-          position="top-center"
-          toastOptions={{
-            classNames: { ...TOAST_CLASS_NAMES },
-          }}
-        />
+        <AppToaster />
       </body>
     </html>
   );

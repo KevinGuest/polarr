@@ -1,10 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, CirclePlus, Clock, Play } from "lucide-react";
+import {
+  ArrowDownCircle,
+  Check,
+  ChevronLeft,
+  CirclePlus,
+  Clock,
+  Play,
+  Shuffle,
+} from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
+import { TrackActionsDrawer } from "@/components/track-actions-drawer";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
 import { TrackRowIndex } from "@/components/track-row-index";
@@ -25,6 +34,15 @@ import {
 } from "@/lib/ui-events";
 import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine } from "@/lib/utils";
 import { toastError, toastSuccess, toastInfo, toastSavingToLibrary } from "@/lib/toast";
+
+function shuffleArray<T>(items: T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
 
 type AlbumTrack = {
   key: string;
@@ -405,6 +423,21 @@ export function AlbumClient({ albumId }: { albumId: string }) {
     }
   }
 
+  const [showStickyTitle, setShowStickyTitle] = useState(false);
+  const heroSentinelRef = useRef<HTMLDivElement>(null);
+  const stickyTitle = album?.title || title;
+
+  useEffect(() => {
+    const el = heroSentinelRef.current;
+    if (!el || loading) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => setShowStickyTitle(!entry?.isIntersecting),
+      { threshold: 0, rootMargin: "-56px 0px 0px 0px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [loading, stickyTitle]);
+
   if (!ref) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -438,9 +471,261 @@ export function AlbumClient({ albumId }: { albumId: string }) {
     router.push(`/artist?${qs.toString()}`);
   }
 
+  function playShuffled() {
+    if (!albumQueue.length) {
+      playAvailable();
+      return;
+    }
+    const shuffled = shuffleArray(albumQueue);
+    play(shuffled[0]!, shuffled);
+  }
+
+  function toPlayerTrack(t: AlbumTrack): PlayerTrack {
+    const trackArtists = formatTrackArtistLine(
+      album?.artist || artist,
+      t.title,
+      t.artists,
+    );
+    return {
+      id: t.localTrackId || `stream:${t.key}`,
+      title: t.title,
+      artist: trackArtists,
+      resolveArtist: album?.artist || artist,
+      album: album?.title || title,
+      coverPath: album?.image || null,
+      streamUrl: t.streamUrl || null,
+      explicit: t.explicit,
+      duration: t.duration || undefined,
+    };
+  }
+
+  const canPlay = !loading && (tracks.length > 0 || fallbackReady);
+
   return (
-    <div className="flex min-h-full flex-col">
-      <section className="relative -mx-6 -mt-6 border-b border-border px-6 pb-10 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10">
+    <>
+      {/* Mobile — Spotify-style album */}
+      <div className="lg:hidden">
+        <div
+          className={cn(
+            "fixed inset-x-0 top-0 z-30 flex items-center gap-2 border-b border-border/40 bg-background/75 px-3 pb-2.5 pt-[max(0.5rem,var(--safe-top))] backdrop-blur-md transition-opacity duration-200",
+            showStickyTitle
+              ? "pointer-events-auto opacity-100"
+              : "pointer-events-none opacity-0",
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="rounded-full p-1.5 text-foreground"
+            aria-label="Go back"
+          >
+            <ChevronLeft className="size-6" />
+          </button>
+          <h1 className="min-w-0 flex-1 truncate text-base font-semibold">
+            {displayTitle || "Album"}
+          </h1>
+        </div>
+
+        {loading && !displayTitle ? (
+          <div className="space-y-4 pt-2" aria-busy="true">
+            <Skeleton className="mx-auto size-56 rounded-md" />
+            <Skeleton className="mx-4 h-8 w-2/3" />
+            <Skeleton className="mx-4 h-4 w-1/3" />
+          </div>
+        ) : (
+          <>
+            <div className="relative pb-1 pt-[max(0.5rem,var(--safe-top))]">
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{
+                  background:
+                    "linear-gradient(180deg, hsl(20 22% 34%) 0%, hsl(20 16% 20%) 55%, hsl(var(--background)) 100%)",
+                }}
+                aria-hidden
+              />
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className="absolute left-3 top-[max(0.5rem,var(--safe-top))] z-10 rounded-full bg-black/35 p-1.5 text-white backdrop-blur-sm"
+                aria-label="Go back"
+              >
+                <ChevronLeft className="size-6" />
+              </button>
+              <div className="relative mx-auto aspect-square w-[calc(100%-3rem)] max-w-[18rem] overflow-hidden rounded-md shadow-2xl">
+                <CoverArt
+                  seed={coverSeed}
+                  image={coverImage}
+                  className="size-full"
+                />
+              </div>
+              <div ref={heroSentinelRef} className="relative h-px" aria-hidden />
+
+              <div className="relative space-y-3 px-4 pb-2 pt-4">
+              <h1 className="text-[1.75rem] font-bold leading-tight tracking-tight">
+                {displayTitle || "Album"}
+              </h1>
+
+              {displayArtist ? (
+                <button
+                  type="button"
+                  onClick={() => openArtist()}
+                  className="flex min-w-0 items-center gap-2 text-left"
+                >
+                  <CoverArt
+                    seed={displayArtist}
+                    image={artistImage}
+                    className="size-6 shrink-0 rounded-full"
+                  />
+                  <span className="truncate text-sm font-semibold">
+                    {displayArtist}
+                  </span>
+                </button>
+              ) : null}
+
+              <p className="text-sm text-muted-foreground">
+                Album
+                {album?.year ? ` · ${album.year}` : ""}
+                {tracks.length
+                  ? ` · ${tracks.length} song${tracks.length === 1 ? "" : "s"}`
+                  : ""}
+              </p>
+
+              {error && !tracks.length ? (
+                <p className="text-sm text-destructive">{error}</p>
+              ) : null}
+
+              <div className="flex items-center gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => void toggleYourLibrary()}
+                  disabled={!libraryPinKey}
+                  className="flex size-10 items-center justify-center text-muted-foreground disabled:opacity-40"
+                  aria-label={
+                    inYourLibrary
+                      ? "Remove from Your Library"
+                      : "Add to Your Library"
+                  }
+                  aria-pressed={inYourLibrary}
+                >
+                  {inYourLibrary ? (
+                    <span className="flex size-7 items-center justify-center rounded-full bg-foreground text-background">
+                      <Check className="size-4" strokeWidth={3} />
+                    </span>
+                  ) : (
+                    <CirclePlus className="size-8" strokeWidth={1.5} />
+                  )}
+                </button>
+
+                <div className="min-w-0 flex-1" />
+
+                <button
+                  type="button"
+                  onClick={playShuffled}
+                  disabled={!canPlay}
+                  className="rounded-full p-2 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                  aria-label="Shuffle play"
+                >
+                  <Shuffle className="size-6" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => playAvailable()}
+                  disabled={!canPlay}
+                  className="flex size-14 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-opacity hover:opacity-90 disabled:opacity-40"
+                  aria-label="Play album"
+                >
+                  <Play className="size-6 translate-x-0.5" fill="currentColor" />
+                </button>
+              </div>
+            </div>
+            </div>
+
+            <section className="pt-2">
+              {loading ? (
+                <div className="space-y-2 px-4" aria-busy="true">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <Skeleton key={i} className="h-14 w-full rounded-md" />
+                  ))}
+                </div>
+              ) : tracks.length === 0 ? (
+                <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+                  No tracklist found for this album yet.
+                </p>
+              ) : (
+                <ul>
+                  {tracks.map((t) => {
+                    const busy = busyKey === t.key;
+                    const playerTrack = toPlayerTrack(t);
+                    const streamId = `stream:${t.key}`;
+                    const isCurrent = isPlayerRowCurrent(
+                      track,
+                      {
+                        id: playerTrack.id,
+                        localTrackId: t.localTrackId,
+                        streamId,
+                        title: t.title,
+                        artist: playerTrack.artist,
+                      },
+                      queue,
+                    );
+                    return (
+                      <li key={t.key}>
+                        <div className="flex w-full items-center gap-3 px-4 py-2.5">
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void playTrack(t)}
+                            className="min-w-0 flex-1 text-left disabled:opacity-50"
+                          >
+                            <div
+                              className={cn(
+                                "truncate text-[15px] font-medium",
+                                isCurrent
+                                  ? "text-primary"
+                                  : t.available
+                                    ? "text-foreground"
+                                    : "text-foreground/80",
+                              )}
+                            >
+                              {t.title}
+                            </div>
+                            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+                              {t.available ? (
+                                <ArrowDownCircle
+                                  className="size-3.5 shrink-0 text-primary"
+                                  aria-label="In library"
+                                />
+                              ) : null}
+                              {t.explicit ? <ExplicitBadge /> : null}
+                              <span className="truncate">
+                                {playerTrack.artist}
+                              </span>
+                            </div>
+                          </button>
+                          <TrackActionsDrawer
+                            track={playerTrack}
+                            onPolarr={t.available}
+                            inLibrary={t.available && Boolean(t.localTrackId)}
+                            onDownload={
+                              t.available
+                                ? undefined
+                                : () => void markDownloaded(t)
+                            }
+                          />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          </>
+        )}
+      </div>
+
+      {/* Desktop — existing layout */}
+      <div className="hidden min-h-full flex-col lg:flex">
+      <section className="relative -mx-4 -mt-4 border-b border-border px-4 pb-10 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10">
         <div
           className="pointer-events-none absolute inset-0 opacity-35"
           style={{
@@ -673,6 +958,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
           </div>
         )}
       </section>
-    </div>
+      </div>
+    </>
   );
 }

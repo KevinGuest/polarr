@@ -1,4 +1,8 @@
 import { json } from "@/lib/api";
+import {
+  fetchArtistPopularityScores,
+  popularityForTrack,
+} from "@/lib/artist-popularity";
 import { buildArtistCatalog } from "@/lib/artist-catalog";
 import { resolveArtistPortrait } from "@/lib/artist-portrait";
 import {
@@ -134,10 +138,15 @@ export async function GET(req: Request) {
 
   const artistCovers = await getArtistCoverMap();
   // Prefer Deezer (fresher) over Lidarr MediaCover posters
-  const fresh = await resolveArtistPortrait({
-    artist,
-    foreignArtistId,
-  }).catch(() => null);
+  const [fresh, popularityScores] = await Promise.all([
+    resolveArtistPortrait({
+      artist,
+      foreignArtistId,
+    }).catch(() => null),
+    fetchArtistPopularityScores(artist).catch(
+      () => new Map<string, number>(),
+    ),
+  ]);
   let artistImage =
     fresh ||
     imageHint ||
@@ -239,15 +248,24 @@ export async function GET(req: Request) {
     }),
     features: catalog.features,
     tiles,
-    tracks: catalog.tracks.map((t) => ({
-      id: t.id,
-      title: t.title,
-      artist: formatTrackArtistLine(t.artist, t.title),
-      primaryArtist: t.artist,
-      album: t.album,
-      duration: t.duration,
-      coverPath: coverById.get(t.id) || t.coverPath,
-      source: t.source,
-    })),
+    tracks: catalog.tracks
+      .map((t, i) => ({
+        id: t.id,
+        title: t.title,
+        artist: formatTrackArtistLine(t.artist, t.title),
+        primaryArtist: t.artist,
+        album: t.album,
+        duration: t.duration,
+        coverPath: coverById.get(t.id) || t.coverPath,
+        source: t.source,
+        popularity: popularityForTrack(
+          popularityScores,
+          t.artist,
+          t.title,
+          i,
+          catalog.tracks.length,
+        ),
+      }))
+      .sort((a, b) => b.popularity - a.popularity),
   });
 }

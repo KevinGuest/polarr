@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Check, Heart, Info, X } from "lucide-react";
+import { Check, Heart, Info } from "lucide-react";
 import { toast as sonnerToast } from "sonner";
 import { TOAST_CLASS_NAMES } from "@/lib/toast-styles";
 
@@ -60,7 +60,7 @@ export function toastSuccess(
 /** Alias for success. */
 export const toastOk = toastSuccess;
 
-/** Error (X). */
+/** Error (alert icon — not an X; close button is separate). */
 export function toastError(
   message: string,
   opts?: Omit<ToastOpts, "icon"> | string,
@@ -68,7 +68,7 @@ export function toastError(
   const o = typeof opts === "string" ? { description: opts } : opts;
   return greyToast(message, {
     ...o,
-    icon: iconEl(X),
+    icon: iconEl(Info, "size-4 shrink-0 text-red-300"),
   });
 }
 

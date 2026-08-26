@@ -1,7 +1,7 @@
 /** Shared Sonner chrome — safe to import from server layouts. */
 export const TOAST_CLASS_NAMES = {
   toast:
-    "group border border-zinc-600/80 bg-zinc-800 text-zinc-100 shadow-lg",
+    "group toast-polarr border border-zinc-600/80 bg-zinc-800 text-zinc-100 shadow-lg",
   title: "text-zinc-100 font-medium",
   description: "text-zinc-400",
   icon: "text-zinc-300",

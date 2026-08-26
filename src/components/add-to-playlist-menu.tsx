@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Check, Circle, HardDrive, Heart, Plus, Search } from "lucide-react";
+import { Check, Circle, HardDrive, Plus, Search } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { PromptDialog } from "@/components/confirm-dialog";
 import { Input } from "@/components/ui/input";
+import { LikedSongsCover } from "@/components/liked-songs-cover";
 import { emitLikesChanged, emitLibraryChanged } from "@/lib/ui-events";
 import { cn } from "@/lib/utils";
 import { toastError, toastInfo, toastHeart, toastSuccess } from "@/lib/toast";
@@ -30,7 +31,7 @@ type PlaylistRow = {
 function MembershipMark({ saved }: { saved: boolean }) {
   if (saved) {
     return (
-      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-black">
+      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
         <Check className="size-3" strokeWidth={3} />
       </span>
     );
@@ -379,9 +380,10 @@ export function AddToPlaylistMenu({
                           disabled={busyId === "liked"}
                           onClick={() => void toggleLiked()}
                           leading={
-                            <span className="flex size-8 items-center justify-center rounded bg-gradient-to-br from-indigo-500 to-emerald-400">
-                              <Heart className="size-3.5 fill-white text-white" />
-                            </span>
+                            <LikedSongsCover
+                              className="size-8 shrink-0 rounded"
+                              heartClassName="size-3.5"
+                            />
                           }
                         />
                       </li>
@@ -416,9 +418,10 @@ export function AddToPlaylistMenu({
                           disabled={busyId === "liked"}
                           onClick={() => void toggleLiked()}
                           leading={
-                            <span className="flex size-8 items-center justify-center rounded bg-gradient-to-br from-indigo-500 to-emerald-400">
-                              <Heart className="size-3.5 fill-white text-white" />
-                            </span>
+                            <LikedSongsCover
+                              className="size-8 shrink-0 rounded"
+                              heartClassName="size-3.5"
+                            />
                           }
                         />
                       </li>

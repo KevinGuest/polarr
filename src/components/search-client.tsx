@@ -3,10 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Play } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowUpLeft,
+  Check,
+  CirclePlus,
+  Play,
+  Search,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CoverArt } from "@/components/cover-art";
+import { ExplicitBadge } from "@/components/explicit-badge";
 import { UserAvatar } from "@/components/user-avatar";
 import { albumHref } from "@/lib/album-ref";
 import {
@@ -15,13 +24,23 @@ import {
   MediaTileShell,
   ShelfHeader,
 } from "@/components/media-shelf";
+import { TrackActionsDrawer } from "@/components/track-actions-drawer";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
-import { formatTrackArtistLine } from "@/lib/utils";
+import { formatTrackArtistLine, titleLooksExplicit } from "@/lib/utils";
 import { toastSavingToLibrary } from "@/lib/toast";
+import { RECENT_PLAYED_CHANGED_EVENT } from "@/lib/ui-events";
+import { MobileSearchHeader } from "@/components/mobile-search-header";
+import { MobileSaveButton } from "@/components/saved-in-drawer";
+import {
+  readRecentPlayedTracks,
+  removeRecentPlayedTrack,
+  type RecentPlayedTrack,
+} from "@/lib/recent-searches";
 
 const TOP_PREVIEW = 8;
+type SearchScope = "polarr" | "library";
 
 type CatalogTrack = {
   id: string;
@@ -87,6 +106,8 @@ export function SearchClient() {
   const { play } = usePlayer();
   const q = searchParams.get("q") || "";
   const view = searchParams.get("view");
+  const scope: SearchScope =
+    searchParams.get("scope") === "library" ? "library" : "polarr";
   const [tracks, setTracks] = useState<CatalogTrack[]>([]);
   const [albums, setAlbums] = useState<CatalogAlbum[]>([]);
   const [artists, setArtists] = useState<CatalogArtist[]>([]);
@@ -95,6 +116,26 @@ export function SearchClient() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [recentVersion, setRecentVersion] = useState(0);
+
+  const recentItems = useMemo(
+    () => readRecentPlayedTracks(),
+    [recentVersion, q],
+  );
+
+  function bumpRecent() {
+    setRecentVersion((v) => v + 1);
+  }
+
+  useEffect(() => {
+    function onRecentPlayed() {
+      bumpRecent();
+    }
+    window.addEventListener(RECENT_PLAYED_CHANGED_EVENT, onRecentPlayed);
+    return () => {
+      window.removeEventListener(RECENT_PLAYED_CHANGED_EVENT, onRecentPlayed);
+    };
+  }, []);
 
   useEffect(() => {
     const term = q.trim();
@@ -179,18 +220,70 @@ export function SearchClient() {
     };
   }, [q]);
 
+  const scopedTracks = useMemo(() => {
+    if (scope === "library") {
+      return tracks.filter((t) => t.onPolarr || t.localTrackId);
+    }
+    return tracks;
+  }, [tracks, scope]);
+
+  const scopedAlbums = useMemo(() => {
+    if (scope === "library") {
+      return albums.filter((a) => a.alreadyInLibrary);
+    }
+    return albums;
+  }, [albums, scope]);
+
+  const scopedArtists = useMemo(() => {
+    if (scope === "library") {
+      return artists.filter((a) => a.alreadyInLibrary);
+    }
+    return artists;
+  }, [artists, scope]);
+
   const catalogRows = useMemo((): CatalogRow[] => {
-    const inLib = albums.filter((a) => a.alreadyInLibrary);
-    const rest = albums.filter((a) => !a.alreadyInLibrary);
+    const inLib = scopedAlbums.filter((a) => a.alreadyInLibrary);
+    const rest = scopedAlbums.filter((a) => !a.alreadyInLibrary);
     return [
       ...inLib.slice(0, 2).map((hit) => ({ kind: "album" as const, hit })),
-      ...tracks.map((hit) => ({ kind: "track" as const, hit })),
+      ...scopedTracks.map((hit) => ({ kind: "track" as const, hit })),
       ...[...inLib.slice(2), ...rest].map((hit) => ({
         kind: "album" as const,
         hit,
       })),
     ];
-  }, [tracks, albums]);
+  }, [scopedTracks, scopedAlbums]);
+
+  /** Query completions that update alongside live results (Spotify-style). */
+  const querySuggestions = useMemo(() => {
+    const term = q.trim();
+    if (term.length < 1) return [] as string[];
+    const lower = term.toLowerCase();
+    const out: string[] = [];
+    const seen = new Set<string>();
+
+    function push(text: string) {
+      const t = text.trim().replace(/\s+/g, " ");
+      if (!t || t.length < term.length) return;
+      const key = t.toLowerCase();
+      if (seen.has(key) || key === lower) return;
+      if (!key.startsWith(lower) && !key.includes(` ${lower}`)) return;
+      seen.add(key);
+      out.push(t);
+    }
+
+    for (const a of scopedArtists) push(a.name);
+    for (const t of scopedTracks) {
+      push(t.title);
+      push(`${t.title} ${formatTrackArtistLine(t.artist, t.title)}`);
+      push(formatTrackArtistLine(t.artist, t.title));
+    }
+    for (const a of scopedAlbums) {
+      push(a.title);
+      push(`${a.title} ${a.artist}`);
+    }
+    return out.slice(0, 5);
+  }, [q, scopedArtists, scopedTracks, scopedAlbums]);
 
   async function playCatalogTrack(hit: CatalogTrack) {
     if (hit.localTrackId) {
@@ -309,18 +402,301 @@ export function SearchClient() {
     !loading &&
     term &&
     catalogRows.length === 0 &&
-    artists.length === 0 &&
+    scopedArtists.length === 0 &&
     profiles.length === 0;
 
   function searchHref(extra?: Record<string, string>) {
     const qs = new URLSearchParams();
     if (term) qs.set("q", term);
+    if (scope === "library") qs.set("scope", "library");
     if (extra) {
       for (const [k, v] of Object.entries(extra)) qs.set(k, v);
     }
     const s = qs.toString();
     return s ? `/search?${s}` : "/search";
   }
+
+  function removeRecent(key: string) {
+    removeRecentPlayedTrack(key);
+    bumpRecent();
+  }
+
+  function renderMobileRemoveButton(key: string) {
+    return (
+      <button
+        type="button"
+        aria-label="Remove from recent searches"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          removeRecent(key);
+        }}
+        className="flex size-9 shrink-0 items-center justify-center text-muted-foreground"
+      >
+        <X className="size-4" strokeWidth={2} />
+      </button>
+    );
+  }
+
+  function renderMobileAlbumSaveIcon(saved: boolean) {
+    if (saved) {
+      return (
+        <span className="flex size-9 shrink-0 items-center justify-center">
+          <span className="flex size-6 items-center justify-center rounded-full bg-foreground text-background">
+            <Check className="size-3.5" strokeWidth={3} />
+          </span>
+        </span>
+      );
+    }
+    return (
+      <span className="flex size-9 shrink-0 items-center justify-center">
+        <CirclePlus className="size-6 text-muted-foreground" strokeWidth={1.5} />
+      </span>
+    );
+  }
+
+  function renderMobileRow(row: CatalogRow, showRemove?: string) {
+    if (row.kind === "album") {
+      const hit = row.hit;
+      const href = albumPageHref(hit);
+      return (
+        <li key={`m-album:${hit.id}`}>
+          <div className="flex min-w-0 items-center gap-3 py-2.5">
+            <button
+              type="button"
+              onClick={() => router.push(href)}
+              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+            >
+              <CoverArt
+                seed={hit.title}
+                image={hit.image}
+                className="size-12 shrink-0 rounded-md"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">{hit.title}</div>
+                <div className="truncate text-sm text-muted-foreground">
+                  Album · {hit.artist}
+                </div>
+              </div>
+            </button>
+            {renderMobileAlbumSaveIcon(Boolean(hit.alreadyInLibrary))}
+            {showRemove ? renderMobileRemoveButton(showRemove) : null}
+          </div>
+        </li>
+      );
+    }
+
+    const hit = row.hit;
+    const trackId = hit.localTrackId || hit.id;
+    const pt: PlayerTrack = {
+      id: trackId,
+      title: hit.title,
+      artist: formatTrackArtistLine(hit.artist, hit.title),
+      album: hit.album || "",
+      coverPath: hit.image,
+      duration: hit.duration,
+      resolveArtist: hit.artist,
+      explicit: titleLooksExplicit(hit.title),
+    };
+    return (
+      <li key={`m-track:${hit.id}`}>
+        <div className="flex min-w-0 items-center gap-3 py-2.5">
+          <button
+            type="button"
+            onClick={() => void playCatalogTrack(hit)}
+            className="flex min-w-0 flex-1 items-center gap-3 text-left"
+          >
+            <CoverArt
+              seed={hit.title}
+              image={hit.image}
+              className="size-12 shrink-0 rounded-md"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium">{hit.title}</div>
+              <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+                {pt.explicit ? <ExplicitBadge /> : null}
+                <span className="truncate">
+                  Song · {formatTrackArtistLine(hit.artist, hit.title)}
+                </span>
+              </div>
+            </div>
+          </button>
+          {!showRemove ? (
+            <TrackActionsDrawer
+              track={pt}
+              onPolarr={Boolean(hit.onPolarr)}
+              inLibrary={Boolean(hit.onPolarr || hit.localTrackId)}
+              onDownload={
+                hit.onPolarr || hit.localTrackId
+                  ? undefined
+                  : () => void playCatalogTrack(hit)
+              }
+              onChanged={bumpRecent}
+            />
+          ) : null}
+          <MobileSaveButton
+            trackId={trackId}
+            artist={hit.artist}
+            title={hit.title}
+            album={hit.album}
+            coverPath={hit.image}
+            duration={hit.duration}
+            onPolarr={Boolean(hit.onPolarr)}
+            alreadyInLibrary={Boolean(hit.onPolarr || hit.localTrackId)}
+            onDownload={
+              hit.onPolarr || hit.localTrackId
+                ? undefined
+                : () => void playCatalogTrack(hit)
+            }
+            onSavedChange={bumpRecent}
+          />
+          {showRemove ? renderMobileRemoveButton(showRemove) : null}
+        </div>
+      </li>
+    );
+  }
+
+  function renderMobileArtistRow(hit: CatalogArtist, showRemove?: string) {
+    const href = artistPageHref(hit);
+    return (
+      <li key={`m-artist:${hit.id}`}>
+        <div className="flex min-w-0 items-center gap-3 py-2.5">
+          <button
+            type="button"
+            onClick={() => router.push(href)}
+            className="flex min-w-0 flex-1 items-center gap-3 text-left"
+          >
+            <CoverArt
+              seed={hit.name}
+              image={hit.image}
+              className="size-12 shrink-0 rounded-full"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium">{hit.name}</div>
+              <div className="truncate text-sm text-muted-foreground">Artist</div>
+            </div>
+          </button>
+          {showRemove ? renderMobileRemoveButton(showRemove) : null}
+        </div>
+      </li>
+    );
+  }
+
+  function renderMobileRecentItem(item: RecentPlayedTrack) {
+    return renderMobileRow(
+      {
+        kind: "track",
+        hit: {
+          id: item.trackId,
+          title: item.title,
+          artist: item.artist,
+          album: item.album || "",
+          image: item.image,
+          localTrackId: item.localTrackId,
+          onPolarr: item.onPolarr,
+        },
+      },
+      item.key,
+    );
+  }
+
+  function renderMobileProfileRow(hit: CatalogProfile) {
+    return (
+      <li key={`m-profile:${hit.id}`}>
+        <button
+          type="button"
+          onClick={() => router.push(hit.href)}
+          className="flex w-full min-w-0 items-center gap-3 py-2.5 text-left"
+        >
+          <UserAvatar
+            username={hit.username}
+            avatarUrl={hit.avatarUrl}
+            textClassName="text-lg"
+            className="size-12 shrink-0 rounded-full"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-medium">{hit.username}</div>
+            <div className="truncate text-sm text-muted-foreground">Profile</div>
+          </div>
+        </button>
+      </li>
+    );
+  }
+
+  const mobileEmpty =
+    !loading &&
+    term &&
+    catalogRows.length === 0 &&
+    scopedArtists.length === 0 &&
+    profiles.length === 0 &&
+    querySuggestions.length === 0;
+
+  function applySuggestion(text: string) {
+    const qs = new URLSearchParams();
+    qs.set("q", text);
+    if (scope === "library") qs.set("scope", "library");
+    router.replace(`/search?${qs.toString()}`);
+  }
+
+  const mobileResults = (
+    <div>
+      {!term ? (
+        recentItems.length > 0 ? (
+          <section>
+            <h2 className="mb-1.5 text-xl font-bold text-foreground">
+              Recent searches
+            </h2>
+            <ul>{recentItems.map((item) => renderMobileRecentItem(item))}</ul>
+          </section>
+        ) : null
+      ) : mobileEmpty ? (
+        <p className="py-4 text-sm text-muted-foreground">
+          {catalogError || "No matches."}
+        </p>
+      ) : (
+        <div className="space-y-1">
+          {querySuggestions.length > 0 ? (
+            <ul className="mb-1">
+              {querySuggestions.map((s) => (
+                <li key={s}>
+                  <button
+                    type="button"
+                    onClick={() => applySuggestion(s)}
+                    className="flex w-full items-center gap-3 py-2.5 text-left"
+                  >
+                    <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-muted/70">
+                      <Search
+                        className="size-5 text-muted-foreground"
+                        strokeWidth={2}
+                      />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[15px] font-medium">
+                      {s}
+                    </span>
+                    <ArrowUpLeft
+                      className="size-5 shrink-0 text-muted-foreground"
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {loading &&
+          catalogRows.length === 0 &&
+          scopedArtists.length === 0 &&
+          profiles.length === 0 ? (
+            <p className="py-2 text-sm text-muted-foreground">Searching…</p>
+          ) : null}
+          <ul>
+            {catalogRows.map((row) => renderMobileRow(row))}
+            {scopedArtists.map((hit) => renderMobileArtistRow(hit))}
+            {profiles.map((hit) => renderMobileProfileRow(hit))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 
   function renderCatalogRow(row: CatalogRow) {
     if (row.kind === "album") {
@@ -614,7 +990,13 @@ export function SearchClient() {
     ) : null;
 
   return (
-    <div className="min-w-0 space-y-10">
+    <div className="min-w-0">
+      <div className="lg:hidden">
+        <MobileSearchHeader />
+        <div className="pt-2">{mobileResults}</div>
+      </div>
+
+      <div className="hidden min-w-0 space-y-10 lg:block">
       {message ? (
         <p className="text-sm text-foreground">{message}</p>
       ) : null}
@@ -645,14 +1027,14 @@ export function SearchClient() {
 
       {!handleLike ? profilesShelf : null}
 
-      {artists.length > 0 ? (
+      {scopedArtists.length > 0 ? (
         <MediaShelfRow
           title="Artists"
-          itemCount={artists.length}
+          itemCount={scopedArtists.length}
           seeAllHref={searchHref({ view: "artists" })}
         >
           {(visible) =>
-            artists.slice(0, visible).map((hit) => (
+            scopedArtists.slice(0, visible).map((hit) => (
               <MediaTileShell
                 key={hit.id}
                 title={hit.name}
@@ -672,6 +1054,7 @@ export function SearchClient() {
           }
         </MediaShelfRow>
       ) : null}
+      </div>
     </div>
   );
 }

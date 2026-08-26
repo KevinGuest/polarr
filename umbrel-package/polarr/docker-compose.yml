@@ -9,7 +9,7 @@ services:
       PROXY_AUTH_ADD: "false"
 
   web:
-    image: ghcr.io/kevinguest/polarr-app:0.6.12
+    image: ghcr.io/kevinguest/polarr-app:0.6.12@sha256:a78ee5c458163feb3e3b282ca5174fd67cd7bcc868c7957eceb06dd600ac71db
     user: "1000:1000"
     init: true
     restart: on-failure

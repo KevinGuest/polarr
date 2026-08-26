@@ -19,11 +19,21 @@ type FsEntry = {
   type: "dir" | "file";
 };
 
+type QuickPath = {
+  path: string;
+  label: string;
+};
+
 type BrowsePayload = {
   path: string;
   parent: string | null;
   entries: FsEntry[];
   error?: string;
+  hint?: string;
+  remappedFrom?: string;
+  suggested?: string;
+  platform?: string;
+  quickPaths?: QuickPath[];
 };
 
 /**
@@ -40,17 +50,20 @@ export function FileBrowserDialog({
   initialPath?: string;
   onSelect: (path: string) => void;
 }) {
-  const [pathInput, setPathInput] = useState(initialPath || "/");
-  const [cwd, setCwd] = useState(initialPath || "/");
+  const [pathInput, setPathInput] = useState(initialPath || "");
+  const [cwd, setCwd] = useState(initialPath || "");
   const [parent, setParent] = useState<string | null>(null);
   const [entries, setEntries] = useState<FsEntry[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
+  const [quickPaths, setQuickPaths] = useState<QuickPath[]>([]);
 
   const load = useCallback(async (dir: string) => {
     setLoading(true);
     setError(null);
+    setHint(null);
     setSelected(null);
     try {
       const res = await fetch(
@@ -58,10 +71,13 @@ export function FileBrowserDialog({
         { cache: "no-store" },
       );
       const data = (await res.json().catch(() => null)) as BrowsePayload | null;
+      if (Array.isArray(data?.quickPaths)) setQuickPaths(data.quickPaths);
+
       if (!res.ok || !data) {
         setError(
           typeof data?.error === "string" ? data.error : "Couldn’t open folder",
         );
+        if (typeof data?.hint === "string") setHint(data.hint);
         if (data?.path) {
           setCwd(data.path);
           setPathInput(data.path);
@@ -74,6 +90,7 @@ export function FileBrowserDialog({
       setPathInput(data.path);
       setParent(data.parent);
       setEntries(Array.isArray(data.entries) ? data.entries : []);
+      if (typeof data.hint === "string") setHint(data.hint);
     } catch {
       setError("Couldn’t open folder");
       setEntries([]);
@@ -84,8 +101,9 @@ export function FileBrowserDialog({
 
   useEffect(() => {
     if (!open) return;
-    const start = (initialPath || "/").trim() || "/";
+    const start = (initialPath || "").trim();
     setPathInput(start);
+    // Empty path → API picks a platform-aware default (music dir / cwd / drives).
     void load(start);
   }, [open, initialPath, load]);
 
@@ -110,14 +128,14 @@ export function FileBrowserDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="shrink-0 px-4">
+        <div className="shrink-0 space-y-2 px-4">
           <Input
             value={pathInput}
             onChange={(e) => setPathInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                void load(pathInput.trim() || "/");
+                void load(pathInput.trim());
               }
             }}
             placeholder="Start typing or select a path below."
@@ -125,6 +143,25 @@ export function FileBrowserDialog({
             autoComplete="off"
             spellCheck={false}
           />
+          {quickPaths.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {quickPaths.map((q) => (
+                <Button
+                  key={q.path}
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="h-7 max-w-full px-2 font-mono text-xs"
+                  onClick={() => void load(q.path)}
+                >
+                  <span className="truncate">{q.label}</span>
+                </Button>
+              ))}
+            </div>
+          ) : null}
+          {hint ? (
+            <p className="text-xs text-muted-foreground">{hint}</p>
+          ) : null}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto border-y border-border bg-muted/20">
@@ -139,9 +176,19 @@ export function FileBrowserDialog({
               Loading…
             </div>
           ) : error ? (
-            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-              {error}
-            </p>
+            <div className="space-y-3 px-4 py-8 text-center">
+              <p className="text-sm text-muted-foreground">{error}</p>
+              {quickPaths[0] ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void load(quickPaths[0]!.path)}
+                >
+                  Open {quickPaths[0].label}
+                </Button>
+              ) : null}
+            </div>
           ) : (
             <ul className="pb-2">
               {parent ? (

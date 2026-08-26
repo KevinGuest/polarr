@@ -2,7 +2,7 @@ manifestVersion: 1
 id: polarr
 category: media
 name: Polarr
-version: "0.6.12"
+version: "0.6.13"
 tagline: Discover, request, and stream your homeserver music
 description: >-
   Polarr is a self-hosted music hub for umbrelOS. Point it at Lidarr (the same
@@ -33,8 +33,9 @@ description: >-
   Polarr does not ship Lidarr itself; install Lidarr from the Umbrel App Store
   first if you want automated *arr-style acquisition.
 releaseNotes: >-
-  Faster home loads (warm discover cache, SSR shelves, Lidarr list dedupe),
-  and a File Browser to pick the music folder under Admin → Sources.
+  Lidarr vs Polarr source badges, real File Browser on Windows and Umbrel
+  (full /downloads mount), Discord sign-in and password reset, stream missing-file
+  alerts.
 developer: Polarr
 website: https://github.com/KevinGuest/polarr
 dependencies:

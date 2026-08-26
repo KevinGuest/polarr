@@ -94,6 +94,39 @@ export async function POST(req: Request) {
       createdBy: admin.id,
       createdByUsername: admin.username,
     });
+    const targetName =
+      (
+        getDb()
+          .prepare(`SELECT username FROM users WHERE id = ?`)
+          .get(realId) as { username: string } | undefined
+      )?.username || "user";
+    const kinds = [
+      body.user ? "account" : null,
+      body.stream ? "stream" : null,
+      body.download ? "download" : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    const { notifyDiscord } = await import("@/lib/admin-notify");
+    notifyDiscord("userBanned", {
+      title: "User banned",
+      description: `${admin.username} banned ${targetName}`,
+      fields: [
+        { name: "User", value: targetName, inline: true },
+        { name: "Types", value: kinds || "—", inline: true },
+        {
+          name: "Duration",
+          value: ban.expiresAt
+            ? `until ${new Date(ban.expiresAt).toLocaleString()}`
+            : "permanent",
+          inline: true,
+        },
+        ...(ban.reason
+          ? [{ name: "Reason", value: ban.reason }]
+          : []),
+      ],
+      href: "/admin/bans",
+    });
     return json({
       ban: {
         ...ban,
@@ -121,7 +154,27 @@ export async function DELETE(req: Request) {
   if (!parsed.success) {
     return json({ error: "banId required" }, { status: 400 });
   }
+  const banRow = getDb()
+    .prepare(
+      `SELECT b.user_id as userId, u.username
+       FROM user_bans b
+       LEFT JOIN users u ON u.id = b.user_id
+       WHERE b.id = ?`,
+    )
+    .get(parsed.data.banId) as
+    | { userId: string; username: string | null }
+    | undefined;
   const ok = liftUserBan(parsed.data.banId);
   if (!ok) return json({ error: "Ban not found or already lifted" }, { status: 404 });
+  const { notifyDiscord } = await import("@/lib/admin-notify");
+  notifyDiscord("userUnbanned", {
+    title: "User unbanned",
+    description: `${admin.username} lifted a ban on ${banRow?.username || "a user"}`,
+    fields: [
+      { name: "User", value: banRow?.username || "—", inline: true },
+      { name: "By", value: admin.username, inline: true },
+    ],
+    href: "/admin/bans",
+  });
   return json({ ok: true });
 }

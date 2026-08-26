@@ -119,7 +119,7 @@ export function useTrackSavedStatus(
     liked ||
     inPlaylist;
 
-  return { saved, liked, inPlaylist, loading, refresh };
+  return { saved, liked, inPlaylist, inAnyPlaylist: liked || inPlaylist, loading, refresh };
 }
 
 export function MobileSaveButton({
@@ -158,7 +158,7 @@ export function MobileSaveButton({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [optimisticLiked, setOptimisticLiked] = useState(Boolean(seedLiked));
-  const { liked, refresh } = useTrackSavedStatus(trackId, {
+  const { liked, inAnyPlaylist, refresh } = useTrackSavedStatus(trackId, {
     onPolarr,
     alreadyInLibrary,
   });
@@ -167,8 +167,8 @@ export function MobileSaveButton({
     setOptimisticLiked(Boolean(seedLiked));
   }, [trackId, seedLiked]);
 
-  // Check = in Liked Songs (plus means “add to liked”).
-  const showCheck = liked || optimisticLiked;
+  // Check = in Liked Songs or any user playlist.
+  const showCheck = inAnyPlaylist || optimisticLiked;
 
   async function ensureLiked() {
     if (liked || optimisticLiked) return true;
@@ -216,13 +216,13 @@ export function MobileSaveButton({
     <>
       <button
         type="button"
-        aria-label={showCheck ? "Saved — manage playlists" : "Add to Liked Songs"}
+        aria-label={showCheck ? "Saved — manage playlists" : "Add to playlist"}
         disabled={busy}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
           void (async () => {
-            if (!liked && !optimisticLiked) await ensureLiked();
+            if (!inAnyPlaylist && !optimisticLiked) await ensureLiked();
             setOpen(true);
           })();
         }}

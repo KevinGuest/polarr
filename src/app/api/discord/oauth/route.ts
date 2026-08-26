@@ -45,7 +45,8 @@ export async function GET() {
 
   const state = randomBytes(16).toString("hex");
   const cookieStore = await cookies();
-  cookieStore.set(OAUTH_STATE_COOKIE, `${user.id}:${state}`, {
+  // link:<userId>:<state> — callback distinguishes from login:<state>
+  cookieStore.set(OAUTH_STATE_COOKIE, `link:${user.id}:${state}`, {
     httpOnly: true,
     sameSite: "lax",
     path: "/",

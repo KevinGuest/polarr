@@ -1,4 +1,5 @@
 import { z } from "zod";
+import fs from "node:fs";
 import { getAdminUser, getAuthUser, json } from "@/lib/api";
 import {
   getServerOwnerContact,
@@ -14,10 +15,24 @@ import { DOWNLOAD_QUALITIES } from "@/lib/download-quality";
 import { isDiscordWebhookUrl, sendDiscordTest } from "@/lib/discord";
 import { sendSmtpTestEmail } from "@/lib/mail";
 import { probeLidarr } from "@/lib/lidarr";
-import { detectMusicRoots } from "@/lib/music-roots";
+import { detectMusicRoots, resolveBrowsableMusicPath } from "@/lib/music-roots";
 import { normalizePublicBaseUrl } from "@/lib/public-url";
 
 export const dynamic = "force-dynamic";
+
+/** Keep the admin’s pick when it exists; only remap when the path isn’t visible. */
+function persistMusicRoot(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) return "";
+  try {
+    if (fs.existsSync(trimmed) && fs.statSync(trimmed).isDirectory()) {
+      return trimmed.replace(/[/\\]+$/, "") || trimmed;
+    }
+  } catch {
+    /* fall through */
+  }
+  return resolveBrowsableMusicPath(trimmed).path;
+}
 
 function maskSecrets(settings: ReturnType<typeof getSettings>) {
   return {
@@ -313,7 +328,10 @@ export async function POST(req: Request) {
     saveOnPlay: body.saveOnPlay ?? current.saveOnPlay,
     libraryScanMinutes:
       body.libraryScanMinutes ?? current.libraryScanMinutes,
-    musicRoot: body.musicRoot ?? current.musicRoot,
+    musicRoot: (() => {
+      if (body.musicRoot === undefined) return current.musicRoot;
+      return persistMusicRoot(body.musicRoot);
+    })(),
     fallbackEnabled: true,
     downloadQuality:
       (body.downloadQuality as typeof current.downloadQuality | undefined) ??

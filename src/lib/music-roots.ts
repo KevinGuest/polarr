@@ -11,13 +11,33 @@ export type DetectedMusicRoot = {
   exists: boolean;
 };
 
-/** Lidarr container paths that usually share a host folder with Polarr’s `/music`. */
+/**
+ * Paths Lidarr / Umbrel use that usually share the same host folder Polarr
+ * mounts at `/music` (see umbrel compose: downloads/music → /music).
+ */
 const LIDARR_PATH_ALIASES: Record<string, string> = {
   "/downloads/complete/music": "/music",
   "/downloads/music": "/music",
+  "/downloads/media/music": "/music",
   "/data/media/music": "/music",
+  "/data/storage/downloads/music": "/music",
   "/music": "/music",
 };
+
+/** Longer prefixes first so /downloads/media/music beats /downloads. */
+const LIDARR_PATH_PREFIXES: [string, string][] = (
+  [
+    ["/downloads/complete/music", "/music"],
+    ["/downloads/media/music", "/music"],
+    ["/data/storage/downloads/music", "/music"],
+    ["/downloads/music", "/music"],
+    ["/data/media/music", "/music"],
+  ] as [string, string][]
+).sort((a, b) => b[0].length - a[0].length);
+
+function stripTrailingSlash(dir: string): string {
+  return dir.replace(/[/\\]+$/, "") || "/";
+}
 
 function dirExists(dir: string): boolean {
   const p = dir.trim();
@@ -27,6 +47,91 @@ function dirExists(dir: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Map a Lidarr/Umbrel-style path into this container (usually `/music`).
+ * Returns null when no known alias applies.
+ */
+export function remapForeignMusicPath(input: string): string | null {
+  const raw = stripTrailingSlash((input || "").trim().replace(/\\/g, "/"));
+  if (!raw || raw === ".") return null;
+
+  const exact = LIDARR_PATH_ALIASES[raw];
+  if (exact) return exact;
+
+  for (const [from, to] of LIDARR_PATH_PREFIXES) {
+    if (raw === from) return to;
+    if (raw.startsWith(`${from}/`)) {
+      return path.posix.join(to, raw.slice(from.length + 1));
+    }
+  }
+  return null;
+}
+
+function isWindowsAbsolute(input: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(input.trim());
+}
+
+function isUnixAbsolute(input: string): boolean {
+  const t = input.trim().replace(/\\/g, "/");
+  return t.startsWith("/") && !isWindowsAbsolute(t);
+}
+
+/**
+ * Prefer a path that exists for this process.
+ * Umbrel/Lidarr Unix paths get remapped into the container mount.
+ * Windows localhost paths are kept as-is (never rewritten to /music).
+ */
+export function resolveBrowsableMusicPath(input: string): {
+  path: string;
+  remappedFrom?: string;
+} {
+  const raw = (input || "").trim();
+  if (!raw) return { path: process.platform === "win32" ? musicDir() : "/" };
+
+  // Keep Windows separators for exists checks / persisted settings.
+  if (isWindowsAbsolute(raw) || process.platform === "win32") {
+    const winPath = stripTrailingSlash(path.resolve(raw));
+    if (dirExists(winPath)) return { path: winPath };
+    // Don't substitute musicDir — user typed a real host path that isn't there yet.
+    return { path: winPath };
+  }
+
+  const requested = stripTrailingSlash(raw.replace(/\\/g, "/"));
+  if (requested && dirExists(requested)) {
+    return { path: requested };
+  }
+
+  // Only remap Unix Lidarr/Umbrel-style paths (/downloads/media/music → /music).
+  if (isUnixAbsolute(requested)) {
+    const remapped = remapForeignMusicPath(requested);
+    if (remapped && dirExists(remapped)) {
+      return { path: remapped, remappedFrom: requested };
+    }
+
+    const env = (process.env.POLARR_MUSIC_DIR || "").trim();
+    if (env && dirExists(env)) {
+      return {
+        path: env,
+        remappedFrom: requested || undefined,
+      };
+    }
+
+    try {
+      const mount = musicDir();
+      if (dirExists(mount)) {
+        return {
+          path: mount,
+          remappedFrom: requested || undefined,
+        };
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return { path: requested || "/" };
 }
 
 function normalizeKey(dir: string): string {
@@ -43,7 +148,11 @@ function add(
   const prev = out.get(key);
   if (prev) {
     if (prev.source !== "lidarr" && opt.source === "lidarr") {
-      out.set(key, { ...opt, path: prev.path, exists: prev.exists || opt.exists });
+      out.set(key, {
+        ...opt,
+        path: prev.path,
+        exists: prev.exists || opt.exists,
+      });
     }
     return;
   }
@@ -97,9 +206,12 @@ export async function detectMusicRoots(): Promise<DetectedMusicRoot[]> {
     if (client) {
       const roots = await client.rootFolders().catch(() => []);
       for (const r of roots) {
-        const lidarrPath = (r.path || "").trim().replace(/[/\\]+$/, "");
+        const lidarrPath = stripTrailingSlash((r.path || "").trim());
         if (!lidarrPath) continue;
-        const alias = LIDARR_PATH_ALIASES[lidarrPath] || lidarrPath;
+        const alias =
+          remapForeignMusicPath(lidarrPath) ||
+          LIDARR_PATH_ALIASES[lidarrPath] ||
+          lidarrPath;
         const visible = dirExists(lidarrPath)
           ? lidarrPath
           : dirExists(alias)
@@ -109,7 +221,7 @@ export async function detectMusicRoots(): Promise<DetectedMusicRoot[]> {
         add(out, {
           path: visible,
           label: mapped
-            ? `Lidarr library (${lidarrPath} → ${visible})`
+            ? `Lidarr / Umbrel (${lidarrPath} → ${visible})`
             : `Lidarr library (${lidarrPath})`,
           source: "lidarr",
           exists: dirExists(visible),
@@ -120,13 +232,27 @@ export async function detectMusicRoots(): Promise<DetectedMusicRoot[]> {
     /* Lidarr offline */
   }
 
+  // Always surface Umbrel’s usual mount when /music exists
+  if (dirExists("/music")) {
+    add(out, {
+      path: "/music",
+      label: "Umbrel downloads/music → /music",
+      source: "mount",
+      exists: true,
+    });
+  }
+
   const current = settings.musicRoot.trim();
   if (current) {
+    const resolved = resolveBrowsableMusicPath(current);
     add(out, {
-      path: current,
-      label: `Current (${current})`,
+      path: resolved.path,
+      label:
+        resolved.remappedFrom && resolved.remappedFrom !== resolved.path
+          ? `Current (${resolved.remappedFrom} → ${resolved.path})`
+          : `Current (${resolved.path})`,
       source: "current",
-      exists: dirExists(current),
+      exists: dirExists(resolved.path),
     });
   }
 

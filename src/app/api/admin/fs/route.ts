@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { getAdminUser, json } from "@/lib/api";
+import { musicDir } from "@/lib/paths";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -13,11 +14,88 @@ export type FsBrowseEntry = {
 
 const isWin = process.platform === "win32";
 
+function looksUnixAbsolute(p: string): boolean {
+  const t = p.trim().replace(/\\/g, "/");
+  return t.startsWith("/") && !/^[a-zA-Z]:\//.test(t);
+}
+
+function winDriveRoots(): string[] {
+  const roots: string[] = [];
+  for (let i = 0; i < 26; i++) {
+    const letter = String.fromCharCode(65 + i);
+    const root = `${letter}:\\`;
+    try {
+      if (fs.existsSync(root)) roots.push(root);
+    } catch {
+      /* ignore */
+    }
+  }
+  return roots;
+}
+
+/** Same idea on every platform: start where we can actually list folders. */
+function defaultBrowsePath(): string {
+  if (isWin) {
+    try {
+      const mount = musicDir();
+      if (fs.existsSync(mount) && fs.statSync(mount).isDirectory()) return mount;
+    } catch {
+      /* fall through */
+    }
+    return process.cwd();
+  }
+  // Linux / Umbrel / Docker — browse the real FS from root (like Windows drives).
+  return "/";
+}
+
+function quickBrowsePaths(): { path: string; label: string }[] {
+  const out: { path: string; label: string }[] = [];
+  const seen = new Set<string>();
+  const add = (p: string, label: string) => {
+    const key = isWin ? path.resolve(p) : path.posix.resolve(p);
+    if (seen.has(key)) return;
+    try {
+      if (!fs.existsSync(p) || !fs.statSync(p).isDirectory()) return;
+    } catch {
+      return;
+    }
+    seen.add(key);
+    out.push({ path: p, label });
+  };
+
+  if (isWin) {
+    try {
+      add(musicDir(), "Music folder");
+    } catch {
+      /* ignore */
+    }
+    add(process.cwd(), "App folder");
+    for (const root of winDriveRoots()) add(root, root);
+  } else {
+    add("/", "/");
+    add("/downloads", "/downloads");
+    add("/downloads/media/music", "/downloads/media/music");
+    add("/downloads/music", "/downloads/music");
+    add("/music", "/music");
+    try {
+      add(musicDir(), "Music folder");
+    } catch {
+      /* ignore */
+    }
+    add("/data", "/data");
+  }
+  return out;
+}
+
 function safeResolve(input: string): string | null {
-  const fallback = isWin ? process.cwd() : "/";
-  const raw = (input || "").trim() || fallback;
+  const raw = (input || "").trim();
+  if (!raw) return defaultBrowsePath();
   try {
-    if (isWin) return path.resolve(raw);
+    if (isWin) {
+      // Don't turn Umbrel-style "/music" into C:\music on Windows.
+      if (looksUnixAbsolute(raw)) return defaultBrowsePath();
+      return path.resolve(raw);
+    }
     return path.posix.resolve("/", raw.replace(/\\/g, "/"));
   } catch {
     return null;
@@ -26,6 +104,7 @@ function safeResolve(input: string): string | null {
 
 function parentOf(dir: string): string | null {
   if (!isWin && (dir === "/" || dir === "")) return null;
+  if (isWin && /^[a-zA-Z]:\\$/.test(dir)) return null;
   const parent = path.dirname(dir);
   if (!parent || parent === dir) return null;
   return parent;
@@ -37,17 +116,19 @@ function joinPath(dir: string, name: string): string {
 
 /**
  * Admin-only directory browser for picking a music root (Sonarr-style).
- * GET ?path=/music
+ * Same behavior everywhere: list real folders Polarr can see — no silent remaps.
+ * GET ?path=/downloads/media/music  or  ?path=C:\Music
  */
 export async function GET(req: Request) {
   const admin = await getAdminUser();
   if (!admin) return json({ error: "Forbidden" }, { status: 403 });
 
   const url = new URL(req.url);
-  const requested =
-    url.searchParams.get("path") || (isWin ? process.cwd() : "/");
+  const requested = url.searchParams.get("path") || defaultBrowsePath();
   const dir = safeResolve(requested);
   if (!dir) return json({ error: "Invalid path" }, { status: 400 });
+
+  const quickPaths = quickBrowsePaths();
 
   let stat: fs.Stats;
   try {
@@ -59,6 +140,10 @@ export async function GET(req: Request) {
         path: dir,
         parent: parentOf(dir),
         entries: [],
+        platform: process.platform,
+        quickPaths,
+        hint: "That folder isn’t visible here. Browse from a shortcut below, or go up and pick a folder Polarr can see.",
+        suggested: quickPaths[0]?.path || (isWin ? process.cwd() : "/"),
       },
       { status: 404 },
     );
@@ -102,5 +187,7 @@ export async function GET(req: Request) {
     path: dir,
     parent: parentOf(dir),
     entries,
+    platform: process.platform,
+    quickPaths,
   });
 }

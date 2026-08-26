@@ -7,7 +7,7 @@
  * Downloads: fallback yt-dlp jobs.
  */
 import Database from "better-sqlite3";
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { avatarsDir, dbPath, playlistCoversDir, unlinkManagedAudioFile } from "./paths";
@@ -614,6 +614,16 @@ function migrate(database: Database.Database) {
       used_at TEXT,
       emailed_to TEXT,
       FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS listen_daily (
@@ -1487,6 +1497,123 @@ export function updateUserPassword(
   return { ok: true };
 }
 
+/** Set password without knowing the current one (forgot-password flow). */
+export function setUserPassword(
+  userId: string,
+  newPassword: string,
+): { ok: true } | { ok: false; error: string } {
+  if (!userId) return { ok: false, error: "Unauthorized" };
+  if (newPassword.length < 8 || newPassword.length > 128) {
+    return { ok: false, error: "Password must be at least 8 characters" };
+  }
+  const exists = getDb()
+    .prepare(`SELECT id FROM users WHERE id = ?`)
+    .get(userId) as { id: string } | undefined;
+  if (!exists) return { ok: false, error: "User not found" };
+  getDb()
+    .prepare(`UPDATE users SET password_hash = ? WHERE id = ?`)
+    .run(hashPassword(newPassword), userId);
+  // Force re-login everywhere after a reset
+  getDb().prepare(`DELETE FROM sessions WHERE user_id = ?`).run(userId);
+  return { ok: true };
+}
+
+function hashResetToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/**
+ * Look up a user by account email. Must have an email on file to receive a reset link.
+ */
+export function findUserForPasswordReset(emailRaw: string): {
+  id: string;
+  username: string;
+  email: string;
+} | null {
+  const email = emailRaw.trim().toLowerCase();
+  if (!email || !email.includes("@")) return null;
+  const row = getDb()
+    .prepare(
+      `SELECT id, username, email FROM users
+       WHERE lower(email) = ? AND access_revoked_at IS NULL
+       LIMIT 1`,
+    )
+    .get(email) as
+    | { id: string; username: string; email: string | null }
+    | undefined;
+  const addr = (row?.email || "").trim();
+  if (!row || !addr) return null;
+  return { id: row.id, username: row.username, email: addr };
+}
+
+/** Create a one-time reset token (plain returned once; hash stored). Valid 1h. */
+export function createPasswordResetToken(userId: string): string {
+  const db = getDb();
+  // Invalidate unused prior tokens for this user
+  db.prepare(
+    `UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL`,
+  ).run(new Date().toISOString(), userId);
+
+  const token = randomBytes(32).toString("hex");
+  const now = new Date();
+  const expires = new Date(now.getTime() + 60 * 60 * 1000);
+  db.prepare(
+    `INSERT INTO password_resets(id, user_id, token_hash, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(
+    randomBytes(16).toString("hex"),
+    userId,
+    hashResetToken(token),
+    now.toISOString(),
+    expires.toISOString(),
+  );
+  return token;
+}
+
+/** Consume a reset token → user id, or null if invalid/expired/used. */
+export function consumePasswordResetToken(token: string): string | null {
+  const plain = (token || "").trim();
+  if (!plain || plain.length < 32) return null;
+  const hash = hashResetToken(plain);
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT id, user_id as userId, expires_at as expiresAt, used_at as usedAt
+       FROM password_resets WHERE token_hash = ? LIMIT 1`,
+    )
+    .get(hash) as
+    | {
+        id: string;
+        userId: string;
+        expiresAt: string;
+        usedAt: string | null;
+      }
+    | undefined;
+  if (!row || row.usedAt) return null;
+  if (new Date(row.expiresAt).getTime() < Date.now()) return null;
+  db.prepare(`UPDATE password_resets SET used_at = ? WHERE id = ?`).run(
+    new Date().toISOString(),
+    row.id,
+  );
+  return row.userId;
+}
+
+/** Peek whether a token is still usable (for the reset form UI). */
+export function passwordResetTokenValid(token: string): boolean {
+  const plain = (token || "").trim();
+  if (!plain || plain.length < 32) return false;
+  const row = getDb()
+    .prepare(
+      `SELECT expires_at as expiresAt, used_at as usedAt
+       FROM password_resets WHERE token_hash = ? LIMIT 1`,
+    )
+    .get(hashResetToken(plain)) as
+    | { expiresAt: string; usedAt: string | null }
+    | undefined;
+  if (!row || row.usedAt) return false;
+  return new Date(row.expiresAt).getTime() >= Date.now();
+}
+
 /** Check password for the given user (e.g. before revealing secrets in admin UI). */
 export function verifyUserPassword(userId: string, password: string): boolean {
   if (!userId || !password) return false;
@@ -1536,24 +1663,113 @@ export function setDiscordLink(
     expiresAt: string | null;
   },
 ) {
+  const db = getDb();
+  // One Discord account → one Polarr user
+  db.prepare(
+    `UPDATE users SET
+       discord_id = NULL,
+       discord_username = NULL,
+       discord_access_token = NULL,
+       discord_refresh_token = NULL,
+       discord_token_expires_at = NULL,
+       discord_presence_enabled = 0
+     WHERE discord_id = ? AND id != ?`,
+  ).run(input.discordId, userId);
+  db.prepare(
+    `UPDATE users SET
+       discord_id = ?,
+       discord_username = ?,
+       discord_access_token = ?,
+       discord_refresh_token = ?,
+       discord_token_expires_at = ?
+     WHERE id = ?`,
+  ).run(
+    input.discordId,
+    input.discordUsername,
+    input.accessToken,
+    input.refreshToken,
+    input.expiresAt,
+    userId,
+  );
+}
+
+/** Find Polarr user id that already linked this Discord account. */
+export function getUserIdByDiscordId(discordId: string): string | null {
+  const id = (discordId || "").trim();
+  if (!id) return null;
+  const row = getDb()
+    .prepare(
+      `SELECT id FROM users
+       WHERE discord_id = ? AND access_revoked_at IS NULL
+       LIMIT 1`,
+    )
+    .get(id) as { id: string } | undefined;
+  return row?.id || null;
+}
+
+/**
+ * Create a session for an existing user (password or Discord login).
+ * Returns null if user missing / revoked.
+ */
+export function createSessionForUser(
+  userId: string,
+  client?: { ip?: string | null; hwid?: string | null },
+) {
+  const row = getDb()
+    .prepare(
+      `SELECT id, username, is_admin as isAdmin, role,
+              access_revoked_at as accessRevokedAt
+       FROM users WHERE id = ?`,
+    )
+    .get(userId) as
+    | {
+        id: string;
+        username: string;
+        isAdmin: number;
+        role: string | null;
+        accessRevokedAt: string | null;
+      }
+    | undefined;
+  if (!row || row.accessRevokedAt) return null;
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const bans = require("./bans") as typeof import("./bans");
+    const ban = bans.getActiveBan(row.id);
+    if (ban?.user) {
+      return {
+        banned: true as const,
+        banMessage: bans.banToastMessage(ban),
+        expiresAt: ban.expiresAt,
+        permanent: ban.expiresAt == null,
+      };
+    }
+  } catch {
+    /* migrate */
+  }
+
+  const role = resolveRole(row.role, row.isAdmin);
+  const token = randomBytes(32).toString("hex");
+  const now = new Date();
+  const expires = new Date(now.getTime() + 1000 * 60 * 60 * 24 * 30);
+  const ip = (client?.ip || "").trim().slice(0, 64) || null;
+  const hwid = (client?.hwid || "").trim().slice(0, 128) || null;
   getDb()
     .prepare(
-      `UPDATE users SET
-         discord_id = ?,
-         discord_username = ?,
-         discord_access_token = ?,
-         discord_refresh_token = ?,
-         discord_token_expires_at = ?
-       WHERE id = ?`,
+      `INSERT INTO sessions(token, user_id, created_at, expires_at, ip, hwid)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .run(
-      input.discordId,
-      input.discordUsername,
-      input.accessToken,
-      input.refreshToken,
-      input.expiresAt,
-      userId,
-    );
+    .run(token, row.id, now.toISOString(), expires.toISOString(), ip, hwid);
+  recordUserClientInfo(row.id, { ip, hwid }, token);
+  return {
+    token,
+    user: {
+      id: row.id,
+      username: row.username,
+      isAdmin: role === "admin" || role === "owner",
+      role,
+    },
+  };
 }
 
 export function clearDiscordLink(userId: string) {
@@ -1808,6 +2024,25 @@ export function redeemInvite(
   if (invite.emailedTo?.trim()) {
     updateUserEmail(user.id, invite.emailedTo.trim());
   }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { notifyDiscord } =
+      require("./admin-notify") as typeof import("./admin-notify");
+    notifyDiscord("inviteUsed", {
+      title: "Invite used",
+      description: `${user.username} joined with invite ${invite.code}`,
+      fields: [
+        { name: "User", value: user.username, inline: true },
+        {
+          name: "Emailed to",
+          value: invite.emailedTo?.trim() || "—",
+          inline: true,
+        },
+      ],
+    });
+  } catch {
+    /* ignore */
+  }
   return user;
 }
 
@@ -1834,46 +2069,7 @@ export function authenticate(
     | undefined;
   if (!row || !verifyPassword(password, row.password_hash)) return null;
   if (row.accessRevokedAt) return null;
-
-  // Full account ban — credentials OK but no session.
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const bans = require("./bans") as typeof import("./bans");
-    const ban = bans.getActiveBan(row.id);
-    if (ban?.user) {
-      return {
-        banned: true as const,
-        banMessage: bans.banToastMessage(ban),
-        expiresAt: ban.expiresAt,
-        permanent: ban.expiresAt == null,
-      };
-    }
-  } catch {
-    /* table may not exist yet during migrate */
-  }
-
-  const role = resolveRole(row.role, row.isAdmin);
-  const token = randomBytes(32).toString("hex");
-  const now = new Date();
-  const expires = new Date(now.getTime() + 1000 * 60 * 60 * 24 * 30);
-  const ip = (client?.ip || "").trim().slice(0, 64) || null;
-  const hwid = (client?.hwid || "").trim().slice(0, 128) || null;
-  getDb()
-    .prepare(
-      `INSERT INTO sessions(token, user_id, created_at, expires_at, ip, hwid)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(token, row.id, now.toISOString(), expires.toISOString(), ip, hwid);
-  recordUserClientInfo(row.id, { ip, hwid }, token);
-  return {
-    token,
-    user: {
-      id: row.id,
-      username: row.username,
-      isAdmin: role === "admin" || role === "owner",
-      role,
-    },
-  };
+  return createSessionForUser(row.id, client);
 }
 
 type AuthUser = {
@@ -2767,7 +2963,13 @@ function findTrackExact(artist: string, title: string): TrackRow | null {
          AND source != 'stream'
          AND path NOT LIKE 'stream:%'
          AND path NOT LIKE 'stream://%'
-       ORDER BY CASE source WHEN 'fallback' THEN 0 WHEN 'slskd' THEN 0 WHEN 'library' THEN 1 ELSE 2 END
+       ORDER BY CASE source
+         WHEN 'lidarr' THEN 0
+         WHEN 'library' THEN 0
+         WHEN 'fallback' THEN 2
+         WHEN 'slskd' THEN 2
+         ELSE 1
+       END
        LIMIT 1`,
     )
     .get(a, t) as Record<string, unknown> | undefined;
@@ -2783,7 +2985,13 @@ function findTrackByMatchKey(key: string): TrackRow | null {
          AND source != 'stream'
          AND path NOT LIKE 'stream:%'
          AND path NOT LIKE 'stream://%'
-       ORDER BY CASE source WHEN 'fallback' THEN 0 WHEN 'slskd' THEN 0 WHEN 'library' THEN 1 ELSE 2 END
+       ORDER BY CASE source
+         WHEN 'lidarr' THEN 0
+         WHEN 'library' THEN 0
+         WHEN 'fallback' THEN 2
+         WHEN 'slskd' THEN 2
+         ELSE 1
+       END
        LIMIT 1`,
     )
     .get(key) as Record<string, unknown> | undefined;
@@ -3330,6 +3538,23 @@ export function updateRequestStatus(
   if (updated && current.status !== status) {
     if (status === "failed") {
       notifyFromRequest(updated, "failed");
+    } else if (status === "downloading") {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { notifyDiscord } =
+          require("./admin-notify") as typeof import("./admin-notify");
+        notifyDiscord("downloadStarted", {
+          title: "Download started",
+          description: `${updated.title} — ${updated.artist}`,
+          href: "/admin/requests",
+          fields: [
+            { name: "Source", value: updated.source, inline: true },
+            { name: "By", value: updated.requestedBy || "—", inline: true },
+          ],
+        });
+      } catch {
+        /* ignore */
+      }
     } else if (
       status === "available" &&
       (current.status === "downloading" ||
@@ -3339,7 +3564,6 @@ export function updateRequestStatus(
       // Only when something actually finished acquiring — not instant library
       notifyFromRequest(updated, "available");
     }
-    // No spam for started / downloading / new intermediate states
   }
   return updated;
 }
@@ -3542,6 +3766,37 @@ function notifyFromRequest(
       // One lifecycle row per request
       dedupeKey: `request:${req.id}`,
     });
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { notifyDiscord } = require("./admin-notify") as typeof import("./admin-notify");
+    if (event === "new") {
+      notifyDiscord("requestNew", {
+        title: "New request",
+        description: `${actorLabel} ${message}`,
+        href,
+        fields: [
+          { name: "Type", value: media, inline: true },
+          { name: "Title", value: req.title || "—", inline: true },
+          { name: "Artist", value: req.artist || "—", inline: true },
+        ],
+      });
+    } else if (event === "available") {
+      notifyDiscord("requestAvailable", {
+        title: "Ready to stream",
+        description: message,
+        href,
+      });
+    } else {
+      notifyDiscord("requestFailed", {
+        title: "Download failed",
+        description: message,
+        href,
+      });
+    }
+  } catch {
+    /* ignore */
   }
 }
 

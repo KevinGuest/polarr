@@ -99,6 +99,16 @@ export async function POST(req: Request) {
     );
   }
 
+  const { notifyDiscord } = await import("@/lib/admin-notify");
+  notifyDiscord("inviteCreated", {
+    title: "Invite created",
+    description: `${admin.username} invited ${parsed.data.email}`,
+    fields: [
+      { name: "Code", value: invite.code, inline: true },
+      { name: "Email", value: parsed.data.email, inline: true },
+    ],
+  });
+
   return json({
     invite: { ...invite, status: inviteStatus(invite) },
     emailedTo: parsed.data.email,

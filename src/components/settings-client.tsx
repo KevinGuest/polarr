@@ -565,6 +565,10 @@ export function SettingsClient() {
                 <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                   Optional link
                 </p>
+                <p className="text-sm text-muted-foreground">
+                  Linking lets you sign in with Discord on the login page
+                  (same Discord app / redirect URI).
+                </p>
                 {discordLinked ? (
                   <>
                     <p className="text-sm text-foreground">

@@ -84,6 +84,16 @@ export async function POST(req: Request) {
   }
 
   if (!(await ytDlpAvailable())) {
+    const { notifyDiscordStreamError } = await import("@/lib/admin-notify");
+    notifyDiscordStreamError({
+      dedupeKey: `ytdlp:${artist}|${title}`,
+      title: "Stream error — yt-dlp unavailable",
+      description: `${title} by ${artist}`,
+      fields: [
+        { name: "User", value: user.username, inline: true },
+        { name: "Track", value: `${artist} — ${title}` },
+      ],
+    });
     return json(
       { error: "Live stream unavailable — yt-dlp not ready" },
       { status: 503 },
@@ -97,6 +107,16 @@ export async function POST(req: Request) {
     expectedDurationSec,
   });
   if (!session) {
+    const { notifyDiscordStreamError } = await import("@/lib/admin-notify");
+    notifyDiscordStreamError({
+      dedupeKey: `live:${artist}|${title}`,
+      title: "Stream error — live resolve failed",
+      description: `${title} by ${artist}`,
+      fields: [
+        { name: "User", value: user.username, inline: true },
+        { name: "Track", value: `${artist} — ${title}` },
+      ],
+    });
     return json(
       {
         error: policy.forceRickroll

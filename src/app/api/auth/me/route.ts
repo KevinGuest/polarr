@@ -43,7 +43,16 @@ export async function GET() {
 }
 
 export async function DELETE() {
+  const user = await getAuthUser();
   const cookieStore = await cookies();
   cookieStore.delete("polarr_token");
+  if (user) {
+    const { notifyDiscord } = await import("@/lib/admin-notify");
+    notifyDiscord("userLogout", {
+      title: "User signed out",
+      description: `${user.username} signed out`,
+      fields: [{ name: "User", value: user.username, inline: true }],
+    });
+  }
   return json({ ok: true });
 }

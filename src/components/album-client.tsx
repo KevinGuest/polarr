@@ -33,6 +33,7 @@ import {
   emitLibraryPinsChanged,
 } from "@/lib/ui-events";
 import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine } from "@/lib/utils";
+import type { LocalSourceBadge } from "@/lib/track-source-badge";
 import { toastError, toastSuccess, toastInfo, toastSavingToLibrary } from "@/lib/toast";
 
 function shuffleArray<T>(items: T[]): T[] {
@@ -55,6 +56,7 @@ type AlbumTrack = {
   localTrackId: string | null;
   streamUrl: string | null;
   explicit?: boolean;
+  localSource?: LocalSourceBadge | null;
   artists?: string;
 };
 
@@ -153,6 +155,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                 hasFile: false,
                 localTrackId: null,
                 streamUrl: null,
+                localSource: null,
               }
             : t,
         ),
@@ -926,6 +929,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                           coverPath={album?.image || null}
                           duration={t.duration}
                           onPolarr={t.available}
+                          localSource={t.localSource ?? "lidarr"}
                           downloading={busy}
                           onDownload={
                             t.available

@@ -324,7 +324,7 @@ export function NowPlayingBar() {
           </div>
 
           <div className="hidden items-center justify-end gap-1 lg:flex">
-            <BarTooltip label="Add to Liked Songs">
+            <BarTooltip label="Add to playlist">
               <span className="inline-flex">
                 <MobileSaveButton
                   trackId={track.id}

@@ -23,6 +23,7 @@ import { ytDlpAvailable } from "@/lib/fallback-download";
 import { resolveArtistPortrait } from "@/lib/artist-portrait";
 import { namesMatch, primaryArtistName } from "@/lib/track-match";
 import { titleLooksExplicit, formatTrackArtistLine } from "@/lib/utils";
+import { localSourceBadge, type LocalSourceBadge } from "@/lib/track-source-badge";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,8 @@ export type AlbumTrackDto = {
   localTrackId: string | null;
   streamUrl: string | null;
   explicit: boolean;
+  /** Lidarr library vs Polarr fallback download badge. */
+  localSource: LocalSourceBadge | null;
   /** Display artists (album artist + features when known). */
   artists: string;
 };
@@ -100,6 +103,7 @@ function mapLocalFallback(
       localTrackId: isStream ? null : t.id,
       streamUrl: isStream ? null : `/api/stream/${t.id}`,
       explicit: titleLooksExplicit(t.title),
+      localSource: isStream ? null : localSourceBadge(t.source),
       artists: formatTrackArtistLine(artist, t.title),
     };
   });
@@ -117,6 +121,7 @@ function mergeAvailability(
       available: true,
       localTrackId: local.id,
       streamUrl: `/api/stream/${local.id}`,
+      localSource: localSourceBadge(local.source),
       duration: t.duration || local.duration || 0,
     };
   });
@@ -353,6 +358,7 @@ export async function GET(req: Request) {
                 hasFile: Boolean(t.hasFile),
                 localTrackId: local?.id ?? null,
                 streamUrl: local ? `/api/stream/${local.id}` : null,
+                localSource: local ? localSourceBadge(local.source) : null,
                 explicit: Boolean(t.explicit) || titleLooksExplicit(trackTitle),
                 artists: formatTrackArtistLine(artist, trackTitle),
               } satisfies AlbumTrackDto;
@@ -404,6 +410,7 @@ export async function GET(req: Request) {
               hasFile: false,
               localTrackId: null,
               streamUrl: null,
+              localSource: null,
               explicit: titleLooksExplicit(t.title),
               artists: formatTrackArtistLine(artist, t.title, t.artists),
             })),

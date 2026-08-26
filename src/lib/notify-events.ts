@@ -2,7 +2,17 @@ export type NotifyEventId =
   | "requestNew"
   | "downloadStarted"
   | "requestAvailable"
-  | "requestFailed";
+  | "requestFailed"
+  | "passwordResetRequested"
+  | "passwordResetCompleted"
+  | "inviteCreated"
+  | "inviteUsed"
+  | "userBanned"
+  | "userUnbanned"
+  | "trackAdded"
+  | "userLogin"
+  | "userLogout"
+  | "streamError";
 
 export type NotifyEventFlags = Record<NotifyEventId, boolean>;
 
@@ -11,6 +21,16 @@ export const NOTIFY_EVENT_IDS = [
   "downloadStarted",
   "requestAvailable",
   "requestFailed",
+  "passwordResetRequested",
+  "passwordResetCompleted",
+  "inviteCreated",
+  "inviteUsed",
+  "userBanned",
+  "userUnbanned",
+  "trackAdded",
+  "userLogin",
+  "userLogout",
+  "streamError",
 ] as const satisfies readonly NotifyEventId[];
 
 export const DEFAULT_NOTIFY_EVENTS: NotifyEventFlags = {
@@ -18,6 +38,16 @@ export const DEFAULT_NOTIFY_EVENTS: NotifyEventFlags = {
   downloadStarted: true,
   requestAvailable: true,
   requestFailed: true,
+  passwordResetRequested: true,
+  passwordResetCompleted: true,
+  inviteCreated: true,
+  inviteUsed: true,
+  userBanned: true,
+  userUnbanned: true,
+  trackAdded: true,
+  userLogin: true,
+  userLogout: true,
+  streamError: true,
 };
 
 export const NOTIFY_EVENTS: {
@@ -44,6 +74,56 @@ export const NOTIFY_EVENTS: {
     id: "requestFailed",
     label: "Download failed",
     description: "When a request or acquire job fails.",
+  },
+  {
+    id: "passwordResetRequested",
+    label: "Password reset requested",
+    description: "When someone asks for a forgot-password email.",
+  },
+  {
+    id: "passwordResetCompleted",
+    label: "Password changed",
+    description: "When a password is updated via a reset link.",
+  },
+  {
+    id: "inviteCreated",
+    label: "Invite created",
+    description: "When an admin creates an invite code.",
+  },
+  {
+    id: "inviteUsed",
+    label: "Invite used",
+    description: "When someone joins with an invite code.",
+  },
+  {
+    id: "userBanned",
+    label: "User banned",
+    description: "When a ban is placed on an account.",
+  },
+  {
+    id: "userUnbanned",
+    label: "User unbanned",
+    description: "When a ban is lifted.",
+  },
+  {
+    id: "trackAdded",
+    label: "Tracks added",
+    description: "When new tracks are indexed into the library.",
+  },
+  {
+    id: "userLogin",
+    label: "User signed in",
+    description: "When someone signs in (password or Discord).",
+  },
+  {
+    id: "userLogout",
+    label: "User signed out",
+    description: "When someone signs out.",
+  },
+  {
+    id: "streamError",
+    label: "Stream error",
+    description: "When playback hits a missing file or live stream failure.",
   },
 ];
 

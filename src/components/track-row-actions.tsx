@@ -8,11 +8,15 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  LOCAL_SOURCE_AVAILABLE,
+  type LocalSourceBadge,
+} from "@/lib/track-source-badge";
 import { cn } from "@/lib/utils";
 
 /**
- * Row save control: plus adds to Liked Songs and opens the Saved-in drawer.
- * Check means the track is in Liked Songs.
+ * Row save control: plus opens the Saved-in drawer; check means the track is
+ * in Liked Songs or any user playlist.
  */
 export function TrackRowActions({
   trackId,
@@ -24,6 +28,7 @@ export function TrackRowActions({
   liked,
   inLibrary,
   onPolarr,
+  localSource = "lidarr",
   downloading,
   onDownload,
   onLikedChange,
@@ -38,8 +43,10 @@ export function TrackRowActions({
   liked?: boolean;
   /** Saved to a user playlist / Your Library — not “file exists on disk”. */
   inLibrary?: boolean;
-  /** Indexed on this Polarr server (Lidarr or Polarr download). */
+  /** Indexed on this server — show Lidarr or Polarr source badge. */
   onPolarr?: boolean;
+  /** When onPolarr — Lidarr library vs Polarr fallback download. */
+  localSource?: LocalSourceBadge;
   downloading?: boolean;
   onDownload?: () => void;
   onLikedChange?: (liked: boolean) => void;
@@ -57,10 +64,16 @@ export function TrackRowActions({
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="inline-flex shrink-0">
-                <StreamQualityBadge quality="local" available />
+                <StreamQualityBadge
+                  quality="local"
+                  localSource={localSource}
+                  available
+                />
               </span>
             </TooltipTrigger>
-            <TooltipContent>Available on Polarr</TooltipContent>
+            <TooltipContent>
+              {LOCAL_SOURCE_AVAILABLE[localSource]}
+            </TooltipContent>
           </Tooltip>
         </TooltipProvider>
       ) : null}

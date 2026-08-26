@@ -458,6 +458,10 @@ async function resolveIfNeeded(
       }
       return track;
     }
+    // Logged out / expired session — silent (login page must not toast this)
+    if (res.status === 401) {
+      return track;
+    }
     if (!res.ok || !data) {
       const msg =
         typeof data?.error === "string"

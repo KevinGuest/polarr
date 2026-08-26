@@ -272,9 +272,11 @@ export function AdminLidarrClient() {
             <CardHeader>
               <CardTitle>Music location</CardTitle>
               <CardDescription>
-                Folder Polarr scans and streams from. Use Browse to pick a
-                folder inside this container, or choose a detected Lidarr /
-                mount path.
+                Folder Polarr scans and streams from. Use Browse to open the
+                real filesystem and pick the library folder (same on Windows
+                localhost and Umbrel) — e.g.{" "}
+                <code className="text-xs">/downloads/media/music</code> or{" "}
+                <code className="text-xs">C:\Music</code>.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -287,7 +289,7 @@ export function AdminLidarrClient() {
                     onChange={(e) => {
                       setMusicRoot(e.target.value);
                     }}
-                    placeholder="/music"
+                    placeholder="Browse or paste a folder path"
                     className="font-mono text-sm"
                     autoComplete="off"
                     spellCheck={false}
@@ -333,16 +335,16 @@ export function AdminLidarrClient() {
               {musicRoot &&
               musicRoots.some((r) => r.path === musicRoot && !r.exists) ? (
                 <p className="text-sm text-muted-foreground">
-                  This path isn’t visible inside Polarr’s container. If Lidarr
-                  uses a different mount, pick the mapped folder (often{" "}
-                  <code className="text-xs">/music</code>) instead.
+                  This path isn’t visible to Polarr right now. Browse to a
+                  folder that exists on this machine, or pick a detected folder
+                  above.
                 </p>
               ) : null}
               <Button onClick={() => void saveMusicRoot()}>Save location</Button>
               <FileBrowserDialog
                 open={browserOpen}
                 onOpenChange={setBrowserOpen}
-                initialPath={musicRoot || "/music"}
+                initialPath={musicRoot || ""}
                 onSelect={(p) => {
                   setMusicRoot(p);
                 }}

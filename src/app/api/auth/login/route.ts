@@ -70,5 +70,15 @@ export async function POST(req: Request) {
     result.token,
     await sessionCookieOptions(),
   );
+  const { notifyDiscord } = await import("@/lib/admin-notify");
+  notifyDiscord("userLogin", {
+    title: "User signed in",
+    description: `${result.user.username} signed in`,
+    fields: [
+      { name: "User", value: result.user.username, inline: true },
+      { name: "Method", value: "password", inline: true },
+      ...(ip ? [{ name: "IP", value: ip, inline: true }] : []),
+    ],
+  });
   return json({ token: result.token, user: result.user });
 }

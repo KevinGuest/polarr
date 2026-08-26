@@ -51,9 +51,27 @@ export async function GET(
   try {
     stat = fs.statSync(track.path);
   } catch {
+    const { notifyDiscordStreamError } = await import("@/lib/admin-notify");
+    notifyDiscordStreamError({
+      dedupeKey: `missing:${track.id}`,
+      title: "Stream error — file missing",
+      description: `${track.title} by ${track.artist}`,
+      fields: [
+        { name: "Track", value: track.title, inline: true },
+        { name: "Artist", value: track.artist, inline: true },
+        { name: "Path", value: track.path.slice(0, 200) },
+      ],
+    });
     return json({ error: "Audio file missing on disk" }, { status: 404 });
   }
   if (!stat.isFile()) {
+    const { notifyDiscordStreamError } = await import("@/lib/admin-notify");
+    notifyDiscordStreamError({
+      dedupeKey: `notfile:${track.id}`,
+      title: "Stream error — not a file",
+      description: `${track.title} by ${track.artist}`,
+      fields: [{ name: "Path", value: track.path.slice(0, 200) }],
+    });
     return json({ error: "Audio file missing on disk" }, { status: 404 });
   }
 

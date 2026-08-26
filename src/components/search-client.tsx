@@ -29,6 +29,7 @@ import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
 import { formatTrackArtistLine, titleLooksExplicit } from "@/lib/utils";
+import type { LocalSourceBadge } from "@/lib/track-source-badge";
 import { toastSavingToLibrary } from "@/lib/toast";
 import { RECENT_PLAYED_CHANGED_EVENT } from "@/lib/ui-events";
 import { MobileSearchHeader } from "@/components/mobile-search-header";
@@ -51,6 +52,7 @@ type CatalogTrack = {
   duration?: number;
   localTrackId?: string;
   onPolarr?: boolean;
+  localSource?: LocalSourceBadge;
 };
 
 type CatalogAlbum = {
@@ -821,6 +823,7 @@ export function SearchClient() {
               coverPath={t.image}
               duration={t.duration}
               onPolarr={Boolean(t.onPolarr)}
+              localSource={t.localSource ?? "lidarr"}
             />
             <Button
               size="sm"

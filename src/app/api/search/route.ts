@@ -20,6 +20,7 @@ import {
   scoreLibrarySearchHit,
   trackMatchKey,
 } from "@/lib/track-match";
+import { localSourceBadge } from "@/lib/track-source-badge";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -57,6 +58,7 @@ function trackToHit(
     duration: t.duration || undefined,
     localTrackId: t.id,
     onPolarr: true,
+    localSource: localSourceBadge(t.source),
   };
 }
 
@@ -147,6 +149,7 @@ function hydrateCatalogTracks(
         duration: hit.duration || lib.duration || undefined,
         localTrackId: lib.id,
         onPolarr: true,
+        localSource: localSourceBadge(lib.source),
       });
       continue;
     }

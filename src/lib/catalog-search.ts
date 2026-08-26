@@ -6,6 +6,7 @@
 
 import { namesMatch, normalizeArtistName } from "@/lib/artist-portrait";
 import { scoreSearchHit } from "@/lib/track-match";
+import type { LocalSourceBadge } from "@/lib/track-source-badge";
 
 export type CatalogTrackHit = {
   id: string;
@@ -18,6 +19,8 @@ export type CatalogTrackHit = {
   localTrackId?: string;
   /** Indexed on this Polarr server (Lidarr or download). */
   onPolarr?: boolean;
+  /** Lidarr library vs Polarr fallback download. */
+  localSource?: LocalSourceBadge;
 };
 
 export type CatalogAlbumHit = {

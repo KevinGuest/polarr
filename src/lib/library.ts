@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { isArtworkFilename, readAudioTags } from "./audio-tags";
 import { getSettings, getTrackByPath, upsertTrack } from "./db";
 import { downloadsDir, musicDir } from "./paths";
+import { classifyIndexedTrackSource } from "./track-source";
 
 const AUDIO_EXT = new Set([
   ".mp3",
@@ -94,6 +95,7 @@ async function mapPool<T>(
 export async function scanMusicLibrary(): Promise<{
   scanned: number;
   probed: number;
+  added: number;
   root: string;
 }> {
   const settings = getSettings();
@@ -103,6 +105,7 @@ export async function scanMusicLibrary(): Promise<{
   const roots = Array.from(new Set([path.resolve(root), dlRoot]));
   const files = roots.flatMap((dir) => walk(dir));
   let probed = 0;
+  let added = 0;
 
   await mapPool(files, PROBE_CONCURRENCY, async (file) => {
     let fileSize = 0;
@@ -143,10 +146,7 @@ export async function scanMusicLibrary(): Promise<{
       }
     }
 
-    const abs = path.resolve(file);
-    const underDownload =
-      abs === dlRoot || abs.startsWith(dlRoot + path.sep);
-
+    const isNew = !existing;
     upsertTrack({
       id: existing?.id || randomBytes(12).toString("hex"),
       title,
@@ -155,12 +155,33 @@ export async function scanMusicLibrary(): Promise<{
       duration,
       path: file,
       coverPath: existing?.coverPath ?? null,
-      source: underDownload ? "fallback" : "library",
+      source: classifyIndexedTrackSource(file),
       externalId: existing?.externalId ?? null,
       fileSize,
       mtimeMs,
     });
+    if (isNew) added += 1;
   });
 
-  return { scanned: files.length, probed, root: roots.join(" + ") };
+  if (added > 0) {
+    try {
+      const { notifyDiscord } = await import("@/lib/admin-notify");
+      notifyDiscord("trackAdded", {
+        title: added === 1 ? "Track added" : "Tracks added",
+        description:
+          added === 1
+            ? "1 new track indexed into the library."
+            : `${added} new tracks indexed into the library.`,
+        fields: [
+          { name: "New", value: String(added), inline: true },
+          { name: "Scanned", value: String(files.length), inline: true },
+        ],
+        href: "/library",
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return { scanned: files.length, probed, added, root: roots.join(" + ") };
 }

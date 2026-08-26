@@ -76,7 +76,13 @@ const adminNavGroups = [
   },
 ] as const;
 
-const AUTH_PATHS = new Set(["/setup", "/login", "/join"]);
+const AUTH_PATHS = new Set([
+  "/setup",
+  "/login",
+  "/join",
+  "/forgot-password",
+  "/reset-password",
+]);
 const MINIPLAYER_PATH = "/miniplayer";
 
 function PolarrMark({ className }: { className?: string }) {
@@ -507,13 +513,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (isAuthScreen) {
     return (
-      <PlayerProvider>
-        <AuthProvider>
-          <div className="flex min-h-dvh items-center justify-center bg-background px-4 py-12 text-foreground">
-            {children}
-          </div>
-        </AuthProvider>
-      </PlayerProvider>
+      <div className="flex min-h-dvh items-center justify-center bg-background px-4 py-12 text-foreground">
+        {children}
+      </div>
     );
   }
 

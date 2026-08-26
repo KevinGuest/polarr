@@ -4,6 +4,7 @@ export type {
   LyricDocument,
   LyricSession,
   LyricQuality,
+  GeniusSection,
   ResolveLyricsInput,
 } from "./types";
 export {
@@ -15,6 +16,13 @@ export {
   lyricWordFill01,
 } from "./parse-lrc";
 export { resolveLyrics, lyricsCacheKey } from "./resolve";
+export { fetchGeniusSections, parseGeniusSections, probeGenius } from "./genius";
+export {
+  duoArtists,
+  assignLyricSides,
+  isDualLyricLayout,
+} from "./lyric-sides";
+export type { LyricSide, SidedLyricLine } from "./lyric-sides";
 export {
   suggestLyricsOffsetSec,
   clampLyricsOffset,

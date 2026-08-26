@@ -16,6 +16,7 @@ import {
   renamePlaylist,
   removeTrackFromPlaylist,
   setPlaylistFolder,
+  setPlaylistTrackOrder,
   updatePlaylistDetails,
 } from "@/lib/db";
 import { coverFromMap, getAlbumCoverMap } from "@/lib/lidarr";
@@ -33,9 +34,9 @@ export async function GET(req: Request) {
   const forTrack = (params.get("forTrack") || "").trim();
 
   if (playlistId) {
-    // Owner gets full edit context; any homeserver member can view.
+    // Owner gets full edit context; public playlists are readable by members.
     const owned = getUserPlaylist(user.id, playlistId);
-    const playlist = owned ?? getPlaylistById(playlistId);
+    const playlist = owned ?? getPlaylistById(playlistId, user.id);
     if (!playlist) return json({ error: "Playlist not found" }, { status: 404 });
     const covers = await getAlbumCoverMap();
     const tracks = (
@@ -98,10 +99,17 @@ const patchDetailsSchema = z
     playlistId: z.string().min(1),
     name: z.string().min(1).max(80).optional(),
     description: z.string().max(PLAYLIST_DESCRIPTION_MAX).optional(),
+    isPrivate: z.boolean().optional(),
   })
-  .refine((d) => d.name !== undefined || d.description !== undefined, {
-    message: "Nothing to update",
-  });
+  .refine(
+    (d) =>
+      d.name !== undefined ||
+      d.description !== undefined ||
+      d.isPrivate !== undefined,
+    {
+      message: "Nothing to update",
+    },
+  );
 
 const deleteSchema = z.object({
   action: z.literal("delete"),
@@ -112,6 +120,19 @@ const moveSchema = z.object({
   action: z.literal("move"),
   playlistId: z.string().min(1),
   folderId: z.string().min(1).nullable(),
+});
+
+const reorderSchema = z.object({
+  action: z.literal("reorder"),
+  playlistId: z.string().min(1),
+  trackIds: z.array(z.string().min(1)).max(5000),
+});
+
+const moveTracksSchema = z.object({
+  action: z.literal("moveTracks"),
+  fromPlaylistId: z.string().min(1),
+  toPlaylistId: z.string().min(1),
+  trackIds: z.array(z.string().min(1)).min(1).max(500),
 });
 
 export async function POST(req: Request) {
@@ -138,6 +159,46 @@ export async function POST(req: Request) {
     return result.ok
       ? json({ ok: true })
       : json({ error: result.error }, { status: 400 });
+  }
+
+  if (action === "reorder") {
+    const parsed = reorderSchema.safeParse(raw);
+    if (!parsed.success) {
+      return json({ error: parsed.error.flatten() }, { status: 400 });
+    }
+    const result = setPlaylistTrackOrder(
+      user.id,
+      parsed.data.playlistId,
+      parsed.data.trackIds,
+    );
+    return result.ok
+      ? json({ ok: true })
+      : json({ error: result.error }, { status: 400 });
+  }
+
+  if (action === "moveTracks") {
+    const parsed = moveTracksSchema.safeParse(raw);
+    if (!parsed.success) {
+      return json({ error: parsed.error.flatten() }, { status: 400 });
+    }
+    const { fromPlaylistId, toPlaylistId, trackIds } = parsed.data;
+    if (normalizePlaylistId(fromPlaylistId) === normalizePlaylistId(toPlaylistId)) {
+      return json({ error: "Pick a different playlist" }, { status: 400 });
+    }
+    if (!getUserPlaylist(user.id, fromPlaylistId)) {
+      return json({ error: "Source playlist not found" }, { status: 404 });
+    }
+    if (!getUserPlaylist(user.id, toPlaylistId)) {
+      return json({ error: "Target playlist not found" }, { status: 404 });
+    }
+    let moved = 0;
+    for (const trackId of trackIds) {
+      const added = addTrackToPlaylist(user.id, toPlaylistId, trackId);
+      if (!added.ok) continue;
+      removeTrackFromPlaylist(user.id, fromPlaylistId, trackId);
+      moved += 1;
+    }
+    return json({ ok: true, moved });
   }
 
   if (action === "rename") {
@@ -226,6 +287,7 @@ export async function PATCH(req: Request) {
   const playlist = updatePlaylistDetails(user.id, parsed.data.playlistId, {
     name: parsed.data.name,
     description: parsed.data.description,
+    isPrivate: parsed.data.isPrivate,
   });
   return playlist
     ? json({ playlist })

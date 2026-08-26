@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { MoreHorizontal, X } from "lucide-react";
+import { Eye, EyeOff, MoreHorizontal, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,7 +21,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { roleLabel, type UserRole } from "@/lib/roles";
+import { roleLabel, roleSortRank, type UserRole } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import { toastError, toastSuccess } from "@/lib/toast";
 import { UserAvatar } from "@/components/user-avatar";
@@ -75,11 +75,74 @@ type UserDetailPayload = {
   }[];
 };
 
+type UserSortOrder = "role" | "newest" | "oldest" | "name";
+
+function maskEmail(email: string): string {
+  const at = email.lastIndexOf("@");
+  if (at <= 0) return "****";
+  return `****${email.slice(at)}`;
+}
+
+function maskIp(ip: string): string {
+  if (ip.includes(".")) {
+    return ip
+      .split(".")
+      .map(() => "***")
+      .join(".");
+  }
+  if (ip.includes(":")) {
+    return ip
+      .split(":")
+      .map((part) => (part ? "****" : ""))
+      .join(":");
+  }
+  return "••••••••";
+}
+
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid grid-cols-[7.5rem_1fr] gap-3 py-2 text-sm">
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="min-w-0 break-all font-medium text-foreground">{value}</dd>
+    </div>
+  );
+}
+
+function SensitiveDetailRow({
+  label,
+  value,
+  kind,
+}: {
+  label: string;
+  value: string | null | undefined;
+  kind: "email" | "ip";
+}) {
+  const [revealed, setRevealed] = useState(false);
+  const raw = (value || "").trim();
+  if (!raw) {
+    return <DetailRow label={label} value="—" />;
+  }
+  const masked = kind === "email" ? maskEmail(raw) : maskIp(raw);
+  return (
+    <div className="grid grid-cols-[7.5rem_1fr] gap-3 py-2 text-sm">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="flex min-w-0 items-start gap-2">
+        <span className="min-w-0 flex-1 break-all font-medium text-foreground">
+          {revealed ? raw : masked}
+        </span>
+        <button
+          type="button"
+          onClick={() => setRevealed((v) => !v)}
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={revealed ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+        >
+          {revealed ? (
+            <EyeOff className="size-4" />
+          ) : (
+            <Eye className="size-4" />
+          )}
+        </button>
+      </dd>
     </div>
   );
 }
@@ -99,6 +162,32 @@ function roleBadgeVariant(role: UserRole): "default" | "outline" | "secondary" {
   if (role === "owner" || role === "admin") return "default";
   if (role === "moderator") return "secondary";
   return "outline";
+}
+
+function sortUsers(list: UserRow[], order: UserSortOrder): UserRow[] {
+  const next = list.slice();
+  next.sort((a, b) => {
+    if (order === "newest") {
+      return (
+        Date.parse(b.createdAt) - Date.parse(a.createdAt) ||
+        a.username.localeCompare(b.username)
+      );
+    }
+    if (order === "oldest") {
+      return (
+        Date.parse(a.createdAt) - Date.parse(b.createdAt) ||
+        a.username.localeCompare(b.username)
+      );
+    }
+    if (order === "name") {
+      return a.username.localeCompare(b.username);
+    }
+    const ar = roleSortRank(a.role || (a.isAdmin ? "admin" : "member"));
+    const br = roleSortRank(b.role || (b.isAdmin ? "admin" : "member"));
+    if (ar !== br) return ar - br;
+    return a.username.localeCompare(b.username);
+  });
+  return next;
 }
 
 async function fetchUserPayload(publicId: string): Promise<UserDetailPayload> {
@@ -134,6 +223,12 @@ export function AdminUsersClient() {
   const [restoreTarget, setRestoreTarget] = useState<UserRow | null>(null);
   const [transferTarget, setTransferTarget] = useState<UserRow | null>(null);
   const [openedFromQuery, setOpenedFromQuery] = useState(false);
+  const [sortOrder, setSortOrder] = useState<UserSortOrder>("role");
+
+  const sortedUsers = useMemo(
+    () => sortUsers(users, sortOrder),
+    [users, sortOrder],
+  );
 
   async function refresh() {
     const res = await fetch("/api/admin/users");
@@ -437,14 +532,30 @@ export function AdminUsersClient() {
       </div>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">
-          {users.length} member{users.length === 1 ? "" : "s"}
-        </h2>
-        {users.length === 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-medium text-muted-foreground">
+            {users.length} member{users.length === 1 ? "" : "s"}
+          </h2>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="sr-only">Sort members</span>
+            <select
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value as UserSortOrder)}
+              className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+              aria-label="Sort members"
+            >
+              <option value="role">By role</option>
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="name">Name A–Z</option>
+            </select>
+          </label>
+        </div>
+        {sortedUsers.length === 0 ? (
           <p className="text-sm text-muted-foreground">No users yet.</p>
         ) : (
           <ul className="space-y-3">
-            {users.map((u) => {
+            {sortedUsers.map((u) => {
               const role = u.role || (u.isAdmin ? "admin" : "member");
               const isSelf = u.publicId === mePublicId;
 
@@ -675,9 +786,9 @@ export function AdminUsersClient() {
                   </div>
 
                   <p className="text-xs text-muted-foreground">
-                    Albums count is from the shared library shown on their
-                    public profile. Requests and downloads are tracked per
-                    account.
+                    Albums and library tracks are from this member&apos;s saved
+                    library (pinned albums and liked songs), not the shared
+                    catalog. Requests and downloads are tracked per account.
                   </p>
                 </>
               ) : null}
@@ -764,18 +875,30 @@ export function AdminUsersClient() {
 
               <div className="space-y-5">
                 <dl className="divide-y divide-border/70 border-t border-border/70">
-                  <DetailRow label="Email" value={details.email || "—"} />
+                  <SensitiveDetailRow
+                    key={`${details.publicId}-email`}
+                    label="Email"
+                    value={details.email}
+                    kind="email"
+                  />
                   <DetailRow
                     label="Invite code"
                     value={details.invite?.code || "—"}
                   />
                   {details.invite?.emailedTo ? (
-                    <DetailRow
+                    <SensitiveDetailRow
+                      key={`${details.publicId}-invite-email`}
                       label="Invite email"
                       value={details.invite.emailedTo}
+                      kind="email"
                     />
                   ) : null}
-                  <DetailRow label="Last IP" value={details.lastIp || "—"} />
+                  <SensitiveDetailRow
+                    key={`${details.publicId}-ip`}
+                    label="Last IP"
+                    value={details.lastIp}
+                    kind="ip"
+                  />
                   <DetailRow
                     label="Device ID"
                     value={details.lastHwid || "—"}

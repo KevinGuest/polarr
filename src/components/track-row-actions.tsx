@@ -1,18 +1,11 @@
 "use client";
 
 import { MobileSaveButton } from "@/components/saved-in-drawer";
-import { StreamQualityBadge } from "@/components/stream-quality-badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { PolarrAvailabilityBadge } from "@/components/stream-quality-badge";
 import { cn } from "@/lib/utils";
 
 /**
- * Row save control: plus opens the Saved-in drawer; check means the track is
- * in Liked Songs or any user playlist.
+ * Row actions: availability badge, then plus/check (Saved-in drawer).
  */
 export function TrackRowActions({
   trackId,
@@ -39,9 +32,9 @@ export function TrackRowActions({
   liked?: boolean;
   /** Saved to a user playlist / Your Library — not “file exists on disk”. */
   inLibrary?: boolean;
-  /** Indexed on this Polarr server — show Polarr badge (not Lidarr). */
+  /** Indexed on this Polarr server (library file). */
   onPolarr?: boolean;
-  /** When false, caller renders availability next to the artist instead. */
+  /** Show server/cloud badge left of the save control. */
   showPolarrBadge?: boolean;
   downloading?: boolean;
   onDownload?: () => void;
@@ -51,21 +44,12 @@ export function TrackRowActions({
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center justify-end gap-1",
+        "flex shrink-0 items-center justify-end gap-1.5",
         className,
       )}
     >
-      {showPolarrBadge && onPolarr ? (
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="inline-flex shrink-0">
-                <StreamQualityBadge quality="local" available />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>Available on Polarr</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+      {showPolarrBadge ? (
+        <PolarrAvailabilityBadge available={Boolean(onPolarr)} />
       ) : null}
       <MobileSaveButton
         trackId={trackId}

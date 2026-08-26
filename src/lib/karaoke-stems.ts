@@ -154,7 +154,14 @@ function run(
     };
     const child = spawn(cmd, args, {
       shell: false,
-      env: process.env,
+      env: {
+        ...process.env,
+        // Ensure Demucs (spawned as a sibling node process) can resolve ORT
+        // packages that live next to the Next standalone server.
+        NODE_PATH: [path.join(process.cwd(), "node_modules"), process.env.NODE_PATH]
+          .filter(Boolean)
+          .join(path.delimiter),
+      },
       windowsHide: true,
       cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"],
@@ -438,7 +445,10 @@ async function renderInstrumental(
 
   if (sep.code !== 0) {
     job.status = "error";
-    job.error = `Stem separation failed.\n${(sep.stderr || sep.stdout).slice(-500)}`;
+    const raw = (sep.stderr || sep.stdout).slice(-800);
+    job.error = /MODULE_NOT_FOUND|Cannot find module ['"]onnxruntime/i.test(raw)
+      ? "Stem separation failed: ONNX Runtime is missing from the server image. Redeploy Polarr with the karaoke runtime packages included."
+      : `Stem separation failed.\n${raw.slice(-500)}`;
     writeStatus(key, job);
     return;
   }

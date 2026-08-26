@@ -50,3 +50,17 @@ export function roleLabel(role: UserRole | string | null | undefined): string {
       return "Member";
   }
 }
+
+/** Lower = higher privilege (owner → admin → mod → member). */
+export function roleSortRank(role: UserRole | string | null | undefined): number {
+  switch (normalizeUserRole(role)) {
+    case "owner":
+      return 0;
+    case "admin":
+      return 1;
+    case "moderator":
+      return 2;
+    default:
+      return 3;
+  }
+}

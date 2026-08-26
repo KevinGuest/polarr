@@ -1,7 +1,15 @@
 import { trackMatchKey } from "../track-match";
-import { getLyricsCache, setLyricsCache, type LyricsCacheRow } from "../db";
+import {
+  getLyricsCache,
+  setLyricsCache,
+  setLyricsCacheGenius,
+  type LyricsCacheRow,
+} from "../db";
 import { lrclibGet, lrclibSearch } from "./lrclib";
+import { fetchGeniusSections } from "./genius";
+import { duoArtists } from "./lyric-sides";
 import type {
+  GeniusSection,
   LyricDocument,
   LyricSession,
   ResolveLyricsInput,
@@ -15,6 +23,7 @@ const EMPTY: LyricDocument = {
   externalId: null,
   instrumental: false,
   found: false,
+  geniusSections: null,
 };
 
 /** Stable cache key: artist|title|durationBucket */
@@ -27,6 +36,34 @@ export function lyricsCacheKey(input: ResolveLyricsInput): string {
   const bucket =
     typeof dur === "number" && dur > 20 ? Math.round(dur / 5) * 5 : 0;
   return `${base}|d${bucket}`;
+}
+
+function parseGeniusJson(raw: string | null | undefined): GeniusSection[] | null {
+  if (!raw?.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    const sections: GeniusSection[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const o = item as Record<string, unknown>;
+      const lines = Array.isArray(o.lines)
+        ? o.lines.filter((l): l is string => typeof l === "string")
+        : [];
+      const speaker =
+        typeof o.speaker === "string"
+          ? o.speaker
+          : o.speaker === null
+            ? null
+            : null;
+      const label = typeof o.label === "string" ? o.label : "";
+      if (!lines.length && !speaker) continue;
+      sections.push({ speaker, label, lines });
+    }
+    return sections.length ? sections : null;
+  } catch {
+    return null;
+  }
 }
 
 function rowToDoc(row: LyricsCacheRow): LyricDocument {
@@ -71,6 +108,7 @@ function rowToDoc(row: LyricsCacheRow): LyricDocument {
     externalId: row.externalId,
     instrumental: row.quality === "instrumental",
     found: row.quality !== "none",
+    geniusSections: parseGeniusJson(row.geniusJson),
   };
 }
 
@@ -95,9 +133,31 @@ function buildSession(
   };
 }
 
+async function attachGeniusStructure(
+  doc: LyricDocument,
+  cacheKey: string,
+  artist: string,
+  title: string,
+): Promise<LyricDocument> {
+  if (doc.geniusSections?.some((s) => s.speaker)) return doc;
+  if (!doc.found || doc.instrumental) return doc;
+  if (!duoArtists(artist, title)) return doc;
+
+  try {
+    const sections = await fetchGeniusSections({ artist, title });
+    if (!sections?.length) return doc;
+    const geniusJson = JSON.stringify(sections);
+    setLyricsCacheGenius(cacheKey, geniusJson);
+    return { ...doc, geniusSections: sections };
+  } catch {
+    return doc;
+  }
+}
+
 /**
  * Resolve lyrics for a track: cache → lrclib get → lrclib search.
  * Line times are the provider stamps (no session offset / DTW rewrite).
+ * Duo credits also pull Genius section speakers when available.
  */
 export async function resolveLyrics(
   input: ResolveLyricsInput,
@@ -121,7 +181,11 @@ export async function resolveLyrics(
 
   const cached = getLyricsCache(cacheKey);
   if (cached && shouldUseCache(cached)) {
-    return buildSession(rowToDoc(cached), cacheKey, mediaDurationSec);
+    let doc = rowToDoc(cached);
+    if (!doc.geniusSections?.some((s) => s.speaker) && duoArtists(artist, title)) {
+      doc = await attachGeniusStructure(doc, cacheKey, artist, title);
+    }
+    return buildSession(doc, cacheKey, mediaDurationSec);
   }
 
   let doc: LyricDocument | null = null;
@@ -156,6 +220,8 @@ export async function resolveLyrics(
     sourceDurationSec: doc.sourceDurationSec,
     linesJson: JSON.stringify(doc.lines),
   });
+
+  doc = await attachGeniusStructure(doc, cacheKey, artist, title);
 
   return buildSession(doc, cacheKey, mediaDurationSec);
 }

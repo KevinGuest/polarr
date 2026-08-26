@@ -46,6 +46,7 @@ export async function GET(req: Request) {
       synced: session.quality === "synced",
       cacheKey: session.cacheKey,
       mediaDurationSec: session.mediaDurationSec,
+      geniusSections: session.geniusSections ?? null,
     });
   } catch {
     return json({ error: "Lyrics session failed" }, { status: 502 });

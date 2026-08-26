@@ -272,18 +272,24 @@ function LyricsBody({
     });
   }, [open, track?.id]);
 
-  // Keep the active line pinned near the top (karaoke follow).
+  // Keep the active line just below the header — not tucked under the title.
   useEffect(() => {
     const scroller = scrollerRef.current;
     const active = activeRef.current;
     if (!scroller || !active || !session.synced) return;
     if (Date.now() < ignoreAutoScrollUntil.current) return;
 
-    const topPin = compact ? 12 : 72;
-    const target = Math.max(0, active.offsetTop - topPin);
+    // Compact sheet header sits above the scroller; leave clear air so the
+    // enlarged active line never clips under the title/artist row.
+    const topPin = compact ? 56 : 96;
+    const scrollerRect = scroller.getBoundingClientRect();
+    const activeRect = active.getBoundingClientRect();
+    const delta = activeRect.top - scrollerRect.top - topPin;
+    if (Math.abs(delta) < 4) return;
+
     programmaticScroll.current = true;
     scroller.scrollTo({
-      top: target,
+      top: Math.max(0, scroller.scrollTop + delta),
       behavior: "smooth",
     });
     const t = window.setTimeout(() => {
@@ -298,8 +304,15 @@ function LyricsBody({
         session.lines,
         track?.artist || track?.resolveArtist || "",
         track?.title || "",
+        session.geniusSections,
       ),
-    [session.lines, track?.artist, track?.resolveArtist, track?.title],
+    [
+      session.lines,
+      session.geniusSections,
+      track?.artist,
+      track?.resolveArtist,
+      track?.title,
+    ],
   );
   const duo = useMemo(
     () =>
@@ -343,10 +356,11 @@ function LyricsBody({
         }}
         className={cn(
           "min-h-0 flex-1 overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden",
-          // Extra bottom pad so late lines can still pin near the top.
+          // Extra top pad so the active line can sit clear of the header;
+          // bottom pad so late lines can still pin near the top.
           compact
-            ? "px-5 pb-[50vh] pt-1"
-            : "px-8 pb-[70vh] pt-20 md:px-16 lg:px-24",
+            ? "px-5 pb-[50vh] pt-5"
+            : "px-8 pb-[70vh] pt-24 md:px-16 lg:px-24",
         )}
       >
         {session.status === "loading" && (

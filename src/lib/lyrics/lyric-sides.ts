@@ -1,4 +1,4 @@
-import type { LyricLine } from "./types";
+import type { GeniusSection, LyricLine } from "./types";
 import { extractFeaturedArtists } from "@/lib/utils";
 import { normalizeArtistName, primaryArtistName } from "@/lib/track-match";
 
@@ -160,29 +160,119 @@ function flip(side: LyricSide): LyricSide {
   return side === "left" ? "right" : side === "right" ? "left" : "left";
 }
 
+function normalizeMatchText(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s']/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function linesSimilar(a: string, b: string): boolean {
+  const na = normalizeMatchText(a);
+  const nb = normalizeMatchText(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.length >= 12 && nb.length >= 12 && (na.includes(nb) || nb.includes(na))) {
+    return true;
+  }
+  // First ~5 tokens — handles slight LRC / Genius wording drift
+  const ta = na.split(" ").slice(0, 5).join(" ");
+  const tb = nb.split(" ").slice(0, 5).join(" ");
+  return ta.length >= 10 && ta === tb;
+}
+
 /**
- * When the track is a clear duo, map lines to left (primary) / right (guest).
- * Uses Genius-style section headers, sticky speaker, verse index, and
- * silence / ♪ gaps so unmarked LRC still splits across the two artists.
+ * Align timed LRC lines to Genius sections (speaker from `[Verse: Name]`).
+ * Prefer this over silence-flip heuristics when Genius structure exists.
  */
-export function assignLyricSides(
+function assignFromGenius(
   lines: LyricLine[],
-  artist: string,
-  title: string,
+  duo: { left: string; right: string },
+  sections: GeniusSection[],
 ): SidedLyricLine[] {
-  const duo = duoArtists(artist, title);
-  if (!duo) {
-    return lines.map((line) => ({
-      ...line,
-      side: "center" as const,
-      displayText: line.text,
-    }));
+  type Flat = { text: string; speaker: string | null };
+  const flat: Flat[] = [];
+  for (const sec of sections) {
+    for (const text of sec.lines) {
+      const t = text.trim();
+      if (!t) continue;
+      flat.push({ text: t, speaker: sec.speaker });
+    }
+  }
+  if (!flat.length) {
+    return assignLyricSidesHeuristic(lines, duo);
   }
 
+  let cursor = 0;
+  let sticky: LyricSide = "left";
+  let matched = 0;
+
+  const out = lines.map((line) => {
+    const raw = line.text.trim();
+    const isGap = raw === "♪" || raw === "♫" || raw === "";
+    if (isGap) {
+      return { ...line, side: "center" as const, displayText: raw || "♪" };
+    }
+
+    // Inline Genius-style headers somehow present in LRC
+    const section = sectionSpeaker(raw);
+    if (section) {
+      sticky = sideForSpeaker(section, duo);
+      return { ...line, side: "center" as const, displayText: raw };
+    }
+
+    let found = -1;
+    const windowEnd = Math.min(flat.length, cursor + 8);
+    for (let i = cursor; i < windowEnd; i++) {
+      if (linesSimilar(raw, flat[i]!.text)) {
+        found = i;
+        break;
+      }
+    }
+    // Occasional LRC insert — look a bit further
+    if (found < 0) {
+      for (let i = cursor; i < Math.min(flat.length, cursor + 20); i++) {
+        if (linesSimilar(raw, flat[i]!.text)) {
+          found = i;
+          break;
+        }
+      }
+    }
+
+    if (found >= 0) {
+      const speaker = flat[found]!.speaker;
+      if (speaker) {
+        sticky = sideForSpeaker(speaker, duo);
+      } else {
+        // Unlabeled chorus / hook → shared center
+        sticky = "center";
+      }
+      cursor = found + 1;
+      matched += 1;
+    }
+
+    return { ...line, side: sticky, displayText: raw };
+  });
+
+  // Too few alignments → fall back to heuristics
+  if (matched < Math.min(6, Math.floor(lines.length * 0.2))) {
+    return assignLyricSidesHeuristic(lines, duo);
+  }
+  return out;
+}
+
+/**
+ * Heuristic path when Genius structure is missing.
+ * Gap flips are conservative — easy to put Drake on SZA’s side.
+ */
+function assignLyricSidesHeuristic(
+  lines: LyricLine[],
+  duo: { left: string; right: string },
+): SidedLyricLine[] {
   let sticky: LyricSide = "left";
   let sawSpeaker = false;
   let prevTime = Number.NEGATIVE_INFINITY;
-  /** Lines since last side flip — avoid flipping every tiny gap. */
   let sinceFlip = 0;
 
   return lines.map((line) => {
@@ -193,7 +283,6 @@ export function assignLyricSides(
     prevTime = t;
 
     if (isGap) {
-      // Instrumental break → next verse often flips artist on duets
       if (sawSpeaker || sinceFlip >= 2) {
         sticky = flip(sticky);
         sinceFlip = 0;
@@ -211,7 +300,6 @@ export function assignLyricSides(
 
     const verseN = sectionIndex(raw);
     if (verseN != null) {
-      // Odd verses → primary (left), even → guest (right) — common duet form
       sticky = verseN % 2 === 1 ? "left" : "right";
       sawSpeaker = true;
       sinceFlip = 0;
@@ -247,16 +335,40 @@ export function assignLyricSides(
       };
     }
 
-    // Long silence between sung lines → treat as a verse break and flip
-    if (gapSec >= 7 && sinceFlip >= 3) {
+    // Only flip on long gaps after an explicit speaker cue (not cold open)
+    if (sawSpeaker && gapSec >= 10 && sinceFlip >= 4) {
       sticky = flip(sticky);
       sinceFlip = 0;
-      sawSpeaker = true;
     }
 
     sinceFlip += 1;
     return { ...line, side: sticky, displayText: raw };
   });
+}
+
+/**
+ * When the track is a clear duo, map lines to left (primary) / right (guest).
+ * Prefers Genius section speakers when provided; otherwise heuristics.
+ */
+export function assignLyricSides(
+  lines: LyricLine[],
+  artist: string,
+  title: string,
+  geniusSections?: GeniusSection[] | null,
+): SidedLyricLine[] {
+  const duo = duoArtists(artist, title);
+  if (!duo) {
+    return lines.map((line) => ({
+      ...line,
+      side: "center" as const,
+      displayText: line.text,
+    }));
+  }
+
+  if (geniusSections?.some((s) => s.speaker)) {
+    return assignFromGenius(lines, duo, geniusSections);
+  }
+  return assignLyricSidesHeuristic(lines, duo);
 }
 
 /** True when a duo credit exists (layout columns), not only when both sides appear. */

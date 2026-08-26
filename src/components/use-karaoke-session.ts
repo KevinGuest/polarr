@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { LyricLine, LyricQuality } from "@/lib/lyrics/types";
+import type {
+  GeniusSection,
+  LyricLine,
+  LyricQuality,
+} from "@/lib/lyrics/types";
 
 export type KaraokeSessionState = {
   status: "idle" | "loading" | "ready" | "empty" | "error";
@@ -11,6 +15,7 @@ export type KaraokeSessionState = {
   instrumental: boolean;
   cacheKey: string | null;
   source: string | null;
+  geniusSections: GeniusSection[] | null;
   error: string | null;
 };
 
@@ -22,6 +27,7 @@ const IDLE: KaraokeSessionState = {
   instrumental: false,
   cacheKey: null,
   source: null,
+  geniusSections: null,
   error: null,
 };
 
@@ -51,6 +57,7 @@ export function useKaraokeSession(input: {
       status: "loading",
       error: null,
       lines: [],
+      geniusSections: null,
     }));
 
     const params = new URLSearchParams({
@@ -73,10 +80,14 @@ export function useKaraokeSession(input: {
           synced: boolean;
           cacheKey: string;
           source: string;
+          geniusSections?: GeniusSection[] | null;
         }>;
       })
       .then((data) => {
         if (cancelled) return;
+        const geniusSections = Array.isArray(data.geniusSections)
+          ? data.geniusSections
+          : null;
         if (data.instrumental || data.quality === "instrumental") {
           setSession({
             status: "empty",
@@ -86,6 +97,7 @@ export function useKaraokeSession(input: {
             instrumental: true,
             cacheKey: data.cacheKey || null,
             source: data.source || null,
+            geniusSections: null,
             error: null,
           });
           return;
@@ -100,6 +112,7 @@ export function useKaraokeSession(input: {
             instrumental: false,
             cacheKey: data.cacheKey || null,
             source: data.source || null,
+            geniusSections: null,
             error: null,
           });
           return;
@@ -112,6 +125,7 @@ export function useKaraokeSession(input: {
           instrumental: false,
           cacheKey: data.cacheKey || null,
           source: data.source || null,
+          geniusSections,
           error: null,
         });
       })

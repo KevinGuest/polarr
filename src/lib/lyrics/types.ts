@@ -16,6 +16,13 @@ export type LyricLine = {
   words?: LyricWord[];
 };
 
+/** Genius section with optional named vocalist (from `[Verse 1: Drake]`). */
+export type GeniusSection = {
+  speaker: string | null;
+  label: string;
+  lines: string[];
+};
+
 export type LyricDocument = {
   quality: LyricQuality;
   lines: LyricLine[];
@@ -27,6 +34,8 @@ export type LyricDocument = {
   externalId: string | null;
   instrumental: boolean;
   found: boolean;
+  /** Genius structure for duet left/right when available. */
+  geniusSections?: GeniusSection[] | null;
 };
 
 export type LyricSession = LyricDocument & {

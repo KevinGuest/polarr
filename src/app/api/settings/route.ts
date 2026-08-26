@@ -15,6 +15,7 @@ import { DOWNLOAD_QUALITIES } from "@/lib/download-quality";
 import { isDiscordWebhookUrl, sendDiscordTest } from "@/lib/discord";
 import { sendSmtpTestEmail } from "@/lib/mail";
 import { probeLidarr } from "@/lib/lidarr";
+import { probeGenius } from "@/lib/lyrics/genius";
 import { detectMusicRoots, resolveBrowsableMusicPath } from "@/lib/music-roots";
 import { normalizePublicBaseUrl } from "@/lib/public-url";
 
@@ -40,6 +41,8 @@ function maskSecrets(settings: ReturnType<typeof getSettings>) {
     lidarrApiKey: settings.lidarrApiKey ? "••••••••" : "",
     smtpPassword: settings.smtpPassword ? "••••••••" : "",
     spotifyClientSecret: settings.spotifyClientSecret ? "••••••••" : "",
+    geniusClientSecret: settings.geniusClientSecret ? "••••••••" : "",
+    geniusAccessToken: settings.geniusAccessToken ? "••••••••" : "",
     // Never send live Discord credentials in GET — reveal after password.
     discordClientId: settings.discordClientId ? "••••••••" : "",
     discordClientSecret: settings.discordClientSecret ? "••••••••" : "",
@@ -49,6 +52,7 @@ function maskSecrets(settings: ReturnType<typeof getSettings>) {
     spotifyConfigured: Boolean(
       settings.spotifyClientId.trim() && settings.spotifyClientSecret.trim(),
     ),
+    geniusConfigured: Boolean(settings.geniusAccessToken.trim()),
     discordOAuthConfigured: Boolean(
       settings.discordClientId.trim() && settings.discordClientSecret.trim(),
     ),
@@ -123,6 +127,10 @@ const bodySchema = z.object({
   notifyDiscordEvents: notifyEventsSchema,
   spotifyClientId: z.string().max(120).optional(),
   spotifyClientSecret: z.string().max(120).optional(),
+  geniusClientId: z.string().max(120).optional(),
+  geniusClientSecret: z.string().max(120).optional(),
+  geniusAccessToken: z.string().max(200).optional(),
+  testGenius: z.boolean().optional(),
   discordClientId: z.string().max(120).optional(),
   discordClientSecret: z.string().max(120).optional(),
   /** Confirm account password and return live Discord secrets for admin UI. */
@@ -149,6 +157,10 @@ export async function POST(req: Request) {
     body.musicRoot !== undefined ||
     body.spotifyClientId !== undefined ||
     body.spotifyClientSecret !== undefined ||
+    body.geniusClientId !== undefined ||
+    body.geniusClientSecret !== undefined ||
+    body.geniusAccessToken !== undefined ||
+    body.testGenius ||
     body.discordClientId !== undefined ||
     body.discordClientSecret !== undefined;
   const touchesServer =
@@ -216,6 +228,29 @@ export async function POST(req: Request) {
         { status: 400 },
       );
     }
+  }
+
+  if (body.testGenius) {
+    // Persist any new token fields first so the probe uses them.
+    updateSettings({
+      geniusClientId: body.geniusClientId ?? current.geniusClientId,
+      geniusClientSecret:
+        body.geniusClientSecret && body.geniusClientSecret !== "••••••••"
+          ? body.geniusClientSecret
+          : current.geniusClientSecret,
+      geniusAccessToken:
+        body.geniusAccessToken && body.geniusAccessToken !== "••••••••"
+          ? body.geniusAccessToken
+          : current.geniusAccessToken,
+    });
+    const result = await probeGenius();
+    if (!result.ok) {
+      return json(
+        { ok: false, error: result.error || "Genius test failed", result },
+        { status: 400 },
+      );
+    }
+    return json({ ok: true, result });
   }
 
   if (body.testDiscord) {
@@ -366,6 +401,15 @@ export async function POST(req: Request) {
       body.spotifyClientSecret && body.spotifyClientSecret !== "••••••••"
         ? body.spotifyClientSecret
         : current.spotifyClientSecret,
+    geniusClientId: body.geniusClientId ?? current.geniusClientId,
+    geniusClientSecret:
+      body.geniusClientSecret && body.geniusClientSecret !== "••••••••"
+        ? body.geniusClientSecret
+        : current.geniusClientSecret,
+    geniusAccessToken:
+      body.geniusAccessToken && body.geniusAccessToken !== "••••••••"
+        ? body.geniusAccessToken
+        : current.geniusAccessToken,
     discordClientId:
       body.discordClientId !== undefined
         ? body.discordClientId && body.discordClientId !== "••••••••"

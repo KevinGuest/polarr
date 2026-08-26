@@ -15,7 +15,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   if (!playlistId) return json({ error: "Missing playlist" }, { status: 400 });
 
   const playlist =
-    getUserPlaylist(user.id, playlistId) ?? getPlaylistById(playlistId);
+    getUserPlaylist(user.id, playlistId) ?? getPlaylistById(playlistId, user.id);
   if (!playlist) return json({ error: "Playlist not found" }, { status: 404 });
 
   const url = new URL(_req.url);

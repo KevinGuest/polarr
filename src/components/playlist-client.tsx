@@ -8,7 +8,6 @@ import {
   Camera,
   ChevronLeft,
   Clock,
-  Copy,
   Ellipsis,
   ListFilter,
   Music2,
@@ -18,12 +17,14 @@ import {
   Plus,
   Search,
   Shuffle,
-  Trash2,
 } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CoverArt } from "@/components/cover-art";
 import { MobileSaveButton } from "@/components/saved-in-drawer";
 import { NowPlayingBars } from "@/components/now-playing-bars";
+import { PlaylistActionsDrawer } from "@/components/playlist-actions-drawer";
+import { PlaylistEditDrawer } from "@/components/playlist-edit-drawer";
+import { PlaylistNameDetailsDrawer } from "@/components/playlist-name-details-drawer";
 import { PolarrAvailabilityBadge } from "@/components/stream-quality-badge";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { TrackActionsDrawer } from "@/components/track-actions-drawer";
@@ -31,14 +32,12 @@ import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
 import { TrackRowIndex } from "@/components/track-row-index";
 import { UserAvatar } from "@/components/user-avatar";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -46,8 +45,6 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
@@ -68,8 +65,6 @@ import {
 } from "@/lib/utils";
 import { toastError, toastSuccess } from "@/lib/toast";
 
-const PLAYLIST_DESCRIPTION_MAX = 1000;
-
 type PlaylistMeta = {
   id: string;
   name: string;
@@ -78,6 +73,7 @@ type PlaylistMeta = {
   ownerAvatarUrl?: string | null;
   trackCount: number;
   coverUrl: string | null;
+  isPrivate?: boolean;
 };
 
 type PlaylistTrack = {
@@ -148,19 +144,41 @@ function formatDateAdded(iso: string | undefined): string {
   });
 }
 
+function playlistTrackOnPolarr(t: {
+  path?: string | null;
+  source?: string | null;
+}): boolean {
+  const p = (t.path || "").trim();
+  if (!p) return false;
+  if (t.source === "stream") return false;
+  if (
+    p.startsWith("stream:") ||
+    p.startsWith("stream://") ||
+    p.startsWith("live://")
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function toPlayerTrack(
   t: PlaylistTrack,
-  playlistName: string,
+  _playlistName: string,
   playlistCover: string | null,
 ): PlayerTrack {
+  const onPolarr = playlistTrackOnPolarr(t);
+  const id = t.localTrackId || t.id;
   return {
-    id: t.localTrackId || t.id,
+    id,
     title: t.title,
     artist: t.artist,
     resolveArtist: t.artist,
-    album: t.album || playlistName,
+    // Keep the real album for library match — never the playlist name.
+    album: t.album || "",
     coverPath: t.coverPath || playlistCover,
     explicit: t.explicit ?? titleLooksExplicit(t.title),
+    duration: t.duration || undefined,
+    quality: onPolarr ? "local" : "youtube",
   };
 }
 
@@ -350,153 +368,6 @@ function AddTracksDialog({
   );
 }
 
-function EditDetailsDialog({
-  open,
-  onOpenChange,
-  playlist,
-  coverImage,
-  coverBusy,
-  onPickCover,
-  onSaved,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  playlist: PlaylistMeta;
-  coverImage?: string;
-  coverBusy: boolean;
-  onPickCover: () => void;
-  onSaved: (next: { name: string; description: string }) => void;
-}) {
-  const [name, setName] = useState(playlist.name);
-  const [description, setDescription] = useState(playlist.description || "");
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setName(playlist.name);
-    setDescription(playlist.description || "");
-  }, [open, playlist.id, playlist.name, playlist.description]);
-
-  async function save() {
-    const nextName = name.trim();
-    if (!nextName) {
-      toastError("Give this playlist a name");
-      return;
-    }
-    const nextDescription = description.trim().slice(0, PLAYLIST_DESCRIPTION_MAX);
-    setSaving(true);
-    try {
-      const res = await fetch("/api/playlists", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({
-          playlistId: playlist.id,
-          name: nextName,
-          description: nextDescription,
-        }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.playlist) {
-        toastError(data?.error || "Couldn’t save playlist details");
-        return;
-      }
-      onSaved({
-        name: data.playlist.name,
-        description: String(data.playlist.description || ""),
-      });
-      onOpenChange(false);
-      emitLibraryChanged();
-    } catch {
-      toastError("Couldn’t save playlist details");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl gap-5 p-6">
-        <DialogHeader>
-          <DialogTitle>Edit details</DialogTitle>
-          <DialogDescription className="sr-only">
-            Update this playlist’s name, description, and cover image.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-          <button
-            type="button"
-            onClick={() => onPickCover()}
-            disabled={coverBusy || saving}
-            aria-label="Change playlist cover"
-            className="group relative size-44 shrink-0 overflow-hidden rounded-lg shadow-lg sm:size-48"
-          >
-            {coverImage ? (
-              <CoverArt
-                seed={playlist.id || playlist.name}
-                image={coverImage}
-                className="size-full"
-              />
-            ) : (
-              <div
-                className="flex size-full items-center justify-center bg-[#282828] text-[#7f7f7f]"
-                aria-hidden
-              >
-                <Music2 className="size-16" strokeWidth={1.25} />
-              </div>
-            )}
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/55 opacity-0 transition-opacity group-hover:opacity-100">
-              <Camera className="size-8 text-white" strokeWidth={1.5} />
-              <span className="text-sm font-medium text-white">
-                Choose photo
-              </span>
-            </div>
-          </button>
-          <div className="flex min-w-0 flex-1 flex-col gap-3">
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void save();
-                }
-              }}
-              maxLength={80}
-              placeholder="Add a name"
-              aria-label="Playlist name"
-              autoFocus
-              className="h-11 border-transparent bg-muted/70"
-            />
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              maxLength={PLAYLIST_DESCRIPTION_MAX}
-              placeholder="Add an optional description"
-              aria-label="Playlist description"
-              rows={6}
-              className="min-h-[8.5rem] w-full resize-none rounded-md border border-transparent bg-muted/70 px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          </div>
-        </div>
-        <DialogFooter className="flex-col items-end gap-2 sm:flex-col sm:items-end sm:justify-end">
-          <Button
-            type="button"
-            disabled={saving || coverBusy || !name.trim()}
-            onClick={() => void save()}
-            className="rounded-full px-8"
-          >
-            {saving ? "Saving…" : "Save"}
-          </Button>
-          <p className="max-w-sm text-right text-xs text-muted-foreground">
-            You should own the image you upload.
-          </p>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export function PlaylistClient({ playlistId }: { playlistId: string }) {
   const { play, toggle, track, queue: playerQueue, playing, shuffle, toggleShuffle } =
     usePlayer();
@@ -511,6 +382,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
   const [coverBusy, setCoverBusy] = useState(false);
   const [localCover, setLocalCover] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -797,19 +669,6 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
     }
   }
 
-  async function copyPlaylistLink() {
-    const url =
-      typeof window !== "undefined"
-        ? `${window.location.origin}/playlist/${encodeURIComponent(playlistId)}`
-        : `/playlist/${encodeURIComponent(playlistId)}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      toastSuccess("Link copied");
-    } catch {
-      toastError("Couldn’t copy link");
-    }
-  }
-
   async function deleteThisPlaylist() {
     if (!playlist) return;
     setDeleteBusy(true);
@@ -1049,13 +908,21 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => openDetails()}
+                  onClick={() => setEditOpen(true)}
                   className={pillClass}
                 >
                   <ListFilter className="size-4" />
                   Edit
                 </button>
                 <SortPill />
+                <button
+                  type="button"
+                  onClick={() => openDetails()}
+                  className={pillClass}
+                >
+                  <Pencil className="size-4" />
+                  Name & details
+                </button>
               </>
             ) : null}
             <div className="min-w-0 flex-1" />
@@ -1143,58 +1010,25 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
           >
             <Shuffle className="size-6" />
           </button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="rounded-full p-2 text-muted-foreground hover:text-foreground"
-                aria-label="More options"
-              >
-                <Ellipsis className="size-6" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-48">
-              {canEdit ? (
-                <>
-                  <DropdownMenuItem
-                    className="gap-2"
-                    onSelect={() => setAddOpen(true)}
-                  >
-                    <Plus className="size-4" />
-                    Add songs
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="gap-2"
-                    onSelect={() => openDetails()}
-                  >
-                    <Pencil className="size-4" />
-                    Edit details
-                  </DropdownMenuItem>
-                </>
-              ) : null}
-              <DropdownMenuItem
-                className="gap-2"
-                onSelect={() => void copyPlaylistLink()}
-              >
-                <Copy className="size-4" />
-                Copy link
-              </DropdownMenuItem>
-              {canEdit ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
-                    onSelect={() => {
-                      setTimeout(() => setDeleteOpen(true), 0);
-                    }}
-                  >
-                    <Trash2 className="size-4" />
-                    Delete
-                  </DropdownMenuItem>
-                </>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <PlaylistActionsDrawer
+            playlistId={playlistId}
+            title={displayTitle}
+            subtitle={metaLine || undefined}
+            coverUrl={coverImage}
+            canEdit={canEdit}
+            onAddSongs={() => setAddOpen(true)}
+            onEditPlaylist={() => setEditOpen(true)}
+            onEditDetails={() => openDetails()}
+            onDelete={() => setDeleteOpen(true)}
+          >
+            <button
+              type="button"
+              className="rounded-full p-2 text-muted-foreground hover:text-foreground"
+              aria-label="More options"
+            >
+              <Ellipsis className="size-6" />
+            </button>
+          </PlaylistActionsDrawer>
           <div className="min-w-0 flex-1" />
           <button
             type="button"
@@ -1224,13 +1058,21 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
             </button>
             <button
               type="button"
-              onClick={() => openDetails()}
+              onClick={() => setEditOpen(true)}
               className={pillClass}
             >
               <ListFilter className="size-4" />
               Edit
             </button>
             <SortPill />
+            <button
+              type="button"
+              onClick={() => openDetails()}
+              className={pillClass}
+            >
+              <Pencil className="size-4" />
+              Name & details
+            </button>
           </div>
         ) : null}
 
@@ -1306,27 +1148,31 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                             </span>
                           </div>
                           <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
-                            <PolarrAvailabilityBadge available={Boolean(t.path)} />
                             {explicit ? <ExplicitBadge /> : null}
-                            <span className="truncate">{t.artist}</span>
+                            <span className="min-w-0 truncate">{t.artist}</span>
                           </div>
                         </div>
                       </button>
-                      <MobileSaveButton
-                        trackId={trackId}
-                        artist={t.artist}
-                        title={t.title}
-                        album={t.album}
-                        coverPath={t.coverPath}
-                        duration={t.duration}
-                        onPolarr={Boolean(t.path)}
-                        alreadyInLibrary={Boolean(t.path)}
-                        size="sm"
-                      />
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <PolarrAvailabilityBadge
+                          available={playlistTrackOnPolarr(t)}
+                        />
+                        <MobileSaveButton
+                          trackId={trackId}
+                          artist={t.artist}
+                          title={t.title}
+                          album={t.album}
+                          coverPath={t.coverPath}
+                          duration={t.duration}
+                          onPolarr={playlistTrackOnPolarr(t)}
+                          alreadyInLibrary={playlistTrackOnPolarr(t)}
+                          size="sm"
+                        />
+                      </div>
                       <TrackActionsDrawer
                         track={playerTrack}
-                        onPolarr={Boolean(t.path)}
-                        inLibrary={Boolean(t.path)}
+                        onPolarr={playlistTrackOnPolarr(t)}
+                        inLibrary={playlistTrackOnPolarr(t)}
                         playlistId={canEdit ? playlistId : undefined}
                         onRemovedFromPlaylist={
                           canEdit
@@ -1466,58 +1312,25 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
           >
             <Shuffle className="size-5" />
           </button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex size-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
-                aria-label="More options"
-              >
-                <Ellipsis className="size-6" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-48">
-              {canEdit ? (
-                <>
-                  <DropdownMenuItem
-                    className="gap-2"
-                    onSelect={() => setAddOpen(true)}
-                  >
-                    <Plus className="size-4" />
-                    Add songs
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="gap-2"
-                    onSelect={() => openDetails()}
-                  >
-                    <Pencil className="size-4" />
-                    Name & details
-                  </DropdownMenuItem>
-                </>
-              ) : null}
-              <DropdownMenuItem
-                className="gap-2"
-                onSelect={() => void copyPlaylistLink()}
-              >
-                <Copy className="size-4" />
-                Copy link
-              </DropdownMenuItem>
-              {canEdit ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
-                    onSelect={() => {
-                      setTimeout(() => setDeleteOpen(true), 0);
-                    }}
-                  >
-                    <Trash2 className="size-4" />
-                    Delete
-                  </DropdownMenuItem>
-                </>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <PlaylistActionsDrawer
+            playlistId={playlistId}
+            title={displayTitle}
+            subtitle={metaLine || undefined}
+            coverUrl={coverImage}
+            canEdit={canEdit}
+            onAddSongs={() => setAddOpen(true)}
+            onEditPlaylist={() => setEditOpen(true)}
+            onEditDetails={() => openDetails()}
+            onDelete={() => setDeleteOpen(true)}
+          >
+            <button
+              type="button"
+              className="flex size-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+              aria-label="More options"
+            >
+              <Ellipsis className="size-6" />
+            </button>
+          </PlaylistActionsDrawer>
         </div>
 
         {canEdit ? (
@@ -1532,13 +1345,21 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
           </button>
           <button
             type="button"
-            onClick={() => openDetails()}
+            onClick={() => setEditOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
           >
             <ListFilter className="size-4" />
             Edit
           </button>
           <SortPill />
+          <button
+            type="button"
+            onClick={() => openDetails()}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+          >
+            <Pencil className="size-4" />
+            Name & details
+          </button>
         </div>
         ) : null}
       </section>
@@ -1642,11 +1463,8 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                               {t.title}
                             </div>
                             <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
-                              <PolarrAvailabilityBadge
-                                available={Boolean(t.path)}
-                              />
                               {explicit ? <ExplicitBadge /> : null}
-                              <span className="truncate">{t.artist}</span>
+                              <span className="min-w-0 truncate">{t.artist}</span>
                             </div>
                           </div>
                         </div>
@@ -1690,8 +1508,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                           album={t.album}
                           coverPath={t.coverPath}
                           duration={t.duration}
-                          onPolarr={Boolean(t.path)}
-                          showPolarrBadge={false}
+                          onPolarr={playlistTrackOnPolarr(t)}
                         />
                       </td>
                       <td
@@ -1709,7 +1526,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                     <TrackContextMenu
                       key={trackId}
                       track={playerTrack}
-                      inLibrary={Boolean(t.path)}
+                      inLibrary={playlistTrackOnPolarr(t)}
                       playlistId={canEdit ? playlistId : undefined}
                       onRemovedFromPlaylist={
                         canEdit
@@ -1737,17 +1554,45 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
         existingIds={existingIds}
         onAdded={() => void load()}
       />
+      <PlaylistEditDrawer
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        playlistId={playlistId}
+        tracks={tracks.map((t) => ({
+          id: t.localTrackId || t.id,
+          title: t.title,
+          artist: t.artist,
+          coverPath: t.coverPath,
+        }))}
+        onSaved={(next) => {
+          setTracks((prev) => {
+            const byId = new Map(
+              prev.map((t) => [t.localTrackId || t.id, t] as const),
+            );
+            return next
+              .map((n) => byId.get(n.id))
+              .filter((t): t is PlaylistTrack => Boolean(t));
+          });
+          setPlaylist((p) =>
+            p ? { ...p, trackCount: next.length } : p,
+          );
+          setSortMode("custom");
+        }}
+      />
       {playlist ? (
-        <EditDetailsDialog
+        <PlaylistNameDetailsDrawer
           open={detailsOpen}
           onOpenChange={setDetailsOpen}
           playlist={playlist}
           coverImage={coverImage}
           coverBusy={coverBusy}
           onPickCover={() => fileRef.current?.click()}
-          onSaved={({ name, description }) => {
-            setPlaylist((p) => (p ? { ...p, name, description } : p));
+          onSaved={({ name, description, isPrivate }) => {
+            setPlaylist((p) =>
+              p ? { ...p, name, description, isPrivate } : p,
+            );
           }}
+          onDelete={() => setDeleteOpen(true)}
         />
       ) : null}
       {playlist ? (

@@ -7,7 +7,7 @@ import {
   streamPolicy,
 } from "@/lib/bans";
 import { createLiveSession } from "@/lib/live-stream";
-import { findTrack, getSettings, type TrackRow } from "@/lib/db";
+import { findTrack, getSettings, getTrack, type TrackRow } from "@/lib/db";
 import { kickSaveOnPlay } from "@/lib/fallback-download";
 import { lidarrHasTrackFile } from "@/lib/lidarr";
 import { primaryArtistName } from "@/lib/track-match";
@@ -19,6 +19,10 @@ export const dynamic = "force-dynamic";
 /** DB hit is only usable if the audio file is still on disk. */
 function libraryFilePlayable(track: TrackRow): boolean {
   if (!track.path || track.path.startsWith("stream:")) return false;
+  if (track.source === "stream") return false;
+  if (track.path.startsWith("stream://") || track.path.startsWith("live://")) {
+    return false;
+  }
   try {
     const st = fs.statSync(track.path);
     return st.isFile() && st.size > 0;
@@ -27,9 +31,28 @@ function libraryFilePlayable(track: TrackRow): boolean {
   }
 }
 
+function resolveLibraryTrack(input: {
+  trackId?: string;
+  artist: string;
+  title: string;
+}): TrackRow | null {
+  const trackId = (input.trackId || "").trim();
+  if (trackId) {
+    const byId = getTrack(trackId);
+    if (byId && libraryFilePlayable(byId)) return byId;
+    if (byId) {
+      const promoted = findTrack(byId.artist, byId.title);
+      if (promoted && libraryFilePlayable(promoted)) return promoted;
+    }
+  }
+  const hit = findTrack(input.artist, input.title);
+  if (hit && libraryFilePlayable(hit)) return hit;
+  return null;
+}
+
 /**
  * Prefer local library; otherwise resolve a live remote stream (no download).
- * Body: { artist, title, album? }
+ * Body: { artist, title, album?, trackId? }
  */
 export async function POST(req: Request) {
   const user = getAuthUserFromRequest(req);
@@ -44,6 +67,7 @@ export async function POST(req: Request) {
     artist?: string;
     title?: string;
     album?: string;
+    trackId?: string;
     duration?: number | null;
     expectedDurationSec?: number | null;
   } | null;
@@ -51,6 +75,7 @@ export async function POST(req: Request) {
   let artist = body?.artist?.trim() || "";
   let title = body?.title?.trim() || "";
   let album = body?.album?.trim() || "";
+  const trackId = body?.trackId?.trim() || "";
   const durationRaw = body?.expectedDurationSec ?? body?.duration;
   const expectedDurationSec =
     typeof durationRaw === "number" &&
@@ -67,13 +92,11 @@ export async function POST(req: Request) {
     return json({ error: "artist and title required" }, { status: 400 });
   }
 
-  // Live / library match on primary credit (drop feat. noise)
-  if (!policy.forceRickroll) {
-    artist = primaryArtistName(artist) || artist;
-  }
-
-  const local = findTrack(artist, title);
-  // Stale index (file deleted / path moved) → fall through to YouTube live.
+  // Keep full credit for library match — findTrack already tries primary artist.
+  // Only strip for the YouTube live query below.
+  const local = policy.forceRickroll
+    ? null
+    : resolveLibraryTrack({ trackId, artist, title });
   if (local && libraryFilePlayable(local)) {
     if (
       policy.forceRickroll &&
@@ -96,6 +119,10 @@ export async function POST(req: Request) {
     }
   }
 
+  const liveArtist = policy.forceRickroll
+    ? artist
+    : primaryArtistName(artist) || artist;
+
   if (!(await ytDlpAvailable())) {
     const { notifyDiscordStreamError } = await import("@/lib/admin-notify");
     notifyDiscordStreamError({
@@ -114,7 +141,7 @@ export async function POST(req: Request) {
   }
 
   const session = await createLiveSession({
-    artist,
+    artist: liveArtist,
     title,
     album: album || title,
     expectedDurationSec,
@@ -145,7 +172,7 @@ export async function POST(req: Request) {
     const dl = downloadPolicy(user.id);
     const settings = getSettings();
     if (dl.ok && settings.saveOnPlay) {
-      const alreadyLocal = findTrack(artist, title);
+      const alreadyLocal = resolveLibraryTrack({ trackId, artist, title });
       const localOk = alreadyLocal && libraryFilePlayable(alreadyLocal);
       const alreadyLidarr =
         !localOk && (await lidarrHasTrackFile(artist, title));

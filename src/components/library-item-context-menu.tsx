@@ -11,7 +11,6 @@ import {
   Check,
   CirclePlus,
   Copy,
-  Download,
   Folder,
   FolderInput,
   Link2,
@@ -309,53 +308,6 @@ export function LibraryItemContextMenu({
     }
   }
 
-  async function downloadAll() {
-    try {
-      const tracks = await resolveTracks();
-      const local = tracks.filter((t) => t.id && !t.id.startsWith("stream:"));
-      if (!local.length) {
-        if (item.kind === "album") {
-          const res = await fetch("/api/requests", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              title: item.title,
-              artist: item.artist,
-              album: item.title,
-              type: "album",
-              prefer: "fallback",
-            }),
-          });
-          const data = await res.json().catch(() => null);
-          if (!res.ok) {
-            toastError(data?.error || "Download failed");
-            return;
-          }
-          toastSuccess("Download started — check Requests");
-          return;
-        }
-        toastInfo("No songs to download");
-        return;
-      }
-      let ok = 0;
-      for (const t of local) {
-        const res = await fetch(`/api/tracks/${encodeURIComponent(t.id)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ deviceId: "web" }),
-        });
-        if (res.ok) ok += 1;
-      }
-      toastSuccess(
-        ok
-          ? `Marked ${ok} song${ok === 1 ? "" : "s"} for offline`
-          : "Couldn’t mark for download",
-      );
-    } catch {
-      toastError("Download failed");
-    }
-  }
-
   async function deleteThisPlaylist() {
     if (item.kind !== "playlist" || !item.playlistId) return;
     setConfirmBusy(true);
@@ -593,13 +545,6 @@ export function LibraryItemContextMenu({
               ))}
             </ContextMenuSubContent>
           </ContextMenuSub>
-        ) : null}
-
-        {item.kind !== "folder" ? (
-          <ContextMenuItem onSelect={() => void downloadAll()}>
-            <Download className="size-4 shrink-0 text-muted-foreground" />
-            Download
-          </ContextMenuItem>
         ) : null}
 
         <ContextMenuSub>

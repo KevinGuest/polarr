@@ -2,7 +2,12 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  serverExternalPackages: ["better-sqlite3", "demucs", "onnxruntime-node"],
+  serverExternalPackages: [
+    "better-sqlite3",
+    "demucs",
+    "onnxruntime-node",
+    "onnxruntime-common",
+  ],
 };
 
 export default nextConfig;

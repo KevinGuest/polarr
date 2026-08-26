@@ -79,6 +79,10 @@ export type Settings = {
   /** Spotify app credentials for public playlist import (Client Credentials). */
   spotifyClientId: string;
   spotifyClientSecret: string;
+  /** Genius API client (search) + access token for duet lyric structure. */
+  geniusClientId: string;
+  geniusClientSecret: string;
+  geniusAccessToken: string;
   /** Discord OAuth app (user linking + Rich Presence client id). */
   discordClientId: string;
   discordClientSecret: string;
@@ -874,6 +878,12 @@ function migrate(database: Database.Database) {
     "description",
     "description TEXT NOT NULL DEFAULT ''",
   );
+  ensureColumn(
+    database,
+    "playlists",
+    "is_private",
+    "is_private INTEGER NOT NULL DEFAULT 0",
+  );
 
   // Bans table for existing installs (also in main CREATE for new DBs)
   database.exec(`
@@ -941,6 +951,12 @@ function migrate(database: Database.Database) {
     "lyrics_cache",
     "aligned_fingerprint",
     "aligned_fingerprint TEXT",
+  );
+  ensureColumn(
+    database,
+    "lyrics_cache",
+    "genius_json",
+    "genius_json TEXT",
   );
 
   // v3: likes may reference streamed tracks (no library file / no track FK)
@@ -1082,6 +1098,18 @@ export function getSettings(): Settings {
       getSetting("spotifyClientSecret", "") ||
       process.env.POLARR_SPOTIFY_CLIENT_SECRET ||
       "",
+    geniusClientId:
+      getSetting("geniusClientId", "") ||
+      process.env.POLARR_GENIUS_CLIENT_ID ||
+      "",
+    geniusClientSecret:
+      getSetting("geniusClientSecret", "") ||
+      process.env.POLARR_GENIUS_CLIENT_SECRET ||
+      "",
+    geniusAccessToken:
+      getSetting("geniusAccessToken", "") ||
+      process.env.POLARR_GENIUS_ACCESS_TOKEN ||
+      "",
     discordClientId:
       getSetting("discordClientId", "") ||
       process.env.POLARR_DISCORD_CLIENT_ID ||
@@ -1129,6 +1157,9 @@ export function updateSettings(partial: Partial<Settings>): Settings {
   );
   setSetting("spotifyClientId", next.spotifyClientId);
   setSetting("spotifyClientSecret", next.spotifyClientSecret);
+  setSetting("geniusClientId", next.geniusClientId);
+  setSetting("geniusClientSecret", next.geniusClientSecret);
+  setSetting("geniusAccessToken", next.geniusAccessToken);
   setSetting("discordClientId", next.discordClientId);
   setSetting("discordClientSecret", next.discordClientSecret);
   setSetting("saveOnPlay", String(next.saveOnPlay));
@@ -1139,6 +1170,12 @@ export function updateSettings(partial: Partial<Settings>): Settings {
 export function smtpConfigured(settings?: Settings): boolean {
   const s = settings ?? getSettings();
   return Boolean(s.smtpHost.trim() && s.smtpFrom.trim() && s.smtpPort > 0);
+}
+
+/** Genius search works with access token (preferred) or public site search. */
+export function geniusConfigured(settings?: Settings): boolean {
+  const s = settings ?? getSettings();
+  return Boolean(s.geniusAccessToken.trim());
 }
 
 export function getEmailTemplates(): EmailTemplatesMap {
@@ -2382,6 +2419,8 @@ export type LyricsCacheRow = {
   fetchedAt: string;
   alignedJson: string | null;
   alignedFingerprint: string | null;
+  /** Genius section structure JSON for duet sides (optional). */
+  geniusJson: string | null;
 };
 
 export function getLyricsCache(cacheKey: string): LyricsCacheRow | null {
@@ -2393,7 +2432,8 @@ export function getLyricsCache(cacheKey: string): LyricsCacheRow | null {
               coalesce(offset_user_set, 0) as offsetUserSet,
               fetched_at as fetchedAt,
               aligned_json as alignedJson,
-              aligned_fingerprint as alignedFingerprint
+              aligned_fingerprint as alignedFingerprint,
+              genius_json as geniusJson
        FROM lyrics_cache WHERE cache_key = ?`,
     )
     .get(cacheKey) as
@@ -2407,6 +2447,7 @@ export function getLyricsCache(cacheKey: string): LyricsCacheRow | null {
     offsetUserSet: Boolean(row.offsetUserSet),
     alignedJson: row.alignedJson ?? null,
     alignedFingerprint: row.alignedFingerprint ?? null,
+    geniusJson: row.geniusJson ?? null,
   };
 }
 
@@ -2423,13 +2464,17 @@ export function setLyricsCache(input: {
   externalId: string | null;
   sourceDurationSec: number | null;
   linesJson: string;
+  geniusJson?: string | null;
 }): void {
+  const geniusJson =
+    input.geniusJson === undefined ? undefined : input.geniusJson;
   getDb()
     .prepare(
       `INSERT INTO lyrics_cache(
          cache_key, artist, title, quality, source, external_id,
-         source_duration_sec, lines_json, offset_sec, offset_user_set, fetched_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+         source_duration_sec, lines_json, offset_sec, offset_user_set, fetched_at,
+         genius_json
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
        ON CONFLICT(cache_key) DO UPDATE SET
          quality = excluded.quality,
          source = excluded.source,
@@ -2438,7 +2483,11 @@ export function setLyricsCache(input: {
          lines_json = excluded.lines_json,
          fetched_at = excluded.fetched_at,
          aligned_json = NULL,
-         aligned_fingerprint = NULL`,
+         aligned_fingerprint = NULL,
+         genius_json = CASE
+           WHEN excluded.genius_json IS NOT NULL THEN excluded.genius_json
+           ELSE lyrics_cache.genius_json
+         END`,
     )
     .run(
       input.cacheKey,
@@ -2450,7 +2499,17 @@ export function setLyricsCache(input: {
       input.sourceDurationSec,
       input.linesJson,
       nowIso(),
+      geniusJson ?? null,
     );
+}
+
+export function setLyricsCacheGenius(
+  cacheKey: string,
+  geniusJson: string | null,
+): void {
+  getDb()
+    .prepare(`UPDATE lyrics_cache SET genius_json = ? WHERE cache_key = ?`)
+    .run(geniusJson, cacheKey);
 }
 
 export function setLyricsCacheOffset(
@@ -2868,6 +2927,51 @@ export function topArtistsFromUserLibrary(
       (a, b) => b.tracks - a.tracks || a.artist.localeCompare(b.artist),
     )
     .slice(0, limit);
+}
+
+/**
+ * Albums/tracks this user saved into their library (pins + likes) — not the
+ * shared scanned catalog size.
+ */
+export function userPersonalLibraryStats(userId: string): {
+  albums: number;
+  tracks: number;
+} {
+  if (!userId) return { albums: 0, tracks: 0 };
+
+  const wanted: { artist: string; album: string }[] = [];
+  for (const pin of listLibraryPins(userId)) {
+    const parsed = parseLibraryAlbumPinKey(pin.itemKey);
+    if (parsed) wanted.push(parsed);
+  }
+  const albums = wanted.length;
+
+  const trackIds = new Set<string>();
+  const likedIds = getDb()
+    .prepare(`SELECT track_id as id FROM track_likes WHERE user_id = ?`)
+    .all(userId) as { id: string }[];
+  for (const row of likedIds) {
+    if (row.id) trackIds.add(row.id);
+  }
+
+  if (wanted.length > 0) {
+    const clause = wanted
+      .map(() => `(lower(artist) = ? AND lower(album) = ?)`)
+      .join(" OR ");
+    const albumTracks = getDb()
+      .prepare(
+        `SELECT id FROM tracks
+         WHERE album IS NOT NULL AND trim(album) != ''
+           AND ${LIBRARY_TRACK_FILTER}
+           AND (${clause})`,
+      )
+      .all(...wanted.flatMap((w) => [w.artist, w.album])) as { id: string }[];
+    for (const row of albumTracks) {
+      if (row.id) trackIds.add(row.id);
+    }
+  }
+
+  return { albums, tracks: trackIds.size };
 }
 
 /**
@@ -4332,6 +4436,7 @@ const PLAYLIST_SELECT = `SELECT p.id, p.user_id as userId, p.name,
         p.description as description,
         p.created_at as createdAt, p.updated_at as updatedAt,
         p.cover_path as coverPath, p.folder_id as folderId,
+        COALESCE(p.is_private, 0) as isPrivate,
         (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlist_id = p.id) as trackCount
  FROM playlists p`;
 
@@ -4348,6 +4453,7 @@ export type PlaylistRow = {
   coverPath: string | null;
   folderId: string | null;
   coverUrl: string | null;
+  isPrivate: boolean;
 };
 
 export type PlaylistDetail = PlaylistRow & {
@@ -4389,6 +4495,7 @@ function mapPlaylistRow(row: Record<string, unknown>): PlaylistRow {
     coverPath,
     folderId: (row.folderId as string | null) || null,
     coverUrl: playlistCoverPublicUrl(id, coverPath, updatedAt),
+    isPrivate: Number(row.isPrivate) === 1,
   };
 }
 
@@ -4518,8 +4625,11 @@ export function getUserPlaylist(
   };
 }
 
-/** Any homeserver member can view a playlist by id (profiles / shared library). */
-export function getPlaylistById(playlistId: string): PlaylistDetail | null {
+/** Homeserver members can view public playlists; private ones are owner-only. */
+export function getPlaylistById(
+  playlistId: string,
+  viewerUserId?: string | null,
+): PlaylistDetail | null {
   const id = normalizePlaylistId(playlistId);
   if (!id) return null;
   const row = getDb()
@@ -4527,12 +4637,65 @@ export function getPlaylistById(playlistId: string): PlaylistDetail | null {
     .get(id) as Record<string, unknown> | undefined;
   if (!row) return null;
   const mapped = mapPlaylistRow(row);
+  if (mapped.isPrivate && viewerUserId != null && mapped.userId !== viewerUserId) {
+    return null;
+  }
   const profile = getPublicProfileById(mapped.userId);
   return {
     ...mapped,
     ownerUsername: profile?.username || "Unknown",
     ownerAvatarUrl: profile?.avatarUrl || null,
   };
+}
+
+/**
+ * If a playlist still points at a stream stub, retarget it to the on-disk
+ * library/Lidarr row when one exists (import → later download).
+ */
+function resolvePlaylistTrackRow(
+  playlistId: string,
+  track: TrackRow,
+): TrackRow {
+  const preferred = preferLibraryTrack(track);
+  if (preferred.id === track.id) return preferred;
+
+  try {
+    const db = getDb();
+    const already = db
+      .prepare(
+        `SELECT 1 as ok FROM playlist_tracks
+         WHERE playlist_id = ? AND track_id = ?`,
+      )
+      .get(playlistId, preferred.id) as { ok: number } | undefined;
+    if (already) {
+      db.prepare(
+        `DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?`,
+      ).run(playlistId, track.id);
+    } else {
+      db.prepare(
+        `UPDATE playlist_tracks SET track_id = ?
+         WHERE playlist_id = ? AND track_id = ?`,
+      ).run(preferred.id, playlistId, track.id);
+    }
+  } catch {
+    /* best-effort heal */
+  }
+  return preferred;
+}
+
+function mapPlaylistTrackRows(
+  playlistId: string,
+  rows: Record<string, unknown>[],
+): TrackRow[] {
+  const out: TrackRow[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const resolved = resolvePlaylistTrackRow(playlistId, mapTrack(row));
+    if (seen.has(resolved.id)) continue;
+    seen.add(resolved.id);
+    out.push(resolved);
+  }
+  return out;
 }
 
 /** Tracks on a playlist (no ownership check — homeserver read). */
@@ -4543,22 +4706,21 @@ export function listPlaylistTracksById(playlistId: string): TrackRow[] {
     .prepare(`SELECT id FROM playlists WHERE id = ?`)
     .get(id) as { id: string } | undefined;
   if (!pl) return [];
-  return (
-    getDb()
-      .prepare(
-        `SELECT tracks.id, tracks.title, tracks.artist, tracks.album, tracks.duration,
-                tracks.path, tracks.cover_path as coverPath, tracks.source,
-                tracks.external_id as externalId, tracks.file_size as fileSize,
-                tracks.mtime_ms as mtimeMs, pt.added_at as addedAt,
-                tracks.updated_at as updatedAt
-         FROM playlist_tracks pt
-         INNER JOIN tracks ON tracks.id = pt.track_id
-         WHERE pt.playlist_id = ?
-           AND ${notArtworkTrackSql("tracks.")}
-         ORDER BY pt.position ASC`,
-      )
-      .all(id) as Record<string, unknown>[]
-  ).map(mapTrack);
+  const rows = getDb()
+    .prepare(
+      `SELECT tracks.id, tracks.title, tracks.artist, tracks.album, tracks.duration,
+              tracks.path, tracks.cover_path as coverPath, tracks.source,
+              tracks.external_id as externalId, tracks.file_size as fileSize,
+              tracks.mtime_ms as mtimeMs, pt.added_at as addedAt,
+              tracks.updated_at as updatedAt
+       FROM playlist_tracks pt
+       INNER JOIN tracks ON tracks.id = pt.track_id
+       WHERE pt.playlist_id = ?
+         AND ${notArtworkTrackSql("tracks.")}
+       ORDER BY pt.position ASC`,
+    )
+    .all(id) as Record<string, unknown>[];
+  return mapPlaylistTrackRows(id, rows);
 }
 
 export function createPlaylist(userId: string, name?: string | null): PlaylistRow {
@@ -4583,13 +4745,18 @@ export function createPlaylist(userId: string, name?: string | null): PlaylistRo
     coverPath: null,
     folderId: null,
     coverUrl: null,
+    isPrivate: false,
   };
 }
 
 export function updatePlaylistDetails(
   userId: string,
   playlistId: string,
-  patch: { name?: string; description?: string | null },
+  patch: {
+    name?: string;
+    description?: string | null;
+    isPrivate?: boolean;
+  },
 ): PlaylistRow | null {
   const existing = getUserPlaylist(userId, playlistId);
   if (!existing) return null;
@@ -4608,16 +4775,30 @@ export function updatePlaylistDetails(
       .slice(0, PLAYLIST_DESCRIPTION_MAX);
   }
 
+  let nextPrivate = existing.isPrivate;
+  if (patch.isPrivate !== undefined) {
+    nextPrivate = Boolean(patch.isPrivate);
+  }
+
   const now = nowIso();
   getDb()
     .prepare(
-      `UPDATE playlists SET name = ?, description = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+      `UPDATE playlists SET name = ?, description = ?, is_private = ?, updated_at = ?
+       WHERE id = ? AND user_id = ?`,
     )
-    .run(nextName, nextDescription, now, existing.id, userId);
+    .run(
+      nextName,
+      nextDescription,
+      nextPrivate ? 1 : 0,
+      now,
+      existing.id,
+      userId,
+    );
   return {
     ...existing,
     name: nextName,
     description: nextDescription,
+    isPrivate: nextPrivate,
     updatedAt: now,
   };
 }
@@ -4797,7 +4978,10 @@ export function addTrackToPlaylist(
     .prepare(`SELECT id FROM playlists WHERE id = ? AND user_id = ?`)
     .get(id, userId) as { id: string } | undefined;
   if (!pl) return { ok: false, error: "Playlist not found" };
-  if (!getTrack(trackId)) return { ok: false, error: "Track not found" };
+  let track = getTrack(trackId);
+  if (!track) return { ok: false, error: "Track not found" };
+  // Always store the library file when one exists for this song.
+  track = preferLibraryTrack(track);
   const pos = (
     getDb()
       .prepare(
@@ -4811,7 +4995,7 @@ export function addTrackToPlaylist(
        VALUES (?, ?, ?, ?)
        ON CONFLICT(playlist_id, track_id) DO NOTHING`,
     )
-    .run(id, trackId, pos, nowIso());
+    .run(id, track.id, pos, nowIso());
   getDb()
     .prepare(`UPDATE playlists SET updated_at = ? WHERE id = ?`)
     .run(nowIso(), id);
@@ -4838,6 +5022,59 @@ export function removeTrackFromPlaylist(
       .prepare(`UPDATE playlists SET updated_at = ? WHERE id = ?`)
       .run(nowIso(), id);
   }
+  return { ok: true };
+}
+
+/**
+ * Replace playlist membership + order. Track ids not listed are removed.
+ * Preserves added_at for tracks that remain. Only existing members are kept
+ * (unknown ids ignored).
+ */
+export function setPlaylistTrackOrder(
+  userId: string,
+  playlistId: string,
+  orderedTrackIds: string[],
+): { ok: boolean; error?: string } {
+  const id = normalizePlaylistId(playlistId);
+  const pl = getDb()
+    .prepare(`SELECT id FROM playlists WHERE id = ? AND user_id = ?`)
+    .get(id, userId) as { id: string } | undefined;
+  if (!pl) return { ok: false, error: "Playlist not found" };
+
+  const existing = getDb()
+    .prepare(
+      `SELECT track_id as trackId, added_at as addedAt
+       FROM playlist_tracks WHERE playlist_id = ?`,
+    )
+    .all(id) as { trackId: string; addedAt: string }[];
+  const addedAt = new Map(existing.map((r) => [r.trackId, r.addedAt]));
+  const allowed = new Set(existing.map((r) => r.trackId));
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const raw of orderedTrackIds) {
+    const trackId = String(raw || "").trim();
+    if (!trackId || !allowed.has(trackId) || seen.has(trackId)) continue;
+    seen.add(trackId);
+    ordered.push(trackId);
+  }
+
+  const stamp = nowIso();
+  const tx = getDb().transaction(() => {
+    getDb()
+      .prepare(`DELETE FROM playlist_tracks WHERE playlist_id = ?`)
+      .run(id);
+    const insert = getDb().prepare(
+      `INSERT INTO playlist_tracks(playlist_id, track_id, position, added_at)
+       VALUES (?, ?, ?, ?)`,
+    );
+    ordered.forEach((trackId, position) => {
+      insert.run(id, trackId, position, addedAt.get(trackId) || stamp);
+    });
+    getDb()
+      .prepare(`UPDATE playlists SET updated_at = ? WHERE id = ?`)
+      .run(stamp, id);
+  });
+  tx();
   return { ok: true };
 }
 
@@ -4888,22 +5125,21 @@ export function listPlaylistTracks(
   if (!pl) return [];
   // playlist_tracks.added_at makes unqualified TRACK_SELECT ambiguous.
   // addedAt is when the track was added to this playlist (pt.added_at).
-  return (
-    getDb()
-      .prepare(
-        `SELECT tracks.id, tracks.title, tracks.artist, tracks.album, tracks.duration,
-                tracks.path, tracks.cover_path as coverPath, tracks.source,
-                tracks.external_id as externalId, tracks.file_size as fileSize,
-                tracks.mtime_ms as mtimeMs, pt.added_at as addedAt,
-                tracks.updated_at as updatedAt
-         FROM playlist_tracks pt
-         INNER JOIN tracks ON tracks.id = pt.track_id
-         WHERE pt.playlist_id = ?
-           AND ${notArtworkTrackSql("tracks.")}
-         ORDER BY pt.position ASC`,
-      )
-      .all(id) as Record<string, unknown>[]
-  ).map(mapTrack);
+  const rows = getDb()
+    .prepare(
+      `SELECT tracks.id, tracks.title, tracks.artist, tracks.album, tracks.duration,
+              tracks.path, tracks.cover_path as coverPath, tracks.source,
+              tracks.external_id as externalId, tracks.file_size as fileSize,
+              tracks.mtime_ms as mtimeMs, pt.added_at as addedAt,
+              tracks.updated_at as updatedAt
+       FROM playlist_tracks pt
+       INNER JOIN tracks ON tracks.id = pt.track_id
+       WHERE pt.playlist_id = ?
+         AND ${notArtworkTrackSql("tracks.")}
+       ORDER BY pt.position ASC`,
+    )
+    .all(id) as Record<string, unknown>[];
+  return mapPlaylistTrackRows(id, rows);
 }
 
 export function libraryPlaylistPinKey(playlistId: string): string {
@@ -5174,18 +5410,9 @@ export function getUserActivityStats(userId: string) {
     createdAt: string;
   }[];
 
-  // Shared library album count (shown on public profiles).
-  const albumsListed = (
-    getDb()
-      .prepare(
-        `SELECT COUNT(*) as c FROM (
-           SELECT 1 FROM tracks
-           WHERE album IS NOT NULL AND trim(album) != ''
-           GROUP BY lower(artist), lower(album)
-         )`,
-      )
-      .get() as { c: number }
-  ).c;
+  // Personal library only (saved albums + liked / album tracks) — never the
+  // full shared catalog.
+  const personal = userPersonalLibraryStats(userId);
 
   const listenRow = getDb()
     .prepare(
@@ -5215,8 +5442,8 @@ export function getUserActivityStats(userId: string) {
       completed: Number(downloadRow?.completed) || 0,
       active: Number(downloadRow?.active) || 0,
     },
-    albumsListed,
-    libraryTracks: libraryStats().tracks,
+    albumsListed: personal.albums,
+    libraryTracks: personal.tracks,
     listensMinutes,
     plays,
     recentRequests,
@@ -5505,6 +5732,23 @@ function listeningRowOnDisk(t: TrackRow): boolean {
   if (t.source === "stream") return false;
   const p = (t.path || "").trim();
   return Boolean(p) && !p.startsWith("stream://") && !p.startsWith("live://");
+}
+
+/** True when this row is a real on-disk library/Lidarr file. */
+export function trackHasLibraryFile(t: TrackRow | null | undefined): boolean {
+  if (!t) return false;
+  return listeningRowOnDisk(t);
+}
+
+/**
+ * Prefer an on-disk library/Lidarr copy of the same song when the given row is
+ * a stream stub or a missing path (common after playlist import → later Lidarr).
+ */
+export function preferLibraryTrack(track: TrackRow): TrackRow {
+  if (listeningRowOnDisk(track)) return track;
+  const lib = findTrack(track.artist, track.title);
+  if (lib && listeningRowOnDisk(lib)) return lib;
+  return track;
 }
 
 /** Prefer a library/Lidarr file (and its cover) when the same song has a stream row. */

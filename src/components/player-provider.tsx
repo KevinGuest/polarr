@@ -383,6 +383,8 @@ function audioLooksPlayable(el: HTMLAudioElement | null | undefined): boolean {
 
 /** Live / catalog / stream ids may need resolve before play. */
 function isEphemeralTrack(track: PlayerTrack): boolean {
+  if (track.quality === "local") return false;
+  if (track.quality === "youtube") return true;
   if (
     track.id.startsWith("live:") ||
     track.id.startsWith("stream:") ||
@@ -442,6 +444,7 @@ async function resolveIfNeeded(
         title: track.title,
         artist: resolveArtist,
         album: track.album,
+        trackId: track.id,
         duration: track.duration || undefined,
       }),
     });
@@ -537,6 +540,7 @@ function prefetchStream(track: PlayerTrack | null | undefined) {
           primaryArtistName(track.artist) ||
           track.artist,
         album: track.album,
+        trackId: track.id,
         duration: track.duration || undefined,
       }),
       credentials: "same-origin",

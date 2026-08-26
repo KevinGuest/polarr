@@ -1,4 +1,4 @@
-import { HardDrive, Radio } from "lucide-react";
+import { HardDrive, Radio, Server, Cloud } from "lucide-react";
 import {
   playbackQuality,
   type PlaybackQuality,
@@ -63,8 +63,8 @@ export function StreamQualityBadge({
 }
 
 /**
- * Album / playlist row: whether this song is on the server (not device offline).
- * Shown next to the artist line — never as a download arrow.
+ * Album / playlist row: on-server (green server) vs stream-only (red cloud).
+ * Sit left of the + / check row actions.
  */
 export function PolarrAvailabilityBadge({
   available,
@@ -73,23 +73,21 @@ export function PolarrAvailabilityBadge({
   available: boolean;
   className?: string;
 }) {
+  const Icon = available ? Server : Cloud;
+  const label = available ? "Available on Polarr" : "Streaming";
   return (
     <span
       className={cn(
-        "inline-flex h-[18px] max-w-[9.5rem] shrink-0 items-center truncate rounded-[3px] px-1.5 text-[10px] font-semibold leading-none tracking-tight",
+        "inline-flex size-7 shrink-0 items-center justify-center rounded-md",
         available
           ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-          : "bg-muted/80 text-muted-foreground",
+          : "bg-red-500/12 text-red-700 dark:text-red-400",
         className,
       )}
-      title={
-        available ? "Available on Polarr" : "Not Available on Polarr"
-      }
-      aria-label={
-        available ? "Available on Polarr" : "Not Available on Polarr"
-      }
+      title={label}
+      aria-label={label}
     >
-      {available ? "Available on Polarr" : "Not on Polarr"}
+      <Icon className="size-3.5" strokeWidth={2.25} aria-hidden />
     </span>
   );
 }

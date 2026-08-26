@@ -715,29 +715,31 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                               </span>
                             </div>
                             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
-                              <PolarrAvailabilityBadge available={t.available} />
                               {t.explicit ? <ExplicitBadge /> : null}
-                              <span className="truncate">
+                              <span className="min-w-0 truncate">
                                 {playerTrack.artist}
                               </span>
                             </div>
                           </button>
-                          <MobileSaveButton
-                            trackId={t.localTrackId || `stream:${t.key}`}
-                            artist={album?.artist || artist || playerTrack.artist}
-                            title={t.title}
-                            album={album?.title || title}
-                            coverPath={album?.image || null}
-                            duration={t.duration}
-                            onPolarr={t.available}
-                            alreadyInLibrary={t.available && Boolean(t.localTrackId)}
-                            onDownload={
-                              t.available
-                                ? undefined
-                                : () => void markDownloaded(t)
-                            }
-                            size="sm"
-                          />
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            <PolarrAvailabilityBadge available={t.available} />
+                            <MobileSaveButton
+                              trackId={t.localTrackId || `stream:${t.key}`}
+                              artist={album?.artist || artist || playerTrack.artist}
+                              title={t.title}
+                              album={album?.title || title}
+                              coverPath={album?.image || null}
+                              duration={t.duration}
+                              onPolarr={t.available}
+                              alreadyInLibrary={t.available && Boolean(t.localTrackId)}
+                              onDownload={
+                                t.available
+                                  ? undefined
+                                  : () => void markDownloaded(t)
+                              }
+                              size="sm"
+                            />
+                          </div>
                           <TrackActionsDrawer
                             track={playerTrack}
                             onPolarr={t.available}
@@ -943,9 +945,8 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                             {t.title}
                           </div>
                           <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
-                            <PolarrAvailabilityBadge available={t.available} />
                             {t.explicit ? <ExplicitBadge /> : null}
-                            <span className="truncate">{trackArtists}</span>
+                            <span className="min-w-0 truncate">{trackArtists}</span>
                           </div>
                         </div>
                       </td>
@@ -958,7 +959,6 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                           coverPath={album?.image || null}
                           duration={t.duration}
                           onPolarr={t.available}
-                          showPolarrBadge={false}
                           downloading={busy}
                           onDownload={
                             t.available

@@ -75,15 +75,28 @@ RUN apt-get update \
 COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
-# Native modules used by the app (sqlite) + optional high-quality karaoke (demucs)
+# Native modules used by the app (sqlite) + karaoke HT-Demucs stack.
+# Next standalone tracing omits these; onnxruntime-node also needs
+# onnxruntime-common at the top level or Demucs fails with MODULE_NOT_FOUND.
 COPY --from=builder --chown=node:node /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
 COPY --from=builder --chown=node:node /app/node_modules /tmp/nm
 RUN set -eux; \
-    for pkg in bindings file-uri-to-path demucs onnxruntime-node mediabunny @mediabunny; do \
+    mkdir -p node_modules; \
+    for pkg in \
+      bindings \
+      file-uri-to-path \
+      demucs \
+      mediabunny \
+      onnxruntime-node \
+      onnxruntime-common \
+    ; do \
       if [ -d "/tmp/nm/$pkg" ]; then cp -a "/tmp/nm/$pkg" node_modules/; fi; \
     done; \
-    # mediabunny packages live under @mediabunny/* \
     if [ -d "/tmp/nm/@mediabunny" ]; then cp -a "/tmp/nm/@mediabunny" node_modules/; fi; \
+    # Fail the image if karaoke ORT cannot load (missing common / native bin).
+    node -e "require('onnxruntime-common'); require('onnxruntime-node'); console.log('karaoke ort ok')"; \
+    test -f node_modules/demucs/dist/cli.js; \
+    test -f node_modules/demucs/htdemucs.onnx; \
     chown -R node:node node_modules; \
     rm -rf /tmp/nm
 

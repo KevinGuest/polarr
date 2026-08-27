@@ -10,7 +10,7 @@ services:
 
   web:
     # Digest pinned after GHCR publish — bump both on release.
-    image: ghcr.io/kevinguest/polarr-app:0.6.16
+    image: ghcr.io/kevinguest/polarr-app:0.6.16@sha256:d86182d37ffe9d56c4d1aeb45ca918657d6062def7db19c65e164a9aebee65d4
     user: "1000:1000"
     init: true
     restart: on-failure

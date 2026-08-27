@@ -38,6 +38,11 @@ import {
 import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine } from "@/lib/utils";
 import type { LocalSourceBadge } from "@/lib/track-source-badge";
 import { toastError, toastSuccess, toastInfo } from "@/lib/toast";
+import {
+  PlaylistOfflineDownloadButton,
+} from "@/components/playlist-offline-download";
+import type { DesktopOfflineTrack } from "@/lib/desktop-offline";
+import { useAuthOptional } from "@/components/auth-provider";
 
 function shuffleArray<T>(items: T[]): T[] {
   const out = [...items];
@@ -84,6 +89,7 @@ function albumLibraryPinKey(artistName: string, albumTitle: string) {
 }
 
 export function AlbumClient({ albumId }: { albumId: string }) {
+  const auth = useAuthOptional();
   const { play, toggle, track, queue, playing } = usePlayer();
   const router = useRouter();
   const ref = useMemo(() => decodeAlbumId(albumId), [albumId]);
@@ -233,6 +239,24 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         quality: t.localTrackId ? "local" : "youtube",
       })),
     [tracks, album, artist, title],
+  );
+
+  const offlineTracks: DesktopOfflineTrack[] = useMemo(
+    () =>
+      tracks
+        .filter((t) => Boolean(t.localTrackId))
+        .map((t) => ({
+          trackId: t.localTrackId!,
+          title: t.title,
+          artist: artistsFor(t),
+          album: album?.title || title,
+          coverUrl: album?.image || null,
+          duration: t.duration || null,
+          userId: auth?.user?.publicId || "",
+        })),
+    // artistsFor depends on album/artist; keep deps explicit
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tracks, album, artist, title, auth?.user?.publicId],
   );
 
   async function playTrack(track: AlbumTrack) {
@@ -829,6 +853,10 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                   <Play className="size-6 translate-x-0.5" fill="currentColor" />
                 )}
               </button>
+              <PlaylistOfflineDownloadButton
+                collectionId={`album:${albumId}`}
+                tracks={offlineTracks}
+              />
               <button
                 type="button"
                 onClick={() => void toggleYourLibrary()}

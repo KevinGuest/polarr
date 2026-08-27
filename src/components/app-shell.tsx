@@ -24,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ExpandedLibraryPanel } from "@/components/expanded-library-panel";
 import { LibrarySidebar } from "@/components/library-sidebar";
 import { HeaderSearch } from "@/components/header-search";
 import { MobileBottomDock } from "@/components/mobile-bottom-dock";
@@ -34,8 +35,14 @@ import { NotificationsBell, NotificationsLink, useNotifications } from "@/compon
 import { ProfileDrawer, UserMenu } from "@/components/user-menu";
 import { AuthProvider, useAuth } from "@/components/auth-provider";
 import { BanStatusBox } from "@/components/ban-status-box";
+import { DesktopChromeBridge } from "@/components/desktop-chrome-bridge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePlayer } from "@/components/player-provider";
+import {
+  captureDesktopQueryParam,
+  isPolarrDesktop,
+  markPolarrDesktop,
+} from "@/lib/desktop-shell";
 import { roleIsStaff } from "@/lib/roles";
 
 const primaryNav = [
@@ -190,9 +197,36 @@ function mobilePageTitle(pathname: string): string | null {
   return null;
 }
 
+function useDesktopShellMode() {
+  const [desktopShell, setDesktopShell] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return isPolarrDesktop();
+  });
+  useEffect(() => {
+    captureDesktopQueryParam();
+    const sync = () => {
+      const on = isPolarrDesktop();
+      setDesktopShell(on);
+      if (on) markPolarrDesktop();
+    };
+    sync();
+    // Child webview may inject __POLARR_DESKTOP__ slightly after first paint.
+    const id = window.setInterval(sync, 250);
+    window.setTimeout(() => window.clearInterval(id), 12_000);
+    const onStorage = () => sync();
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+  return desktopShell;
+}
+
 function ShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { setPanel, track } = usePlayer();
+  const desktopShell = useDesktopShellMode();
   const isSearchPage = pathname === "/search";
   const isLibraryPage = pathname === "/library";
   const isArtistPage = pathname === "/artist";
@@ -206,6 +240,9 @@ function ShellInner({ children }: { children: React.ReactNode }) {
     isSearchPage || isLibraryPage ? null : mobilePageTitle(pathname);
   const { unread: notificationUnread } = useNotifications();
   const [libraryExpanded, setLibraryExpanded] = useState(false);
+  useEffect(() => {
+    setLibraryExpanded(false);
+  }, [pathname]);
   const { role } = useAuth();
   const [adminNavOpen, setAdminNavOpen] = useState(false);
   const [mobileViewport, setMobileViewport] = useState(() =>
@@ -296,10 +333,17 @@ function ShellInner({ children }: { children: React.ReactNode }) {
     </>
   );
 
+  // Desktop Tauri shell owns search / alerts / profile in the native title bar.
+  // Do not mount any web header row (zero height, no spacer).
+  const showWebHeaders = !desktopShell;
+
   return (
     <div className="relative flex h-dvh flex-col bg-background text-foreground">
-      {isAdminPath ? (
-        <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 pt-[max(0.5rem,var(--safe-top))] lg:hidden">
+      {showWebHeaders && isAdminPath ? (
+        <header
+          data-polarr-app-header
+          className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 pt-[max(0.5rem,var(--safe-top))] lg:hidden"
+        >
           <button
             type="button"
             aria-label="Open admin menu"
@@ -319,10 +363,12 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             <UserMenu />
           </div>
         </header>
-      ) : (
+      ) : null}
+      {showWebHeaders && !isAdminPath ? (
         <>
           <header
             suppressHydrationWarning
+            data-polarr-app-header
             className="hidden shrink-0 grid-cols-[1fr_minmax(0,28rem)_1fr] items-center gap-3 border-b border-border px-5 py-3 lg:grid"
           >
             <Link
@@ -350,6 +396,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             </div>
           </header>
           <header
+            data-polarr-app-header
             className={cn(
               "flex shrink-0 items-center gap-3 px-4 pb-3 pt-[max(0.75rem,var(--safe-top))] lg:hidden",
               isSearchPage && "hidden",
@@ -397,7 +444,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             )}
           </header>
         </>
-      )}
+      ) : null}
 
       {isAdminPath && adminNavOpen ? (
         <div className="fixed inset-0 z-50 lg:hidden">
@@ -427,11 +474,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
         <aside
           className={cn(
             "hidden shrink-0 flex-col border-r border-border px-3 py-4 transition-[width] duration-200 ease-out lg:flex",
-            isAdminPath
-              ? "w-56 md:w-60"
-              : libraryExpanded
-                ? "w-80 md:w-96"
-                : "w-56 md:w-60",
+            isAdminPath ? "w-56 md:w-60" : "w-56 md:w-60",
           )}
         >
           {isAdminPath ? (
@@ -469,6 +512,13 @@ function ShellInner({ children }: { children: React.ReactNode }) {
 
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <div className="relative min-h-0 min-w-0 flex-1">
+            {!isAdminPath && libraryExpanded ? (
+              <Suspense fallback={null}>
+                <ExpandedLibraryPanel
+                  onClose={() => setLibraryExpanded(false)}
+                />
+              </Suspense>
+            ) : null}
             <main className="h-full">
               {useLibraryPageScroll ? (
                 <div
@@ -504,9 +554,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (isAuthScreen) {
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-background px-4 py-12 text-foreground">
-        {children}
-      </div>
+      <AuthProvider>
+        <Suspense fallback={null}>
+          <DesktopChromeBridge />
+        </Suspense>
+        <div className="flex min-h-dvh items-center justify-center bg-background px-4 py-12 text-foreground">
+          {children}
+        </div>
+      </AuthProvider>
     );
   }
 
@@ -514,6 +569,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return (
       <PlayerProvider>
         <AuthProvider>
+          <Suspense fallback={null}>
+            <DesktopChromeBridge />
+          </Suspense>
           <div className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
             {children}
           </div>
@@ -525,6 +583,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <PlayerProvider>
       <AuthProvider>
+        <Suspense fallback={null}>
+          <DesktopChromeBridge />
+        </Suspense>
         <ShellInner>{children}</ShellInner>
       </AuthProvider>
     </PlayerProvider>

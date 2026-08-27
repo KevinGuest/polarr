@@ -1,6 +1,6 @@
 import { getAuthUser, json } from "@/lib/api";
 import {
-  findTrack,
+  findTrackFast,
   getSettings,
   listOfflineTrackIds,
   listTracksForAlbum,
@@ -114,7 +114,7 @@ function mergeAvailability(
   artist: string,
 ): AlbumTrackDto[] {
   return tracks.map((t) => {
-    const local = findTrack(artist, t.title);
+    const local = findTrackFast(artist, t.title);
     if (!local) return t;
     return {
       ...t,
@@ -347,7 +347,7 @@ export async function GET(req: Request) {
               const durationSec = t.duration
                 ? Math.round(t.duration / 1000)
                 : 0;
-              const local = findTrack(artist, trackTitle);
+              const local = findTrackFast(artist, trackTitle);
               return {
                 key: `lidarr-${t.id ?? `${trackNumber}-${trackTitle}`}`,
                 title: trackTitle,

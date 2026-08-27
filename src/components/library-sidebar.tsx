@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { LikedSongsCover } from "@/components/liked-songs-cover";
@@ -12,11 +12,6 @@ import {
   libraryAlbumHref,
 } from "@/components/library-item-context-menu";
 import { encodeAlbumId } from "@/lib/album-ref";
-import {
-  LIBRARY_CHANGED_EVENT,
-  LIBRARY_PINS_CHANGED_EVENT,
-  LIKES_CHANGED_EVENT,
-} from "@/lib/ui-events";
 import { cn } from "@/lib/utils";
 import {
   Tooltip,
@@ -26,6 +21,7 @@ import {
 } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePlayer } from "@/components/player-provider";
+import { LibraryOfflineDownloadProgress } from "@/components/playlist-offline-download";
 import {
   ArrowDownUp,
   Folder,
@@ -36,21 +32,13 @@ import {
   UserRound,
 } from "lucide-react";
 
-type NavItem = {
-  type: "album" | "playlist" | "folder" | "artist";
-  key: string;
-  title: string;
-  artist: string;
-  tracks: number;
-  image?: string | null;
-  pinKey?: string;
-  pinned?: boolean;
-  href?: string;
-  updatedAt?: number;
-};
-
-type LibraryFilter = "all" | "playlists" | "albums" | "artists";
-type LibrarySort = "recents" | "alpha";
+import {
+  filterLibraryNavItems,
+  useLibraryNav,
+  type LibraryFilter,
+  type LibraryNavItem,
+  type LibrarySort,
+} from "@/lib/use-library-nav";
 
 const FILTER_TABS: { id: LibraryFilter; label: string }[] = [
   { id: "all", label: "All" },
@@ -85,18 +73,6 @@ function ArtistPlaceholder({ className }: { className?: string }) {
       <UserRound className="size-4" strokeWidth={1.75} />
     </div>
   );
-}
-
-function sortNavItems(items: NavItem[], sort: LibrarySort): NavItem[] {
-  if (sort === "alpha") {
-    return items.slice().sort((a, b) => a.title.localeCompare(b.title));
-  }
-  return items.slice().sort((a, b) => {
-    const aPinned = a.pinned ? 0 : 1;
-    const bPinned = b.pinned ? 0 : 1;
-    if (aPinned !== bPinned) return aPinned - bPinned;
-    return (b.updatedAt || 0) - (a.updatedAt || 0);
-  });
 }
 
 function PlaylistPlaceholder({ className }: { className?: string }) {
@@ -152,54 +128,11 @@ export function LibrarySidebar({
   const searchParams = useSearchParams();
   const artistName = searchParams.get("name") || "";
   const { setPanel } = usePlayer();
-  const [likedTracks, setLikedTracks] = useState(0);
-  const [likedPinned, setLikedPinned] = useState(false);
-  const [items, setItems] = useState<NavItem[]>([]);
-  const [artists, setArtists] = useState<NavItem[]>([]);
+  const { likedTracks, likedPinned, setLikedPinned, items, artists } =
+    useLibraryNav();
   const [filter, setFilter] = useState<LibraryFilter>("all");
   const [sort, setSort] = useState<LibrarySort>("recents");
   const dismissOverlays = () => setPanel("none");
-
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetch("/api/library/nav", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (!data) return;
-      setLikedTracks(Number(data.liked?.tracks) || 0);
-      setLikedPinned(Boolean(data.liked?.pinned));
-      setItems(Array.isArray(data.items) ? data.items : []);
-      setArtists(Array.isArray(data.artists) ? data.artists : []);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-
-    const onLikesChanged = (event: Event) => {
-      const detail = (event as CustomEvent<{ count?: number }>).detail;
-      if (typeof detail?.count === "number") {
-        setLikedTracks(detail.count);
-        return;
-      }
-      void refresh();
-    };
-
-    const onRefresh = () => {
-      void refresh();
-    };
-
-    window.addEventListener(LIKES_CHANGED_EVENT, onLikesChanged);
-    window.addEventListener(LIBRARY_CHANGED_EVENT, onRefresh);
-    window.addEventListener(LIBRARY_PINS_CHANGED_EVENT, onRefresh);
-    return () => {
-      window.removeEventListener(LIKES_CHANGED_EVENT, onLikesChanged);
-      window.removeEventListener(LIBRARY_CHANGED_EVENT, onRefresh);
-      window.removeEventListener(LIBRARY_PINS_CHANGED_EVENT, onRefresh);
-    };
-  }, [refresh]);
 
   const likedActive = pathname.startsWith("/library/liked");
   const isPage = variant === "page";
@@ -210,40 +143,10 @@ export function LibrarySidebar({
     if (!isPage) {
       return { showLiked: true, visibleItems: items };
     }
-
-    if (filter === "playlists") {
-      return {
-        showLiked: true,
-        visibleItems: sortNavItems(
-          items.filter((item) => item.type !== "album" && item.type !== "artist"),
-          sort,
-        ),
-      };
-    }
-
-    if (filter === "albums") {
-      // Only albums the user saved — never the full scanned catalog.
-      const albumRows = items.filter((item) => item.type === "album");
-      return {
-        showLiked: false,
-        visibleItems: sortNavItems(albumRows, sort),
-      };
-    }
-
-    if (filter === "artists") {
-      return {
-        showLiked: false,
-        visibleItems: sortNavItems(artists, sort),
-      };
-    }
-
-    return {
-      showLiked: true,
-      visibleItems: sortNavItems(items, sort),
-    };
+    return filterLibraryNavItems(items, artists, filter, sort);
   }, [artists, filter, isPage, items, sort]);
 
-  function renderNavItem(item: NavItem) {
+  function renderNavItem(item: LibraryNavItem) {
     const href =
       item.href ||
       (item.type === "album"
@@ -495,6 +398,8 @@ export function LibrarySidebar({
           </div>
         </TooltipProvider>
       ) : null}
+
+      <LibraryOfflineDownloadProgress />
 
       {isPage ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain">

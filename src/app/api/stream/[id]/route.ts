@@ -3,6 +3,7 @@ import path from "node:path";
 import { getAuthUserFromRequest, json } from "@/lib/api";
 import { isRickrollTrack, streamPolicy } from "@/lib/bans";
 import { getTrack } from "@/lib/db";
+import { resolvePlayableAudioPath } from "@/lib/audio-path";
 
 export const dynamic = "force-dynamic";
 
@@ -47,10 +48,8 @@ export async function GET(
     }
   }
 
-  let stat: fs.Stats;
-  try {
-    stat = fs.statSync(track.path);
-  } catch {
+  const filePath = resolvePlayableAudioPath(track.path);
+  if (!filePath) {
     const { notifyDiscordStreamError } = await import("@/lib/admin-notify");
     notifyDiscordStreamError({
       dedupeKey: `missing:${track.id}`,
@@ -59,23 +58,23 @@ export async function GET(
       fields: [
         { name: "Track", value: track.title, inline: true },
         { name: "Artist", value: track.artist, inline: true },
-        { name: "Path", value: track.path.slice(0, 200) },
+        { name: "Path", value: (track.path || "").slice(0, 200) },
       ],
     });
     return json({ error: "Audio file missing on disk" }, { status: 404 });
   }
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    return json({ error: "Audio file missing on disk" }, { status: 404 });
+  }
   if (!stat.isFile()) {
-    const { notifyDiscordStreamError } = await import("@/lib/admin-notify");
-    notifyDiscordStreamError({
-      dedupeKey: `notfile:${track.id}`,
-      title: "Stream error — not a file",
-      description: `${track.title} by ${track.artist}`,
-      fields: [{ name: "Path", value: track.path.slice(0, 200) }],
-    });
     return json({ error: "Audio file missing on disk" }, { status: 404 });
   }
 
-  const ext = path.extname(track.path).toLowerCase();
+  const ext = path.extname(filePath).toLowerCase();
   const contentType = MIME[ext] || "application/octet-stream";
   const range = req.headers.get("range");
   // Immutable library files — allow browser reuse across seeks / next-track prefetch
@@ -95,7 +94,7 @@ export async function GET(
       });
     }
     const chunk = end - start + 1;
-    const stream = fs.createReadStream(track.path, { start, end });
+    const stream = fs.createReadStream(filePath, { start, end });
     return new Response(stream as unknown as BodyInit, {
       status: 206,
       headers: {
@@ -108,7 +107,7 @@ export async function GET(
     });
   }
 
-  const stream = fs.createReadStream(track.path);
+  const stream = fs.createReadStream(filePath);
   return new Response(stream as unknown as BodyInit, {
     headers: {
       "Content-Length": String(stat.size),

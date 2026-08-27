@@ -29,6 +29,27 @@ const TOPIC_CHANNEL = /\s-\s*topic$/i;
 export const YTM_AUDIO_FORMAT =
   "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best";
 
+/** Cap concurrent yt-dlp children so multi-user cold resolves don't melt the host. */
+const YTDLP_MAX_CONCURRENT = 2;
+let ytdlpActive = 0;
+const ytdlpWait: Array<() => void> = [];
+
+async function withYtDlpSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (ytdlpActive >= YTDLP_MAX_CONCURRENT) {
+    await new Promise<void>((resolve) => {
+      ytdlpWait.push(resolve);
+    });
+  }
+  ytdlpActive += 1;
+  try {
+    return await fn();
+  } finally {
+    ytdlpActive -= 1;
+    const next = ytdlpWait.shift();
+    if (next) next();
+  }
+}
+
 export type YtmCandidate = {
   videoId: string;
   title: string;
@@ -58,39 +79,42 @@ function runYtDlp(
   args: string[],
   timeoutMs = 28_000,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    const child = spawn(ytDlp, args, {
-      shell: false,
-      env: process.env,
-      windowsHide: true,
-    });
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => {
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        /* ignore */
-      }
-      resolve({ code: 1, stdout, stderr: stderr || "yt-dlp timed out" });
-    }, timeoutMs);
-    if (typeof timer === "object" && "unref" in timer) timer.unref();
+  return withYtDlpSlot(
+    () =>
+      new Promise((resolve) => {
+        const child = spawn(ytDlp, args, {
+          shell: false,
+          env: process.env,
+          windowsHide: true,
+        });
+        let stdout = "";
+        let stderr = "";
+        const timer = setTimeout(() => {
+          try {
+            child.kill("SIGTERM");
+          } catch {
+            /* ignore */
+          }
+          resolve({ code: 1, stdout, stderr: stderr || "yt-dlp timed out" });
+        }, timeoutMs);
+        if (typeof timer === "object" && "unref" in timer) timer.unref();
 
-    child.stdout?.on("data", (buf: Buffer) => {
-      stdout += buf.toString();
-    });
-    child.stderr?.on("data", (buf: Buffer) => {
-      stderr += buf.toString();
-    });
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      resolve({ code: 1, stdout, stderr: err.message });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code: code ?? 1, stdout, stderr });
-    });
-  });
+        child.stdout?.on("data", (buf: Buffer) => {
+          stdout += buf.toString();
+        });
+        child.stderr?.on("data", (buf: Buffer) => {
+          stderr += buf.toString();
+        });
+        child.on("error", (err) => {
+          clearTimeout(timer);
+          resolve({ code: 1, stdout, stderr: err.message });
+        });
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          resolve({ code: code ?? 1, stdout, stderr });
+        });
+      }),
+  );
 }
 
 function tokens(s: string): string[] {

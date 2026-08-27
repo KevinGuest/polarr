@@ -14,6 +14,7 @@ import { primaryArtistName } from "@/lib/track-match";
 import { pushRecentPlayedTrack } from "@/lib/recent-searches";
 import { formatDuration, titleLooksExplicit } from "@/lib/utils";
 import { emitListenCredited } from "@/lib/ui-events";
+import { offlineStreamUrl } from "@/lib/desktop-offline";
 
 export type KaraokeUiStatus =
   | "idle"
@@ -287,6 +288,8 @@ type SyncMsg =
   | { kind: "hello"; tabId: string };
 
 function audioSrcFor(track: PlayerTrack): string {
+  const offline = offlineStreamUrl(track.id);
+  if (offline) return offline;
   if (track.streamUrl) return track.streamUrl;
   return `/api/stream/${track.id}`;
 }
@@ -382,8 +385,18 @@ function audioLooksPlayable(el: HTMLAudioElement | null | undefined): boolean {
 }
 
 /** Live / catalog / stream ids may need resolve before play. */
+function isLibraryTrackId(id: string): boolean {
+  const t = (id || "").trim();
+  if (!t || t.includes(":")) return false;
+  // Library ids are hex from randomBytes(12) — never live:/stream:/catalog:
+  return /^[a-f0-9]{16,}$/i.test(t) || (t.length >= 8 && !/[/:\\]/.test(t));
+}
+
 function isEphemeralTrack(track: PlayerTrack): boolean {
+  // Real library rows always play via /api/stream — even if a prior miss
+  // stamped quality: "youtube" into session storage.
   if (track.quality === "local") return false;
+  if (isLibraryTrackId(track.id)) return false;
   if (track.quality === "youtube") return true;
   if (
     track.id.startsWith("live:") ||
@@ -422,29 +435,21 @@ async function resolveIfNeeded(
     return track;
   }
 
-  // Fresh live URL from search/album — skip a second /api/live round-trip
-  if (
-    ephemeral &&
-    !force &&
-    track.streamUrl &&
-    /\/api\/live\//i.test(track.streamUrl)
-  ) {
-    return track;
-  }
-
   try {
     const resolveArtist =
       (track.resolveArtist || "").trim() ||
       primaryArtistName(track.artist) ||
       track.artist;
+    const libraryTrackId = isLibraryTrackId(track.id) ? track.id : undefined;
     const res = await fetch("/api/live", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: track.title,
-        artist: resolveArtist,
+        // Full credit for library match; server strips for YouTube.
+        artist: track.artist || resolveArtist,
         album: track.album,
-        trackId: track.id,
+        trackId: libraryTrackId,
         duration: track.duration || undefined,
       }),
     });
@@ -497,9 +502,21 @@ async function resolveIfNeeded(
     if (!ephemeral && !force && !data.rickroll) {
       return track;
     }
-    // force / ephemeral / rickroll: adopt server answer (YouTube live or another file).
-    const liveUrl = data.streamUrl || data.track?.streamUrl || null;
+    // force / ephemeral / rickroll: adopt server answer (YouTube live or library).
     const mode = data.mode === "library" ? "local" : "youtube";
+    if (mode === "local") {
+      return {
+        ...track,
+        id: data.track?.id || track.id,
+        title: data.track?.title || track.title,
+        artist: data.track?.artist || track.artist,
+        album: data.track?.album || track.album,
+        coverPath: data.track?.coverPath || track.coverPath,
+        streamUrl: null,
+        quality: "local",
+      };
+    }
+    const liveUrl = data.streamUrl || data.track?.streamUrl || null;
     return {
       ...track,
       id: data.track?.id || track.id,
@@ -508,7 +525,7 @@ async function resolveIfNeeded(
       album: data.track?.album || track.album,
       coverPath: data.track?.coverPath || track.coverPath,
       streamUrl: liveUrl,
-      quality: mode,
+      quality: "youtube",
     };
   } catch {
     return track;
@@ -535,12 +552,9 @@ function prefetchStream(track: PlayerTrack | null | undefined) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: track.title,
-        artist:
-          (track.resolveArtist || "").trim() ||
-          primaryArtistName(track.artist) ||
-          track.artist,
+        artist: track.artist,
         album: track.album,
-        trackId: track.id,
+        trackId: isLibraryTrackId(track.id) ? track.id : undefined,
         duration: track.duration || undefined,
       }),
       credentials: "same-origin",
@@ -655,6 +669,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [],
   );
   const [queueTab, setQueueTab] = useState<QueueTab>("queue");
+  /** Bumped on seek so Discord progress bar timestamps resync. */
+  const [presenceRev, setPresenceRev] = useState(0);
   const pathname = usePathname();
   const prevPathnameRef = useRef(pathname);
 
@@ -1421,7 +1437,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(id);
   }, [playing, track, isOwner]);
 
-  // Discord Rich Presence (local Discord desktop RPC) when user enabled it.
+  // Discord Rich Presence (desktop IPC bridge or local Discord WebSocket RPC).
   useEffect(() => {
     let cancelled = false;
 
@@ -1444,11 +1460,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 : null,
           };
         }
+        if (cancelled) return;
         if (
-          cancelled ||
           !discordPresenceCache.presenceOn ||
           !discordPresenceCache.appId
         ) {
+          const { clearDiscordActivity } = await import("@/lib/discord-rpc");
+          if (!cancelled) await clearDiscordActivity();
           return;
         }
 
@@ -1456,11 +1474,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           await import("@/lib/discord-rpc");
         if (cancelled) return;
         if (playing && track) {
+          const progressSec =
+            audioRef.current?.currentTime ?? progressRef.current ?? 0;
+          const durationSec =
+            durationRef.current ||
+            (typeof track.duration === "number" ? track.duration : 0) ||
+            0;
           await setDiscordListeningActivity(discordPresenceCache.appId, {
             title: track.title,
             artist: track.artist,
             album: track.album,
             coverUrl: track.coverPath,
+            progressSec,
+            durationSec,
           });
         } else {
           await clearDiscordActivity();
@@ -1473,7 +1499,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [playing, track]);
+  }, [playing, track, presenceRev]);
+
+  // Clear presence when the player unmounts (navigation away / logout shell).
+  useEffect(() => {
+    return () => {
+      void import("@/lib/discord-rpc")
+        .then(({ clearDiscordActivity }) => clearDiscordActivity())
+        .catch(() => null);
+    };
+  }, []);
 
   // Recently played / listening feed are driven by /api/listen after ≥15s.
 
@@ -1649,6 +1684,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
       setProgress(next);
       progressRef.current = next;
+      setPresenceRev((n) => n + 1);
       if (wasPlaying && audio.paused) {
         void playBoth().then((ok) => {
           if (!ok) return;

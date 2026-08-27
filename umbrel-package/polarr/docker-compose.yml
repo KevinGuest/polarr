@@ -10,7 +10,7 @@ services:
 
   web:
     # Digest pinned after GHCR publish — bump both on release.
-    image: ghcr.io/kevinguest/polarr-app:0.6.15@sha256:777b6ede916a2d029e026d37f460c7fa0c62779a0444cd39f28496841b1d1fef
+    image: ghcr.io/kevinguest/polarr-app:0.6.16
     user: "1000:1000"
     init: true
     restart: on-failure
@@ -22,7 +22,7 @@ services:
       - POLARR_DOWNLOADS_DIR=/music/downloads
       - PORT=3000
       - HOSTNAME=0.0.0.0
-      - POLARR_APP_VERSION=0.6.15
+      - POLARR_APP_VERSION=0.6.16
     volumes:
       - ${APP_DATA_DIR}/data:/data
       # Full Umbrel downloads tree so File Browser can open real Lidarr/SABnzbd

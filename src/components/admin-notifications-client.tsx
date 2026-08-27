@@ -658,6 +658,11 @@ export function AdminNotificationsClient() {
               and create an application.
             </li>
             <li>
+              Name the application{" "}
+              <span className="font-medium text-foreground">Polarr</span> so
+              Discord shows “Listening to Polarr”.
+            </li>
+            <li>
               Copy the{" "}
               <span className="font-medium text-foreground">Client ID</span> —
               enough for listening status (local Discord desktop).
@@ -670,6 +675,14 @@ export function AdminNotificationsClient() {
               only if users should “Link Discord” on their account.
             </li>
             <li>Click Edit on Rich Presence and paste the values, then Save.</li>
+            <li>
+              Users enable{" "}
+              <span className="font-medium text-foreground">
+                Show listening status
+              </span>{" "}
+              under Account → Discord. Discord desktop must be running on the
+              same PC (Polarr desktop app recommended).
+            </li>
           </ol>
         </DialogContent>
       </Dialog>

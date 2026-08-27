@@ -20,6 +20,8 @@ import {
   Ban,
   FileText,
   Trash2,
+  Download,
+  Check,
 } from "lucide-react";
 import {
   ContextMenu,
@@ -45,6 +47,14 @@ import {
 import { formatDuration } from "@/lib/utils";
 import { albumHref } from "@/lib/album-ref";
 import { emitLibraryChanged, emitLikesChanged } from "@/lib/ui-events";
+import { useAuthOptional } from "@/components/auth-provider";
+import {
+  downloadTrackOffline,
+  isPolarrDesktop,
+  isTrackOfflineCached,
+  refreshOfflineIds,
+  removeTrackOffline,
+} from "@/lib/desktop-offline";
 
 type PlaylistRow = {
   id: string;
@@ -79,6 +89,7 @@ export function TrackContextMenu({
   onRemovedFromPlaylist?: () => void;
 }) {
   const { addToQueue } = usePlayer();
+  const auth = useAuthOptional();
   const router = useRouter();
   const [liked, setLiked] = useState(Boolean(initialLiked));
   const [playlists, setPlaylists] = useState<PlaylistRow[]>([]);
@@ -89,10 +100,67 @@ export function TrackContextMenu({
     duration?: number;
     album?: string;
   } | null>(null);
+  const [desktop, setDesktop] = useState(false);
+  const [offlineCached, setOfflineCached] = useState(false);
+  const [offlineBusy, setOfflineBusy] = useState(false);
 
   useEffect(() => {
     setLiked(Boolean(initialLiked));
   }, [initialLiked, track.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const ok = await isPolarrDesktop();
+      if (cancelled) return;
+      setDesktop(ok);
+      if (ok) {
+        await refreshOfflineIds();
+        if (!cancelled) setOfflineCached(isTrackOfflineCached(track.id));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [track.id]);
+
+  const canOfflineDownload =
+    desktop &&
+    Boolean(auth?.user?.publicId) &&
+    !track.id.startsWith("live:") &&
+    !track.id.startsWith("stream:") &&
+    !track.id.startsWith("catalog:");
+
+  async function toggleOfflineDownload() {
+    if (!auth?.user?.publicId) {
+      toastError("Sign in to download offline");
+      return;
+    }
+    setOfflineBusy(true);
+    try {
+      if (offlineCached) {
+        await removeTrackOffline(track.id);
+        setOfflineCached(false);
+        toastSuccess("Removed offline download");
+        return;
+      }
+      await downloadTrackOffline({
+        trackId: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        coverUrl: track.coverPath,
+        duration: track.duration ?? null,
+        userId: auth.user.publicId,
+      });
+      setOfflineCached(true);
+      toastSuccess("Downloaded for offline");
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : "Offline download failed");
+    } finally {
+      setOfflineBusy(false);
+    }
+  }
 
   const loadPlaylists = useCallback(async () => {
     try {
@@ -312,6 +380,24 @@ export function TrackContextMenu({
             <ListEnd className="size-4 shrink-0 text-muted-foreground" />
             Add to queue
           </ContextMenuItem>
+
+          {canOfflineDownload ? (
+            <ContextMenuItem
+              disabled={offlineBusy}
+              onSelect={() => void toggleOfflineDownload()}
+            >
+              {offlineCached ? (
+                <Check className="size-4 shrink-0 text-muted-foreground" />
+              ) : (
+                <Download className="size-4 shrink-0 text-muted-foreground" />
+              )}
+              {offlineBusy
+                ? "Working…"
+                : offlineCached
+                  ? "Remove offline download"
+                  : "Download offline"}
+            </ContextMenuItem>
+          ) : null}
 
           <ContextMenuItem
             onSelect={() => {

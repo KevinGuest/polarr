@@ -64,6 +64,12 @@ import {
   titleLooksExplicit,
 } from "@/lib/utils";
 import { toastError, toastSuccess } from "@/lib/toast";
+import {
+  PlaylistOfflineDownloadButton,
+  TrackOfflineIndicator,
+} from "@/components/playlist-offline-download";
+import type { DesktopOfflineTrack } from "@/lib/desktop-offline";
+import { useAuthOptional } from "@/components/auth-provider";
 
 type PlaylistMeta = {
   id: string;
@@ -369,6 +375,7 @@ function AddTracksDialog({
 }
 
 export function PlaylistClient({ playlistId }: { playlistId: string }) {
+  const auth = useAuthOptional();
   const { play, toggle, track, queue: playerQueue, playing, shuffle, toggleShuffle } =
     usePlayer();
   const router = useRouter();
@@ -536,6 +543,22 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
         toPlayerTrack(t, playlist?.name || "", playlist?.coverUrl || null),
       ),
     [sortedTracks, playlist],
+  );
+
+  const offlineTracks: DesktopOfflineTrack[] = useMemo(
+    () =>
+      tracks
+        .filter((t) => playlistTrackOnPolarr(t))
+        .map((t) => ({
+          trackId: t.localTrackId || t.id,
+          title: t.title,
+          artist: t.artist,
+          album: t.album,
+          coverUrl: t.coverPath,
+          duration: t.duration || null,
+          userId: auth?.user?.publicId || "",
+        })),
+    [tracks, auth?.user?.publicId],
   );
 
   const inThisPlaylist = Boolean(
@@ -1010,6 +1033,11 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
           >
             <Shuffle className="size-6" />
           </button>
+          <PlaylistOfflineDownloadButton
+            collectionId={`playlist:${playlistId}`}
+            tracks={offlineTracks}
+            iconClassName="size-6"
+          />
           <PlaylistActionsDrawer
             playlistId={playlistId}
             title={displayTitle}
@@ -1146,6 +1174,10 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                             <span className="truncate text-[15px] font-medium">
                               {t.title}
                             </span>
+                            <TrackOfflineIndicator
+                              trackId={trackId}
+                              collectionId={`playlist:${playlistId}`}
+                            />
                           </div>
                           <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
                             {explicit ? <ExplicitBadge /> : null}
@@ -1312,6 +1344,10 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
           >
             <Shuffle className="size-5" />
           </button>
+          <PlaylistOfflineDownloadButton
+            collectionId={`playlist:${playlistId}`}
+            tracks={offlineTracks}
+          />
           <PlaylistActionsDrawer
             playlistId={playlistId}
             title={displayTitle}
@@ -1459,8 +1495,14 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                             className="size-10 shrink-0 rounded-sm"
                           />
                           <div className="min-w-0">
-                            <div className="truncate font-medium text-foreground">
-                              {t.title}
+                            <div className="flex min-w-0 items-center gap-2">
+                              <div className="truncate font-medium text-foreground">
+                                {t.title}
+                              </div>
+                              <TrackOfflineIndicator
+                                trackId={trackId}
+                                collectionId={`playlist:${playlistId}`}
+                              />
                             </div>
                             <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
                               {explicit ? <ExplicitBadge /> : null}

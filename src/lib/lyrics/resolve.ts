@@ -26,6 +26,9 @@ const EMPTY: LyricDocument = {
   geniusSections: null,
 };
 
+/** Deduplicate concurrent resolve for the same track (multi-user stampede). */
+const resolveInflight = new Map<string, Promise<LyricSession>>();
+
 /** Stable cache key: artist|title|durationBucket */
 export function lyricsCacheKey(input: ResolveLyricsInput): string {
   const base = trackMatchKey(input.artist, input.title);
@@ -154,12 +157,20 @@ async function attachGeniusStructure(
   }
 }
 
-/**
- * Resolve lyrics for a track: cache → lrclib get → lrclib search.
- * Line times are the provider stamps (no session offset / DTW rewrite).
- * Duo credits also pull Genius section speakers when available.
- */
-export async function resolveLyrics(
+/** Fire-and-forget Genius fill so lyrics UI isn't blocked on scrape. */
+function scheduleGeniusAttach(
+  cacheKey: string,
+  artist: string,
+  title: string,
+  doc: LyricDocument,
+) {
+  if (doc.geniusSections?.some((s) => s.speaker)) return;
+  if (!doc.found || doc.instrumental) return;
+  if (!duoArtists(artist, title)) return;
+  void attachGeniusStructure(doc, cacheKey, artist, title).catch(() => {});
+}
+
+async function resolveLyricsUncached(
   input: ResolveLyricsInput,
 ): Promise<LyricSession> {
   const artist = input.artist.trim();
@@ -181,10 +192,9 @@ export async function resolveLyrics(
 
   const cached = getLyricsCache(cacheKey);
   if (cached && shouldUseCache(cached)) {
-    let doc = rowToDoc(cached);
-    if (!doc.geniusSections?.some((s) => s.speaker) && duoArtists(artist, title)) {
-      doc = await attachGeniusStructure(doc, cacheKey, artist, title);
-    }
+    const doc = rowToDoc(cached);
+    // Don't block the request on Genius — warm cache in background.
+    scheduleGeniusAttach(cacheKey, artist, title, doc);
     return buildSession(doc, cacheKey, mediaDurationSec);
   }
 
@@ -221,7 +231,31 @@ export async function resolveLyrics(
     linesJson: JSON.stringify(doc.lines),
   });
 
-  doc = await attachGeniusStructure(doc, cacheKey, artist, title);
+  scheduleGeniusAttach(cacheKey, artist, title, doc);
 
   return buildSession(doc, cacheKey, mediaDurationSec);
+}
+
+/**
+ * Resolve lyrics for a track: cache → lrclib get → lrclib search.
+ * Line times are the provider stamps (no session offset / DTW rewrite).
+ * Duo Genius structure fills in the background (non-blocking).
+ */
+export async function resolveLyrics(
+  input: ResolveLyricsInput,
+): Promise<LyricSession> {
+  const cacheKey = lyricsCacheKey({
+    artist: input.artist.trim(),
+    title: input.title.trim(),
+    album: input.album,
+    durationSec: input.durationSec,
+  });
+  const pending = resolveInflight.get(cacheKey);
+  if (pending) return pending;
+
+  const work = resolveLyricsUncached(input).finally(() => {
+    resolveInflight.delete(cacheKey);
+  });
+  resolveInflight.set(cacheKey, work);
+  return work;
 }

@@ -43,6 +43,11 @@ yarn-debug.log*
 # Disbanded Expo companion (keep tree local-only if revived)
 /ios/
 
+# Native client deps / build output (source under apps/ is tracked)
+apps/**/node_modules/
+apps/**/dist/
+apps/desktop/src-tauri/target/
+
 # UI mockup sandbox — local only
 /ui-preview/
 

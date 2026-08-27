@@ -3276,7 +3276,11 @@ function libraryHitAgrees(hit: TrackRow, artist: string, title: string): boolean
   return namesMatch(hit.artist, artist) && titlesMatch(hit.title, title);
 }
 
-export function findTrack(artist: string, title: string): TrackRow | null {
+/**
+ * Hot-path lookup: exact + match_key only (no LIKE fuzzy scan).
+ * Use for live resolve and album availability under concurrent load.
+ */
+export function findTrackFast(artist: string, title: string): TrackRow | null {
   const rawArtist = artist.trim();
   const rawTitle = title.trim();
   if (!rawArtist || !rawTitle) return null;
@@ -3296,7 +3300,26 @@ export function findTrack(artist: string, title: string): TrackRow | null {
     findTrackByMatchKey(trackMatchKey(rawArtist, rawTitle)) ||
     (primary ? findTrackByMatchKey(trackMatchKey(primary, rawTitle)) : null);
   if (indexed && libraryHitAgrees(indexed, rawArtist, rawTitle)) return indexed;
+  // Also accept when credit was primary-only vs feat. in DB
+  if (
+    indexed &&
+    primary &&
+    libraryHitAgrees(indexed, primary, rawTitle)
+  ) {
+    return indexed;
+  }
+  return null;
+}
 
+export function findTrack(artist: string, title: string): TrackRow | null {
+  const rawArtist = artist.trim();
+  const rawTitle = title.trim();
+  if (!rawArtist || !rawTitle) return null;
+
+  const fast = findTrackFast(rawArtist, rawTitle);
+  if (fast) return fast;
+
+  const primary = primaryArtistName(rawArtist);
   const candidates = new Map<string, TrackRow>();
   for (const q of matchSearchQueries(rawArtist, rawTitle)) {
     for (const hit of searchTracksLocal(q, 40)) {

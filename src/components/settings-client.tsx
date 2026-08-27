@@ -536,7 +536,8 @@ export function SettingsClient() {
               Show what you’re listening to as Rich Presence while Discord
               desktop is open on this machine. An admin configures this
               server’s Discord Application Client ID under Admin →
-              Notifications.
+              Notifications. Best with the Polarr desktop app; browser tabs
+              can work if Discord allows local RPC from your server origin.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

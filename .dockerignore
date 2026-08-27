@@ -30,6 +30,9 @@ music
 # mobile companion — not part of the server image
 ios
 
+# native clients (Tauri / Capacitor) — not part of the server image
+apps
+
 # dev-only UI mockups (Vite) — not part of the server image
 ui-preview
 

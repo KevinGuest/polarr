@@ -12,6 +12,11 @@ import {
 import { AVATAR_UPDATED_EVENT } from "@/lib/ui-events";
 import type { UserRole } from "@/lib/roles";
 import { roleIsStaff } from "@/lib/roles";
+import {
+  clearDesktopOfflineSession,
+  setDesktopOfflineSession,
+  startDesktopOfflineSync,
+} from "@/lib/desktop-offline";
 
 export type BanStatus = {
   stream: boolean;
@@ -80,11 +85,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setBan(null);
     setLoading(false);
+    void clearDesktopOfflineSession();
   }, []);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    const uid = user?.publicId ?? null;
+    void setDesktopOfflineSession(uid);
+  }, [user?.publicId]);
+
+  useEffect(() => {
+    return startDesktopOfflineSync(() => user?.publicId ?? null);
+  }, [user?.publicId]);
 
   useEffect(() => {
     function onAvatarUpdated() {

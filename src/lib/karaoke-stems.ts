@@ -10,8 +10,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { findTrack, getTrack, type TrackRow } from "./db";
-import { remapForeignMusicPath } from "./music-roots";
-import { dataDir, musicDir } from "./paths";
+import { resolvePlayableAudioPath } from "./audio-path";
+import { dataDir } from "./paths";
 import { resolveFfmpeg } from "./tools";
 
 export type KaraokeStatus =
@@ -252,38 +252,8 @@ function lookupKey(trackId: string): string | null {
   return null;
 }
 
-function isStreamPath(p: string | null | undefined): boolean {
-  if (!p) return true;
-  return (
-    p.startsWith("stream:") ||
-    p.startsWith("stream://") ||
-    p.startsWith("live:")
-  );
-}
-
 function fileOnDisk(track: TrackRow | null | undefined): string | null {
-  const raw = track?.path?.trim() || "";
-  if (!raw || isStreamPath(raw)) return null;
-  const tries = [raw, path.resolve(raw)];
-  if (raw.startsWith("/music")) {
-    tries.push(
-      path.join(musicDir(), raw.slice("/music".length).replace(/^[\\/]+/, "")),
-    );
-  }
-  const remapped = remapForeignMusicPath(raw);
-  if (remapped) tries.push(remapped);
-  const seen = new Set<string>();
-  for (const p of tries) {
-    if (!p || seen.has(p)) continue;
-    seen.add(p);
-    try {
-      const st = fs.statSync(p);
-      if (st.isFile() && st.size >= 1024) return p;
-    } catch {
-      /* try next */
-    }
-  }
-  return null;
+  return resolvePlayableAudioPath(track?.path);
 }
 
 function artistTitleFromRequest(

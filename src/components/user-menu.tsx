@@ -38,6 +38,8 @@ export function UserMenu({
 
   async function logout() {
     await fetch("/api/auth/me", { method: "DELETE" }).catch(() => null);
+    const { clearDesktopOfflineSession } = await import("@/lib/desktop-offline");
+    await clearDesktopOfflineSession().catch(() => null);
     clear();
     router.replace("/login");
     router.refresh();
@@ -58,6 +60,7 @@ export function UserMenu({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
+          data-polarr-user-avatar=""
           className={cn(
             "rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             variant === "sidebar"
@@ -186,6 +189,8 @@ export function ProfileDrawer({
   async function logout() {
     setOpen(false);
     await fetch("/api/auth/me", { method: "DELETE" }).catch(() => null);
+    const { clearDesktopOfflineSession } = await import("@/lib/desktop-offline");
+    await clearDesktopOfflineSession().catch(() => null);
     clear();
     router.replace("/login");
     router.refresh();

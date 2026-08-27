@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import { getAuthUserFromRequest, json } from "@/lib/api";
 import {
   downloadPolicy,
@@ -7,7 +6,13 @@ import {
   streamPolicy,
 } from "@/lib/bans";
 import { createLiveSession } from "@/lib/live-stream";
-import { findTrack, getSettings, getTrack, type TrackRow } from "@/lib/db";
+import {
+  findTrackFast,
+  getSettings,
+  getTrack,
+  type TrackRow,
+} from "@/lib/db";
+import { resolvePlayableAudioPath } from "@/lib/audio-path";
 import { kickSaveOnPlay } from "@/lib/fallback-download";
 import { lidarrHasTrackFile } from "@/lib/lidarr";
 import { primaryArtistName } from "@/lib/track-match";
@@ -16,19 +21,10 @@ import { ytDlpAvailable } from "@/lib/tools";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** DB hit is only usable if the audio file is still on disk. */
+/** DB hit is only usable if the audio file is still on disk (with path remap). */
 function libraryFilePlayable(track: TrackRow): boolean {
-  if (!track.path || track.path.startsWith("stream:")) return false;
   if (track.source === "stream") return false;
-  if (track.path.startsWith("stream://") || track.path.startsWith("live://")) {
-    return false;
-  }
-  try {
-    const st = fs.statSync(track.path);
-    return st.isFile() && st.size > 0;
-  } catch {
-    return false;
-  }
+  return Boolean(resolvePlayableAudioPath(track.path));
 }
 
 function resolveLibraryTrack(input: {
@@ -37,15 +33,23 @@ function resolveLibraryTrack(input: {
   title: string;
 }): TrackRow | null {
   const trackId = (input.trackId || "").trim();
-  if (trackId) {
-    const byId = getTrack(trackId);
+  // Ignore ephemeral ids from prior live resolves
+  const realId =
+    trackId &&
+    !trackId.includes(":") &&
+    !trackId.startsWith("live") &&
+    !trackId.startsWith("stream")
+      ? trackId
+      : "";
+  if (realId) {
+    const byId = getTrack(realId);
     if (byId && libraryFilePlayable(byId)) return byId;
     if (byId) {
-      const promoted = findTrack(byId.artist, byId.title);
+      const promoted = findTrackFast(byId.artist, byId.title);
       if (promoted && libraryFilePlayable(promoted)) return promoted;
     }
   }
-  const hit = findTrack(input.artist, input.title);
+  const hit = findTrackFast(input.artist, input.title);
   if (hit && libraryFilePlayable(hit)) return hit;
   return null;
 }

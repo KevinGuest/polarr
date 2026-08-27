@@ -831,6 +831,19 @@ function migrate(database: Database.Database) {
     "discord_presence_enabled",
     "discord_presence_enabled INTEGER NOT NULL DEFAULT 0",
   );
+  ensureColumn(database, "users", "discord_avatar", "discord_avatar TEXT");
+  ensureColumn(
+    database,
+    "users",
+    "discord_display_name",
+    "discord_display_name TEXT",
+  );
+  ensureColumn(
+    database,
+    "users",
+    "discord_login_enabled",
+    "discord_login_enabled INTEGER NOT NULL DEFAULT 1",
+  );
   ensureColumn(database, "invites", "emailed_to", "emailed_to TEXT");
   ensureColumn(
     database,
@@ -1465,7 +1478,9 @@ export function getAdminUserDetail(userId: string) {
   const row = getDb()
     .prepare(
       `SELECT email, last_ip as lastIp, last_hwid as lastHwid,
-              access_revoked_at as accessRevokedAt
+              access_revoked_at as accessRevokedAt,
+              discord_id as discordId, discord_username as discordUsername,
+              discord_display_name as discordDisplayName
        FROM users WHERE id = ?`,
     )
     .get(userId) as
@@ -1474,6 +1489,9 @@ export function getAdminUserDetail(userId: string) {
         lastIp: string | null;
         lastHwid: string | null;
         accessRevokedAt: string | null;
+        discordId: string | null;
+        discordUsername: string | null;
+        discordDisplayName: string | null;
       }
     | undefined;
 
@@ -1493,12 +1511,23 @@ export function getAdminUserDetail(userId: string) {
       }
     | undefined;
 
+  const discordId = (row?.discordId || "").trim() || null;
+  const discordUsername = discordId
+    ? (row?.discordUsername || "").trim() || null
+    : null;
+  const discordDisplayName = discordId
+    ? (row?.discordDisplayName || "").trim() || discordUsername
+    : null;
+
   return {
     ...profile,
     email: (row?.email || "").trim() || null,
     lastIp: (row?.lastIp || "").trim() || null,
     lastHwid: (row?.lastHwid || "").trim() || null,
     accessRevokedAt: row?.accessRevokedAt || null,
+    discordId,
+    discordUsername,
+    discordDisplayName,
     invite: invite
       ? {
           id: invite.id,
@@ -1742,30 +1771,72 @@ export function verifyUserPassword(userId: string, password: string): boolean {
 
 export type DiscordLink = {
   discordId: string;
+  /** Discord handle (username), without discriminator. */
   discordUsername: string;
+  /** global_name, falling back to username. */
+  discordDisplayName: string;
+  /** Discord avatar hash, or null for default. */
+  discordAvatar: string | null;
+  /** CDN URL for the Discord avatar. */
+  avatarUrl: string;
   presenceEnabled: boolean;
+  /** When false, Discord login is blocked but the link remains. */
+  loginEnabled: boolean;
 };
+
+export function discordAvatarUrl(
+  discordId: string,
+  avatarHash: string | null | undefined,
+): string {
+  const id = (discordId || "").trim();
+  const hash = (avatarHash || "").trim();
+  if (id && hash) {
+    const ext = hash.startsWith("a_") ? "gif" : "png";
+    return `https://cdn.discordapp.com/avatars/${id}/${hash}.${ext}?size=128`;
+  }
+  let index = 0;
+  try {
+    if (id) index = Number((BigInt(id) >> 22n) % 6n);
+  } catch {
+    index = 0;
+  }
+  return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
+}
 
 export function getDiscordLink(userId: string): DiscordLink | null {
   if (!userId) return null;
   const row = getDb()
     .prepare(
       `SELECT discord_id as discordId, discord_username as discordUsername,
-              discord_presence_enabled as presenceEnabled
+              discord_display_name as discordDisplayName,
+              discord_avatar as discordAvatar,
+              discord_presence_enabled as presenceEnabled,
+              discord_login_enabled as loginEnabled
        FROM users WHERE id = ?`,
     )
     .get(userId) as
     | {
         discordId: string | null;
         discordUsername: string | null;
+        discordDisplayName: string | null;
+        discordAvatar: string | null;
         presenceEnabled: number;
+        loginEnabled: number | null;
       }
     | undefined;
   if (!row?.discordId) return null;
+  const handle = (row.discordUsername || "").trim();
+  const display =
+    (row.discordDisplayName || "").trim() || handle || "Discord";
   return {
     discordId: row.discordId,
-    discordUsername: row.discordUsername || "",
+    discordUsername: handle || display,
+    discordDisplayName: display,
+    discordAvatar: (row.discordAvatar || "").trim() || null,
+    avatarUrl: discordAvatarUrl(row.discordId, row.discordAvatar),
     presenceEnabled: Number(row.presenceEnabled) === 1,
+    // Default true for rows created before the column existed.
+    loginEnabled: row.loginEnabled == null ? true : Number(row.loginEnabled) === 1,
   };
 }
 
@@ -1774,34 +1845,48 @@ export function setDiscordLink(
   input: {
     discordId: string;
     discordUsername: string;
+    discordDisplayName?: string | null;
+    discordAvatar?: string | null;
     accessToken: string;
     refreshToken: string | null;
     expiresAt: string | null;
   },
 ) {
   const db = getDb();
+  const handle = input.discordUsername.trim() || "Discord";
+  const display =
+    (input.discordDisplayName || "").trim() || handle;
+  const avatar = (input.discordAvatar || "").trim() || null;
   // One Discord account → one Polarr user
   db.prepare(
     `UPDATE users SET
        discord_id = NULL,
        discord_username = NULL,
+       discord_display_name = NULL,
+       discord_avatar = NULL,
        discord_access_token = NULL,
        discord_refresh_token = NULL,
        discord_token_expires_at = NULL,
-       discord_presence_enabled = 0
+       discord_presence_enabled = 0,
+       discord_login_enabled = 1
      WHERE discord_id = ? AND id != ?`,
   ).run(input.discordId, userId);
   db.prepare(
     `UPDATE users SET
        discord_id = ?,
        discord_username = ?,
+       discord_display_name = ?,
+       discord_avatar = ?,
        discord_access_token = ?,
        discord_refresh_token = ?,
-       discord_token_expires_at = ?
+       discord_token_expires_at = ?,
+       discord_login_enabled = 1
      WHERE id = ?`,
   ).run(
     input.discordId,
-    input.discordUsername,
+    handle,
+    display,
+    avatar,
     input.accessToken,
     input.refreshToken,
     input.expiresAt,
@@ -1809,18 +1894,20 @@ export function setDiscordLink(
   );
 }
 
-/** Find Polarr user id that already linked this Discord account. */
+/** Find Polarr user id that already linked this Discord account (login allowed). */
 export function getUserIdByDiscordId(discordId: string): string | null {
   const id = (discordId || "").trim();
   if (!id) return null;
   const row = getDb()
     .prepare(
-      `SELECT id FROM users
+      `SELECT id, discord_login_enabled as loginEnabled FROM users
        WHERE discord_id = ? AND access_revoked_at IS NULL
        LIMIT 1`,
     )
-    .get(id) as { id: string } | undefined;
-  return row?.id || null;
+    .get(id) as { id: string; loginEnabled: number | null } | undefined;
+  if (!row) return null;
+  if (row.loginEnabled != null && Number(row.loginEnabled) !== 1) return null;
+  return row.id;
 }
 
 /**
@@ -1894,10 +1981,13 @@ export function clearDiscordLink(userId: string) {
       `UPDATE users SET
          discord_id = NULL,
          discord_username = NULL,
+         discord_display_name = NULL,
+         discord_avatar = NULL,
          discord_access_token = NULL,
          discord_refresh_token = NULL,
          discord_token_expires_at = NULL,
-         discord_presence_enabled = 0
+         discord_presence_enabled = 0,
+         discord_login_enabled = 1
        WHERE id = ?`,
     )
     .run(userId);
@@ -1916,6 +2006,12 @@ export function getDiscordPresenceEnabled(userId: string): boolean {
     )
     .get(userId) as { enabled: number } | undefined;
   return Boolean(row?.enabled);
+}
+
+export function setDiscordLoginEnabled(userId: string, enabled: boolean) {
+  getDb()
+    .prepare(`UPDATE users SET discord_login_enabled = ? WHERE id = ?`)
+    .run(enabled ? 1 : 0, userId);
 }
 
 /** Client ID is enough for local Rich Presence (Discord desktop RPC). */

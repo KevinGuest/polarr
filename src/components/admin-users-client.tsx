@@ -38,6 +38,9 @@ type UserRow = {
 
 type UserApiUser = UserRow & {
   email: string | null;
+  discordId: string | null;
+  discordUsername: string | null;
+  discordDisplayName: string | null;
   lastIp: string | null;
   lastHwid: string | null;
   accessRevokedAt: string | null;
@@ -840,10 +843,10 @@ export function AdminUsersClient() {
                     />
                   </div>
                   <div className="min-w-0 flex-1 space-y-1.5">
-                    <DialogTitle className="truncate leading-tight">
-                      {details.username}
-                    </DialogTitle>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <DialogTitle className="truncate leading-tight">
+                        {details.username}
+                      </DialogTitle>
                       <Badge
                         variant={roleBadgeVariant(detailsRole)}
                         className={
@@ -880,6 +883,20 @@ export function AdminUsersClient() {
                     label="Email"
                     value={details.email}
                     kind="email"
+                  />
+                  <DetailRow
+                    label="Discord"
+                    value={
+                      details.discordId
+                        ? [
+                            details.discordDisplayName ||
+                              details.discordUsername,
+                            details.discordId,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")
+                        : "—"
+                    }
                   />
                   <DetailRow
                     label="Invite code"

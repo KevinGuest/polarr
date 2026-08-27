@@ -7,6 +7,7 @@ import {
   getDiscordPresenceEnabled,
   getSettings,
   getUserEmail,
+  setDiscordLoginEnabled,
   setDiscordPresenceEnabled,
   updateUserEmail,
   updateUsername,
@@ -16,22 +17,30 @@ import { MIN_PASSWORD_LENGTH } from "@/lib/auth-password";
 
 export const dynamic = "force-dynamic";
 
+function discordPayload(userId: string) {
+  const discord = getDiscordLink(userId);
+  const presenceEnabled = getDiscordPresenceEnabled(userId);
+  if (!discord) {
+    return { linked: false as const, presenceEnabled };
+  }
+  return {
+    linked: true as const,
+    username: discord.discordUsername,
+    displayName: discord.discordDisplayName,
+    avatarUrl: discord.avatarUrl,
+    presenceEnabled,
+    loginEnabled: discord.loginEnabled,
+  };
+}
+
 export async function GET() {
   const user = await getAuthUser();
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
   const settings = getSettings();
-  const discord = getDiscordLink(user.id);
-  const presenceEnabled = getDiscordPresenceEnabled(user.id);
   return json({
     username: user.username,
     email: getUserEmail(user.id),
-    discord: discord
-      ? {
-          linked: true,
-          username: discord.discordUsername,
-          presenceEnabled,
-        }
-      : { linked: false, username: null, presenceEnabled },
+    discord: discordPayload(user.id),
     discordOAuthReady: discordOAuthConfigured(settings),
     discordPresenceReady: discordPresenceAppConfigured(settings),
     discordClientId: settings.discordClientId.trim() || null,
@@ -53,13 +62,15 @@ const patchSchema = z
       .optional(),
     confirmPassword: z.string().min(1).max(128).optional(),
     discordPresenceEnabled: z.boolean().optional(),
+    discordLoginEnabled: z.boolean().optional(),
   })
   .refine(
     (d) =>
       d.email !== undefined ||
       d.username !== undefined ||
       d.newPassword !== undefined ||
-      d.discordPresenceEnabled !== undefined,
+      d.discordPresenceEnabled !== undefined ||
+      d.discordLoginEnabled !== undefined,
     { message: "Nothing to update" },
   );
 
@@ -112,21 +123,33 @@ export async function PATCH(req: Request) {
         { status: 400 },
       );
     }
+    if (body.discordPresenceEnabled && !getDiscordLink(user.id)) {
+      return json(
+        { error: "Link your Discord account first" },
+        { status: 400 },
+      );
+    }
     setDiscordPresenceEnabled(user.id, body.discordPresenceEnabled);
   }
 
-  const discord = getDiscordLink(user.id);
-  const presenceEnabled = getDiscordPresenceEnabled(user.id);
+  if (body.discordLoginEnabled !== undefined) {
+    if (!getDiscordLink(user.id)) {
+      return json(
+        { error: "Link your Discord account first" },
+        { status: 400 },
+      );
+    }
+    setDiscordLoginEnabled(user.id, body.discordLoginEnabled);
+  }
+
+  const settings = getSettings();
   return json({
     ok: true,
     username,
     email,
-    discord: discord
-      ? {
-          linked: true,
-          username: discord.discordUsername,
-          presenceEnabled,
-        }
-      : { linked: false, username: null, presenceEnabled },
+    discord: discordPayload(user.id),
+    discordOAuthReady: discordOAuthConfigured(settings),
+    discordPresenceReady: discordPresenceAppConfigured(settings),
+    discordClientId: settings.discordClientId.trim() || null,
   });
 }

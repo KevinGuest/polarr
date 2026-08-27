@@ -899,10 +899,6 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         ) : tracks.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border px-6 py-16 text-center text-muted-foreground">
             <p>No tracklist found for this album yet.</p>
-            <p className="mt-2 text-sm text-muted-foreground/80">
-              Cover art can still show from listening history. Full tracklists
-              come from Lidarr or MusicBrainz once the release is catalogued.
-            </p>
           </div>
         ) : (
           <div className="w-full overflow-x-auto">

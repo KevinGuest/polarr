@@ -519,7 +519,7 @@ export function ArtistClient() {
 
       {/* Desktop — existing layout */}
       <div className="hidden space-y-10 lg:block">
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-end">
+        <section className="flex flex-col gap-4 sm:flex-row sm:items-end">
           <CoverArt
             seed={name}
             image={image || undefined}
@@ -546,7 +546,7 @@ export function ArtistClient() {
               </button>
             ) : null}
           </div>
-        </header>
+        </section>
 
         {loading ? (
           <div className="space-y-6" aria-busy="true">

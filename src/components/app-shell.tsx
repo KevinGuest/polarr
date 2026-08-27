@@ -37,6 +37,12 @@ import { AuthProvider, useAuth } from "@/components/auth-provider";
 import { BanStatusBox } from "@/components/ban-status-box";
 import { DesktopChromeBridge } from "@/components/desktop-chrome-bridge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { usePlayer } from "@/components/player-provider";
 import {
   captureDesktopQueryParam,
@@ -120,24 +126,31 @@ function NavLink({
   icon: Icon,
   active,
   onNavigate,
+  compact = false,
 }: {
   href: string;
   label: string;
   icon: typeof Home;
   active: boolean;
   onNavigate?: () => void;
+  compact?: boolean;
 }) {
   const { setPanel } = usePlayer();
-  return (
+  const link = (
     <Link
       href={href}
       aria-current={active ? "page" : undefined}
+      aria-label={compact ? label : undefined}
+      title={compact ? label : undefined}
       onClick={() => {
         setPanel("none");
         onNavigate?.();
       }}
       className={cn(
-        "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+        "flex w-full items-center rounded-md text-sm transition-colors",
+        compact
+          ? "justify-center px-2 py-2.5"
+          : "gap-3 px-3 py-2",
         active
           ? "font-medium text-foreground"
           : "text-muted-foreground hover:text-foreground",
@@ -147,8 +160,15 @@ function NavLink({
         className="size-[1.15rem] shrink-0"
         strokeWidth={active ? 2.25 : 1.75}
       />
-      <span className="truncate">{label}</span>
+      {!compact ? <span className="truncate">{label}</span> : null}
     </Link>
+  );
+  if (!compact) return link;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{link}</TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -240,28 +260,33 @@ function ShellInner({ children }: { children: React.ReactNode }) {
     isSearchPage || isLibraryPage ? null : mobilePageTitle(pathname);
   const { unread: notificationUnread } = useNotifications();
   const [libraryExpanded, setLibraryExpanded] = useState(false);
+  const [libraryCollapsed, setLibraryCollapsed] = useState(false);
   useEffect(() => {
     setLibraryExpanded(false);
   }, [pathname]);
   const { role } = useAuth();
   const [adminNavOpen, setAdminNavOpen] = useState(false);
-  const [mobileViewport, setMobileViewport] = useState(() =>
-    typeof window !== "undefined"
-      ? window.matchMedia("(max-width: 1023px)").matches
-      : false,
-  );
+  const [mobileViewport, setMobileViewport] = useState(() => {
+    if (typeof window === "undefined") return false;
+    if (isPolarrDesktop()) return false;
+    return window.matchMedia("(max-width: 1023px)").matches;
+  });
   const isAdminPath =
     pathname === "/admin" || pathname.startsWith("/admin/");
   const dismissOverlays = () => setPanel("none");
   const useLibraryPageScroll = isLibraryPage && mobileViewport;
 
   useEffect(() => {
+    if (desktopShell) {
+      setMobileViewport(false);
+      return;
+    }
     const mq = window.matchMedia("(max-width: 1023px)");
     const sync = () => setMobileViewport(mq.matches);
     sync();
     mq.addEventListener("change", sync);
     return () => mq.removeEventListener("change", sync);
-  }, []);
+  }, [desktopShell]);
 
   const visibleAdminGroups = useMemo(() => {
     const isFullAdmin = role === "admin" || role === "owner";
@@ -473,19 +498,24 @@ function ShellInner({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-0 flex-1">
         <aside
           className={cn(
-            "hidden shrink-0 flex-col border-r border-border px-3 py-4 transition-[width] duration-200 ease-out lg:flex",
-            isAdminPath ? "w-56 md:w-60" : "w-56 md:w-60",
+            "hidden shrink-0 flex-col border-r border-border py-4 transition-[width,padding] duration-200 ease-out lg:flex",
+            isAdminPath
+              ? "w-56 px-3 md:w-60"
+              : libraryCollapsed
+                ? "w-[72px] px-2"
+                : "w-60 px-3 md:w-72",
           )}
         >
           {isAdminPath ? (
             adminSidebarInner
           ) : (
-            <>
+            <TooltipProvider delayDuration={300}>
               <nav className="space-y-0.5" aria-label="Primary">
                 {primaryNav.map((item) => (
                   <NavLink
                     key={item.href}
                     {...item}
+                    compact={libraryCollapsed}
                     active={
                       item.href === "/"
                         ? pathname === "/"
@@ -495,18 +525,22 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                 ))}
               </nav>
 
-              <div className="mt-6 flex min-h-0 flex-1 flex-col">
+              <div className="mt-4 flex min-h-0 flex-1 flex-col">
                 <Suspense fallback={null}>
                   <LibrarySidebar
                     expanded={libraryExpanded}
                     onExpandedChange={setLibraryExpanded}
+                    collapsed={libraryCollapsed}
+                    onCollapsedChange={setLibraryCollapsed}
                   />
                 </Suspense>
-                <div className="mt-auto">
-                  <BanStatusBox />
-                </div>
+                {!libraryCollapsed ? (
+                  <div className="mt-auto">
+                    <BanStatusBox />
+                  </div>
+                ) : null}
               </div>
-            </>
+            </TooltipProvider>
           )}
         </aside>
 
@@ -542,7 +576,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
       </div>
 
       {!isAdminPath && <NowPlayingBar />}
-      {!isAdminPath && <MobileBottomDock />}
+      {!isAdminPath && !desktopShell && <MobileBottomDock />}
     </div>
   );
 }

@@ -1,16 +1,17 @@
 /**
  * Discord Rich Presence — “Listening to Polarr”.
  *
- * Prefer Polarr desktop (Tauri IPC via `__POLARR_DESKTOP__` / `__TAURI__`).
- * Fall back to Discord’s local WebSocket RPC (ports 6463–6472) in a browser
- * when Discord is running on this machine.
+ * Desktop-only via Tauri named-pipe IPC (`discord_set_presence`).
+ * Browser WebSocket RPC is intentionally unsupported: Discord closes sockets
+ * from non-allowlisted origins and requires AUTHORIZE/AUTHENTICATE this app
+ * never performs. Client ID comes from Admin → Notifications (never hardcoded).
  */
 
 export type DiscordActivityPayload = {
   title: string;
   artist: string;
   album?: string;
-  /** Absolute or relative cover URL; Discord needs a fetchable URL for art. */
+  /** Absolute or relative cover URL; only public HTTPS is forwarded to Discord. */
   coverUrl?: string | null;
   /** Playback position in seconds. */
   progressSec?: number;
@@ -18,31 +19,17 @@ export type DiscordActivityPayload = {
   durationSec?: number;
 };
 
-type RpcMessage = {
-  cmd?: string;
-  evt?: string;
-  nonce?: string;
-  data?: unknown;
-};
+export type DiscordPresenceResult =
+  | { ok: true }
+  | { ok: false; error: string };
 
 type TauriInvoke = (
   cmd: string,
   args?: Record<string, unknown>,
 ) => Promise<unknown>;
 
-const PORTS = [6463, 6464, 6465, 6466, 6467, 6468, 6469, 6470, 6471, 6472];
-
-let socket: WebSocket | null = null;
-let clientId = "";
-let ready = false;
-let connecting: Promise<boolean> | null = null;
-let nonceCounter = 0;
 let unloadHooked = false;
-
-function nextNonce() {
-  nonceCounter += 1;
-  return `polarr-${Date.now()}-${nonceCounter}`;
-}
+let lastError: string | null = null;
 
 function clip(s: string, max = 128) {
   const t = s.trim();
@@ -50,7 +37,42 @@ function clip(s: string, max = 128) {
   return `${t.slice(0, max - 1)}…`;
 }
 
-function resolveCoverUrl(raw?: string | null): string | undefined {
+function isPrivateOrLocalHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host === "0.0.0.0" ||
+    host.endsWith(".local") ||
+    host.endsWith(".localhost")
+  ) {
+    return true;
+  }
+  // IPv4 private / link-local
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  }
+  // IPv6 unique-local / link-local
+  if (host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Discord fetches cover art from its servers. Only public HTTPS URLs work;
+ * localhost / Umbrel / LAN HTTP covers are omitted (presence still works).
+ */
+export function resolvePublicCoverUrl(raw?: string | null): string | undefined {
   if (!raw?.trim()) return undefined;
   const value = raw.trim();
   try {
@@ -59,11 +81,13 @@ function resolveCoverUrl(raw?: string | null): string | undefined {
       : typeof window !== "undefined"
         ? new URL(value, window.location.origin).href
         : value;
-    if (/^https?:\/\//i.test(absolute)) return absolute.slice(0, 300);
+    const url = new URL(absolute);
+    if (url.protocol !== "https:") return undefined;
+    if (isPrivateOrLocalHost(url.hostname)) return undefined;
+    return absolute.slice(0, 300);
   } catch {
-    /* ignore bad URLs */
+    return undefined;
   }
-  return undefined;
 }
 
 function buildState(artist: string, album?: string) {
@@ -112,116 +136,21 @@ function getTauriInvoke(): TauriInvoke | null {
   if (!w.__POLARR_DESKTOP__?.discordRpc) return null;
   const invoke =
     w.__TAURI__?.core?.invoke ?? w.__TAURI_INTERNALS__?.invoke ?? null;
-  return typeof invoke === "function" ? invoke.bind(w.__TAURI__?.core ?? w) : null;
+  if (typeof invoke !== "function") return null;
+  return invoke.bind(w.__TAURI__?.core ?? w);
 }
 
-function send(payload: Record<string, unknown>) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) return;
-  socket.send(JSON.stringify(payload));
+/** True when running inside Polarr desktop with Discord IPC available. */
+export function isDesktopDiscordRpcAvailable(): boolean {
+  return getTauriInvoke() !== null;
 }
 
-function closeSocket() {
-  ready = false;
-  connecting = null;
-  if (socket) {
-    try {
-      socket.close();
-    } catch {
-      /* ignore */
-    }
-  }
-  socket = null;
-}
-
-function connectPort(port: number, appId: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (ok: boolean) => {
-      if (settled) return;
-      settled = true;
-      resolve(ok);
-    };
-
-    let ws: WebSocket;
-    try {
-      ws = new WebSocket(`ws://127.0.0.1:${port}/?v=1&encoding=json`);
-    } catch {
-      finish(false);
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      try {
-        ws.close();
-      } catch {
-        /* ignore */
-      }
-      finish(false);
-    }, 1200);
-
-    ws.addEventListener("open", () => {
-      ws.send(
-        JSON.stringify({
-          v: 1,
-          client_id: appId,
-        }),
-      );
-    });
-
-    ws.addEventListener("message", (ev) => {
-      let msg: RpcMessage;
-      try {
-        msg = JSON.parse(String(ev.data)) as RpcMessage;
-      } catch {
-        return;
-      }
-      if (msg.cmd === "DISPATCH" && msg.evt === "READY") {
-        window.clearTimeout(timer);
-        socket = ws;
-        ready = true;
-        finish(true);
-      }
-    });
-
-    ws.addEventListener("error", () => {
-      window.clearTimeout(timer);
-      finish(false);
-    });
-    ws.addEventListener("close", () => {
-      window.clearTimeout(timer);
-      if (socket === ws) {
-        socket = null;
-        ready = false;
-      }
-      finish(false);
-    });
-  });
-}
-
-async function ensureConnected(appId: string): Promise<boolean> {
-  if (typeof window === "undefined") return false;
-  if (!appId.trim()) return false;
-  if (ready && socket && clientId === appId) return true;
-  if (connecting) return connecting;
-
-  clientId = appId.trim();
-  closeSocket();
-
-  connecting = (async () => {
-    for (const port of PORTS) {
-      const ok = await connectPort(port, clientId);
-      if (ok) return true;
-    }
-    return false;
-  })();
-
-  const ok = await connecting;
-  connecting = null;
-  return ok;
+export function getLastDiscordPresenceError(): string | null {
+  return lastError;
 }
 
 function activityFields(track: DiscordActivityPayload) {
-  const cover = resolveCoverUrl(track.coverUrl);
+  const cover = resolvePublicCoverUrl(track.coverUrl);
   const timestamps = buildTimestamps(track.progressSec, track.durationSec);
   return {
     details: clip(track.title || "Unknown track"),
@@ -233,87 +162,111 @@ function activityFields(track: DiscordActivityPayload) {
   };
 }
 
-/** Clear Discord activity. */
-export async function clearDiscordActivity() {
-  const invoke = getTauriInvoke();
-  if (invoke) {
-    try {
-      await invoke("discord_clear_presence");
-      return;
-    } catch {
-      /* fall through to browser RPC */
-    }
-  }
-  if (!ready || !socket) return;
-  send({
-    cmd: "SET_ACTIVITY",
-    args: { pid: 0, activity: null },
-    nonce: nextNonce(),
-  });
+function fail(error: string): DiscordPresenceResult {
+  lastError = error;
+  return { ok: false, error };
 }
 
-/** Push current track as a Discord Rich Presence activity. */
+function ok(): DiscordPresenceResult {
+  lastError = null;
+  return { ok: true };
+}
+
+/** Clear Discord activity (desktop IPC only). */
+export async function clearDiscordActivity(): Promise<DiscordPresenceResult> {
+  const invoke = getTauriInvoke();
+  if (!invoke) {
+    return ok(); // Browser: nothing to clear
+  }
+  try {
+    await invoke("discord_clear_presence");
+    return ok();
+  } catch (e) {
+    const msg =
+      e instanceof Error
+        ? e.message
+        : typeof e === "string"
+          ? e
+          : "Could not clear Discord presence";
+    return fail(msg);
+  }
+}
+
+/**
+ * Push current track as Discord Rich Presence.
+ * Requires Polarr desktop + Discord desktop + admin Client ID (passed as appId).
+ */
 export async function setDiscordListeningActivity(
   appId: string,
   track: DiscordActivityPayload | null,
-): Promise<boolean> {
+): Promise<DiscordPresenceResult> {
   ensureUnloadHook();
 
   if (!track) {
-    await clearDiscordActivity();
-    return true;
+    return clearDiscordActivity();
+  }
+
+  const id = appId.trim();
+  if (!id) {
+    return fail("Discord Client ID is not configured (Admin → Notifications)");
+  }
+
+  const invoke = getTauriInvoke();
+  if (!invoke) {
+    return fail(
+      "Rich Presence only works in the Polarr desktop app with Discord open",
+    );
   }
 
   const fields = activityFields(track);
-  const invoke = getTauriInvoke();
-  if (invoke) {
-    try {
-      await invoke("discord_set_presence", {
-        payload: {
-          clientId: appId.trim(),
-          title: fields.details,
-          artist: fields.state,
-          album: fields.albumText,
-          coverUrl: fields.coverUrl,
-          startUnix: fields.startUnix,
-          endUnix: fields.endUnix,
-        },
-      });
-      return true;
-    } catch {
-      /* Discord closed or IPC error — try browser RPC */
-    }
+  try {
+    await invoke("discord_set_presence", {
+      payload: {
+        clientId: id,
+        title: fields.details,
+        artist: fields.state,
+        album: fields.albumText,
+        coverUrl: fields.coverUrl,
+        startUnix: fields.startUnix,
+        endUnix: fields.endUnix,
+      },
+    });
+    return ok();
+  } catch (e) {
+    const msg =
+      e instanceof Error
+        ? e.message
+        : typeof e === "string"
+          ? e
+          : "Could not update Discord presence (is Discord running?)";
+    return fail(msg);
   }
+}
 
-  const connected = await ensureConnected(appId);
-  if (!connected) return false;
-
-  const activity: Record<string, unknown> = {
-    details: fields.details,
-    state: fields.state,
-    assets: {
-      large_text: fields.albumText,
-      ...(fields.coverUrl ? { large_image: fields.coverUrl } : {}),
-    },
-    timestamps: {
-      start: fields.startUnix,
-      ...(fields.endUnix != null ? { end: fields.endUnix } : {}),
-    },
-    type: 2, // LISTENING → “Listening to {App Name}”
-  };
-
-  send({
-    cmd: "SET_ACTIVITY",
-    args: {
-      pid: 0,
-      activity,
-    },
-    nonce: nextNonce(),
+/** Lightweight connect check used when enabling the Settings toggle. */
+export async function probeDiscordPresence(
+  appId: string,
+): Promise<DiscordPresenceResult> {
+  const id = appId.trim();
+  if (!id) {
+    return fail("Discord Client ID is not configured (Admin → Notifications)");
+  }
+  if (!getTauriInvoke()) {
+    return fail(
+      "Rich Presence only works in the Polarr desktop app with Discord open",
+    );
+  }
+  // Set a brief placeholder then clear — verifies IPC + Client ID.
+  const set = await setDiscordListeningActivity(id, {
+    title: "Polarr",
+    artist: "Connected",
+    album: "Polarr",
   });
-  return true;
+  if (!set.ok) return set;
+  await clearDiscordActivity();
+  return ok();
 }
 
 export function discordRpcDisconnect() {
   void clearDiscordActivity();
-  closeSocket();
 }

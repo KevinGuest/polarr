@@ -30,6 +30,14 @@ import {
 } from "@/lib/auth-password";
 import { invalidateDiscordPresenceCache } from "@/components/player-provider";
 import { toastError, toastSaved, toastSuccess } from "@/lib/toast";
+import { MoreHorizontal } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type SettingsTab = "profile" | "playlists" | "discord";
 
@@ -114,10 +122,57 @@ export function SettingsClient() {
 
   const [discordLinked, setDiscordLinked] = useState(false);
   const [discordUsername, setDiscordUsername] = useState<string | null>(null);
+  const [discordDisplayName, setDiscordDisplayName] = useState<string | null>(
+    null,
+  );
+  const [discordAvatarUrl, setDiscordAvatarUrl] = useState<string | null>(null);
+  const [discordLoginEnabled, setDiscordLoginEnabled] = useState(true);
   const [discordPresence, setDiscordPresence] = useState(false);
   const [discordOAuthReady, setDiscordOAuthReady] = useState(false);
   const [discordPresenceReady, setDiscordPresenceReady] = useState(false);
   const [discordBusy, setDiscordBusy] = useState(false);
+
+  function applyDiscordAccount(data: {
+    discord?: {
+      linked?: boolean;
+      username?: string | null;
+      displayName?: string | null;
+      avatarUrl?: string | null;
+      presenceEnabled?: boolean;
+      loginEnabled?: boolean;
+    };
+    discordOAuthReady?: boolean;
+    discordPresenceReady?: boolean;
+    discordClientId?: string | null;
+  }) {
+    const linked = Boolean(data.discord?.linked);
+    setDiscordLinked(linked);
+    setDiscordUsername(
+      typeof data.discord?.username === "string" ? data.discord.username : null,
+    );
+    setDiscordDisplayName(
+      typeof data.discord?.displayName === "string"
+        ? data.discord.displayName
+        : typeof data.discord?.username === "string"
+          ? data.discord.username
+          : null,
+    );
+    setDiscordAvatarUrl(
+      typeof data.discord?.avatarUrl === "string"
+        ? data.discord.avatarUrl
+        : null,
+    );
+    setDiscordLoginEnabled(
+      data.discord?.loginEnabled == null
+        ? true
+        : Boolean(data.discord.loginEnabled),
+    );
+    setDiscordPresence(Boolean(data.discord?.presenceEnabled));
+    setDiscordOAuthReady(Boolean(data.discordOAuthReady));
+    setDiscordPresenceReady(
+      Boolean(data.discordPresenceReady || data.discordClientId),
+    );
+  }
 
   function setTab(next: SettingsTab) {
     router.replace(`/settings?tab=${next}`, { scroll: false });
@@ -139,17 +194,7 @@ export function SettingsClient() {
         const data = await accountRes.json();
         setUsername(typeof data.username === "string" ? data.username : "");
         setEmail(typeof data.email === "string" ? data.email : "");
-        setDiscordLinked(Boolean(data.discord?.linked));
-        setDiscordUsername(
-          typeof data.discord?.username === "string"
-            ? data.discord.username
-            : null,
-        );
-        setDiscordPresence(Boolean(data.discord?.presenceEnabled));
-        setDiscordOAuthReady(Boolean(data.discordOAuthReady));
-        setDiscordPresenceReady(
-          Boolean(data.discordPresenceReady || data.discordClientId),
-        );
+        applyDiscordAccount(data);
       }
       if (servicesRes.ok) {
         const data = await servicesRes.json();
@@ -178,14 +223,11 @@ export function SettingsClient() {
     const text = messages[flag];
     if (flag === "linked") {
       toastSuccess(text || "Discord linked");
-      setDiscordLinked(true);
       setTab("discord");
       void fetch("/api/account")
         .then((r) => r.json())
         .then((data) => {
-          setDiscordLinked(Boolean(data.discord?.linked));
-          setDiscordUsername(data.discord?.username || null);
-          setDiscordPresence(Boolean(data.discord?.presenceEnabled));
+          applyDiscordAccount(data);
         })
         .catch(() => null);
     } else if (text) {
@@ -330,14 +372,50 @@ export function SettingsClient() {
       }
       setDiscordLinked(false);
       setDiscordUsername(null);
+      setDiscordDisplayName(null);
+      setDiscordAvatarUrl(null);
+      setDiscordLoginEnabled(true);
       setDiscordPresence(false);
+      invalidateDiscordPresenceCache();
       toastSuccess("Discord unlinked");
     } finally {
       setDiscordBusy(false);
     }
   }
 
+  async function setDiscordLogin(enabled: boolean) {
+    setDiscordBusy(true);
+    try {
+      const res = await fetch("/api/account", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ discordLoginEnabled: enabled }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toastError(
+          typeof data.error === "string"
+            ? data.error
+            : "Could not update Discord login",
+        );
+        return;
+      }
+      applyDiscordAccount(data);
+      toastSaved(
+        enabled
+          ? "Discord login enabled"
+          : "Discord login disabled",
+      );
+    } finally {
+      setDiscordBusy(false);
+    }
+  }
+
   async function togglePresence(enabled: boolean) {
+    if (enabled && !discordLinked) {
+      toastError("Link your Discord account first");
+      return;
+    }
     setDiscordPresence(enabled);
     const res = await fetch("/api/account", {
       method: "PATCH",
@@ -355,11 +433,46 @@ export function SettingsClient() {
       return;
     }
     invalidateDiscordPresenceCache();
-    toastSaved(
-      enabled
-        ? "Listening status on"
-        : "Listening status off",
-    );
+
+    if (!enabled) {
+      toastSaved("Listening status off");
+      return;
+    }
+
+    const { isDesktopDiscordRpcAvailable, probeDiscordPresence } =
+      await import("@/lib/discord-rpc");
+    if (!isDesktopDiscordRpcAvailable()) {
+      toastSaved("Listening status on");
+      toastError(
+        "Rich Presence only shows in the Polarr desktop app with Discord open — browser tabs cannot set it.",
+      );
+      return;
+    }
+
+    let appId =
+      typeof data.discordClientId === "string"
+        ? data.discordClientId.trim()
+        : "";
+    if (!appId) {
+      const acct = await fetch("/api/account", { cache: "no-store" })
+        .then((r) => r.json())
+        .catch(() => ({}));
+      appId =
+        typeof acct.discordClientId === "string"
+          ? acct.discordClientId.trim()
+          : "";
+    }
+    if (!appId) {
+      toastSaved("Listening status on");
+      return;
+    }
+
+    const probe = await probeDiscordPresence(appId);
+    if (!probe.ok) {
+      toastError(probe.error);
+    } else {
+      toastSaved("Listening status on — Discord connected");
+    }
   }
 
   if (loading) {
@@ -533,72 +646,121 @@ export function SettingsClient() {
           <CardHeader>
             <CardTitle>Discord</CardTitle>
             <CardDescription>
-              Show what you’re listening to as Rich Presence while Discord
-              desktop is open on this machine. An admin configures this
-              server’s Discord Application Client ID under Admin →
-              Notifications. Best with the Polarr desktop app; browser tabs
-              can work if Discord allows local RPC from your server origin.
+              Link Discord to sign in and show your listening status.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {!discordPresenceReady ? (
-              <p className="text-sm text-muted-foreground">
-                An admin hasn’t set a Discord Application Client ID yet (Admin →
-                Notifications).
+            <div className="space-y-3">
+              <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                Link your Discord
               </p>
-            ) : (
-              <div className="flex items-center justify-between gap-4 rounded-lg border border-border px-3 py-3">
+              <p className="text-sm text-muted-foreground">
+                Linking lets you sign in with Discord on the login page and show
+                your listening status.
+              </p>
+              {!discordOAuthReady ? (
+                <p className="text-sm text-muted-foreground">
+                  An admin hasn’t finished Discord setup yet (Admin →
+                  Notifications).
+                </p>
+              ) : discordLinked ? (
+                <div className="flex items-center gap-3 rounded-lg border border-border px-3 py-3">
+                  <div className="relative size-10 shrink-0 overflow-hidden rounded-full bg-muted">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={
+                        discordAvatarUrl ||
+                        "https://cdn.discordapp.com/embed/avatars/0.png"
+                      }
+                      alt=""
+                      className="size-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {discordDisplayName || discordUsername || "Discord"}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      @{discordUsername || "unknown"}
+                      {!discordLoginEnabled ? " · Login off" : ""}
+                    </p>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 shrink-0"
+                        disabled={discordBusy}
+                        aria-label="Discord account options"
+                      >
+                        <MoreHorizontal className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuItem
+                        disabled={discordBusy}
+                        onSelect={() =>
+                          void setDiscordLogin(!discordLoginEnabled)
+                        }
+                      >
+                        {discordLoginEnabled
+                          ? "Disable for login"
+                          : "Enable for login"}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        disabled={discordBusy}
+                        className="text-destructive focus:text-destructive"
+                        onSelect={() => void unlinkDiscord()}
+                      >
+                        Unlink Discord
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={discordBusy}
+                  onClick={() => void linkDiscord()}
+                >
+                  {discordBusy ? "Opening…" : "Link Discord account"}
+                </Button>
+              )}
+            </div>
+
+            {discordPresenceReady ? (
+              <div
+                className={cn(
+                  "flex items-center justify-between gap-4 rounded-lg border border-border px-3 py-3",
+                  !discordLinked && "opacity-60",
+                )}
+              >
                 <div>
                   <p className="text-sm font-medium">Show listening status</p>
-                  <p className="text-xs text-muted-foreground">
-                    Requires Discord desktop running locally.
-                  </p>
+                  {!discordLinked ? (
+                    <p className="text-xs text-muted-foreground">
+                      Link Discord to enable this.
+                    </p>
+                  ) : null}
                 </div>
                 <Switch
-                  checked={discordPresence}
+                  checked={discordPresence && discordLinked}
+                  disabled={!discordLinked}
                   onCheckedChange={(v) => void togglePresence(v)}
                   aria-label="Show listening status on Discord"
                 />
               </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Listening status needs a Discord Application Client ID (Admin →
+                Notifications).
+              </p>
             )}
-            {discordOAuthReady ? (
-              <div className="space-y-3 border-t border-border pt-4">
-                <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                  Optional link
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Linking lets you sign in with Discord on the login page
-                  (same Discord app / redirect URI).
-                </p>
-                {discordLinked ? (
-                  <>
-                    <p className="text-sm text-foreground">
-                      Linked as{" "}
-                      <span className="font-medium">
-                        {discordUsername || "Discord"}
-                      </span>
-                    </p>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={discordBusy}
-                      onClick={() => void unlinkDiscord()}
-                    >
-                      Unlink Discord
-                    </Button>
-                  </>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={discordBusy}
-                    onClick={() => void linkDiscord()}
-                  >
-                    {discordBusy ? "Opening…" : "Link Discord account"}
-                  </Button>
-                )}
-              </div>
-            ) : null}
           </CardContent>
         </Card>
       ) : null}

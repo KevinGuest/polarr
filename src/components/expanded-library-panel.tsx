@@ -7,8 +7,8 @@ import {
   ChevronDown,
   Folder,
   LayoutGrid,
+  Maximize2,
   Music2,
-  PanelLeftClose,
   Pin,
   Search,
   UserRound,
@@ -260,7 +260,7 @@ export function ExpandedLibraryPanel({
             onClick={onClose}
             className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
           >
-            <PanelLeftClose className="size-5" strokeWidth={2} />
+            <Maximize2 className="size-5 rotate-45" strokeWidth={2} />
           </button>
         </div>
 

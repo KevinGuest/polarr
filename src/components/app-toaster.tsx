@@ -12,6 +12,13 @@ export function AppToaster() {
   const [mobile, setMobile] = useState(false);
 
   useEffect(() => {
+    if (
+      document.documentElement.getAttribute("data-polarr-desktop") === "1" ||
+      sessionStorage.getItem("polarr-desktop") === "1"
+    ) {
+      setMobile(false);
+      return;
+    }
     const mq = window.matchMedia("(max-width: 1023px)");
     const sync = () => setMobile(mq.matches);
     sync();

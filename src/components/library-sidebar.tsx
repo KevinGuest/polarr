@@ -25,9 +25,9 @@ import { LibraryOfflineDownloadProgress } from "@/components/playlist-offline-do
 import {
   ArrowDownUp,
   Folder,
+  Library,
+  Maximize2,
   Music2,
-  PanelLeftClose,
-  PanelLeftOpen,
   Pin,
   UserRound,
 } from "lucide-react";
@@ -118,10 +118,16 @@ function HeaderButton({
 export function LibrarySidebar({
   expanded = false,
   onExpandedChange,
+  collapsed = false,
+  onCollapsedChange,
   variant = "sidebar",
 }: {
+  /** Full “Your Library” overlay covering the main pane */
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
+  /** Narrow cover-only rail */
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
   variant?: "sidebar" | "page";
 }) {
   const pathname = usePathname();
@@ -136,8 +142,13 @@ export function LibrarySidebar({
 
   const likedActive = pathname.startsWith("/library/liked");
   const isPage = variant === "page";
-  const coverSize = isPage ? "size-12" : expanded ? "size-14" : "size-11";
-  const rowPad = isPage ? "px-2 py-2.5" : "px-3 py-2";
+  const isRail = !isPage && collapsed;
+  const coverSize = isPage
+    ? "size-12"
+    : isRail
+      ? "size-12"
+      : "size-11";
+  const rowPad = isPage ? "px-2 py-2.5" : isRail ? "justify-center p-1.5" : "px-3 py-2";
 
   const { showLiked, visibleItems } = useMemo(() => {
     if (!isPage) {
@@ -194,6 +205,8 @@ export function LibrarySidebar({
       <Link
         href={href}
         aria-current={active ? "page" : undefined}
+        aria-label={isRail ? item.title : undefined}
+        title={isRail ? item.title : undefined}
         onClick={dismissOverlays}
         className={cn(
           "flex w-full items-center gap-3 rounded-md transition-colors",
@@ -228,20 +241,22 @@ export function LibrarySidebar({
             className={coverClass}
           />
         )}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <div className="truncate text-sm font-medium text-foreground">
-              {item.title}
+        {!isRail ? (
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <div className="truncate text-sm font-medium text-foreground">
+                {item.title}
+              </div>
+              {item.pinned ? (
+                <Pin
+                  className="size-3 shrink-0 fill-current text-muted-foreground"
+                  aria-label="Pinned"
+                />
+              ) : null}
             </div>
-            {item.pinned ? (
-              <Pin
-                className="size-3 shrink-0 fill-current text-muted-foreground"
-                aria-label="Pinned"
-              />
-            ) : null}
+            <div className="truncate text-xs text-muted-foreground">{subtitle}</div>
           </div>
-          <div className="truncate text-xs text-muted-foreground">{subtitle}</div>
-        </div>
+        ) : null}
       </Link>
     );
 
@@ -292,6 +307,8 @@ export function LibrarySidebar({
       <Link
         href="/library/liked"
         aria-current={likedActive ? "page" : undefined}
+        aria-label={isRail ? "Liked Songs" : undefined}
+        title={isRail ? "Liked Songs" : undefined}
         onClick={dismissOverlays}
         className={cn(
           "flex w-full items-center gap-3 rounded-md transition-colors",
@@ -300,22 +317,24 @@ export function LibrarySidebar({
         )}
       >
         <LikedSongsCover className={cn("shrink-0 rounded-sm", coverSize)} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <div className="truncate text-sm font-medium text-foreground">
-              Liked Songs
+        {!isRail ? (
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <div className="truncate text-sm font-medium text-foreground">
+                Liked Songs
+              </div>
+              {likedPinned ? (
+                <Pin
+                  className="size-3 shrink-0 fill-current text-muted-foreground"
+                  aria-label="Pinned"
+                />
+              ) : null}
             </div>
-            {likedPinned ? (
-              <Pin
-                className="size-3 shrink-0 fill-current text-muted-foreground"
-                aria-label="Pinned"
-              />
-            ) : null}
+            <div className="truncate text-xs text-muted-foreground">
+              Playlist · {likedTracks} song{likedTracks === 1 ? "" : "s"}
+            </div>
           </div>
-          <div className="truncate text-xs text-muted-foreground">
-            Playlist · {likedTracks} song{likedTracks === 1 ? "" : "s"}
-          </div>
-        </div>
+        ) : null}
       </Link>
     </LibraryItemContextMenu>
   ) : null;
@@ -380,26 +399,46 @@ export function LibrarySidebar({
 
       {!isPage ? (
         <TooltipProvider delayDuration={300}>
-          <div className="mb-1 flex items-center gap-1 px-1.5">
-            <p className="min-w-0 flex-1 px-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-              Library
-            </p>
-            <LibraryCreateMenu />
-            <HeaderButton
-              label={expanded ? "Collapse library" : "Expand library"}
-              onClick={() => onExpandedChange?.(!expanded)}
-            >
-              {expanded ? (
-                <PanelLeftClose className="size-3.5" strokeWidth={2} />
-              ) : (
-                <PanelLeftOpen className="size-3.5" strokeWidth={2} />
-              )}
-            </HeaderButton>
-          </div>
+          {isRail ? (
+            <div className="mb-2 flex flex-col items-center gap-1">
+              <HeaderButton
+                label="Widen Your Library"
+                onClick={() => onCollapsedChange?.(false)}
+              >
+                <Library className="size-4" strokeWidth={2} />
+              </HeaderButton>
+              <LibraryCreateMenu />
+            </div>
+          ) : (
+            <div className="mb-2 flex items-center gap-1 px-1">
+              <HeaderButton
+                label="Shrink Your Library"
+                onClick={() => {
+                  onExpandedChange?.(false);
+                  onCollapsedChange?.(true);
+                }}
+              >
+                <Library className="size-4" strokeWidth={2} />
+              </HeaderButton>
+              <p className="min-w-0 flex-1 truncate px-1 text-sm font-bold text-foreground">
+                Your Library
+              </p>
+              <LibraryCreateMenu variant="pill" />
+              <HeaderButton
+                label={expanded ? "Collapse Your Library" : "Expand Your Library"}
+                onClick={() => {
+                  onCollapsedChange?.(false);
+                  onExpandedChange?.(!expanded);
+                }}
+              >
+                <Maximize2 className="size-3.5" strokeWidth={2} />
+              </HeaderButton>
+            </div>
+          )}
         </TooltipProvider>
       ) : null}
 
-      <LibraryOfflineDownloadProgress />
+      {!isRail ? <LibraryOfflineDownloadProgress /> : null}
 
       {isPage ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain">

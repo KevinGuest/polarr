@@ -44,6 +44,7 @@ import { LISTEN_CREDITED_EVENT } from "@/lib/ui-events";
 import { cn, formatDuration } from "@/lib/utils";
 import { KaraokeLyricLine } from "@/components/karaoke-lyric-line";
 import { useKaraokeSession } from "@/components/use-karaoke-session";
+import { isPolarrDesktop } from "@/lib/desktop-shell";
 
 function formatRemaining(progress: number, duration: number): string {
   const rem = Math.max(0, duration - progress);
@@ -207,11 +208,13 @@ function SingControl({
 }
 
 function subscribeLg(onChange: () => void) {
+  if (isPolarrDesktop()) return () => {};
   const mq = window.matchMedia("(min-width: 1024px)");
   mq.addEventListener("change", onChange);
   return () => mq.removeEventListener("change", onChange);
 }
 function getLgSnapshot() {
+  if (isPolarrDesktop()) return true;
   return window.matchMedia("(min-width: 1024px)").matches;
 }
 function getLgServerSnapshot() {

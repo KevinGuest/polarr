@@ -2,6 +2,24 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Desktop shell always uses lg layout — never flip to phone chrome on resize. */
+@custom-variant lg {
+  @media (width >= 1024px) {
+    @slot;
+  }
+  html[data-polarr-desktop] & {
+    @slot;
+  }
+}
+
+@custom-variant max-lg {
+  @media (width < 1024px) {
+    html:not([data-polarr-desktop]) & {
+      @slot;
+    }
+  }
+}
+
 /*
   Tokens from satori-ui-preview → slime-satsy/web (Satori).
   Values are HSL channels; colors resolve via hsl(var(--token)).
@@ -126,8 +144,8 @@
   --mobile-tab-stack: var(--mobile-dock-stack);
 }
 
-/* Tauri desktop shell: hide ALL web <header> chrome (title bar owns it) */
-html[data-polarr-desktop] header,
+/* Tauri desktop shell: hide only app chrome headers (title bar owns them).
+   Do NOT target bare `header` — artist/playlist heroes use <header>. */
 html[data-polarr-desktop] [data-polarr-app-header] {
   display: none !important;
   height: 0 !important;

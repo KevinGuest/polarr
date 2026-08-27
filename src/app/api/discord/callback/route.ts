@@ -33,6 +33,7 @@ type DiscordMe = {
   id?: string;
   username?: string;
   global_name?: string | null;
+  avatar?: string | null;
 };
 
 async function exchangeCode(code: string, settings: ReturnType<typeof getSettings>) {
@@ -130,7 +131,9 @@ export async function GET(req: Request) {
 
     setDiscordLink(userId, {
       discordId: me.id!,
-      discordUsername: (me.global_name || me.username || "Discord").trim(),
+      discordUsername: (me.username || "Discord").trim(),
+      discordDisplayName: (me.global_name || me.username || "Discord").trim(),
+      discordAvatar: me.avatar || null,
       accessToken: token.access_token!,
       refreshToken: token.refresh_token || null,
       expiresAt,
@@ -187,7 +190,9 @@ export async function GET(req: Request) {
 
   setDiscordLink(user.id, {
     discordId: me.id!,
-    discordUsername: (me.global_name || me.username || "Discord").trim(),
+    discordUsername: (me.username || "Discord").trim(),
+    discordDisplayName: (me.global_name || me.username || "Discord").trim(),
+    discordAvatar: me.avatar || null,
     accessToken: token.access_token!,
     refreshToken: token.refresh_token || null,
     expiresAt,

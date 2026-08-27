@@ -1480,19 +1480,27 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             durationRef.current ||
             (typeof track.duration === "number" ? track.duration : 0) ||
             0;
-          await setDiscordListeningActivity(discordPresenceCache.appId, {
-            title: track.title,
-            artist: track.artist,
-            album: track.album,
-            coverUrl: track.coverPath,
-            progressSec,
-            durationSec,
-          });
+          const result = await setDiscordListeningActivity(
+            discordPresenceCache.appId,
+            {
+              title: track.title,
+              artist: track.artist,
+              album: track.album,
+              coverUrl: track.coverPath,
+              progressSec,
+              durationSec,
+            },
+          );
+          if (!result.ok && process.env.NODE_ENV === "development") {
+            console.warn("[discord-presence]", result.error);
+          }
         } else {
           await clearDiscordActivity();
         }
-      } catch {
-        /* Discord desktop may be closed */
+      } catch (e) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[discord-presence]", e);
+        }
       }
     })();
 

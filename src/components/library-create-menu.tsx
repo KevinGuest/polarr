@@ -153,8 +153,8 @@ function MobileCreateDrawer({
 }
 
 type LibraryCreateMenuProps = {
-  /** Sidebar icon, mobile library header, or bottom dock tab */
-  variant?: "sidebar" | "header" | "dock";
+  /** Sidebar icon, Create pill, mobile library header, or bottom dock tab */
+  variant?: "sidebar" | "pill" | "header" | "dock";
   onOpenChange?: (open: boolean) => void;
 };
 
@@ -271,8 +271,19 @@ export function LibraryCreateMenu({
     );
   }
 
-  return (
-    <DropdownMenu open={open} onOpenChange={setMenuOpen}>
+  const trigger =
+    variant === "pill" ? (
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="Create"
+          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-full bg-muted/60 px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+        >
+          <Plus className="size-4" strokeWidth={2.25} />
+          Create
+        </button>
+      </DropdownMenuTrigger>
+    ) : (
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
@@ -287,9 +298,14 @@ export function LibraryCreateMenu({
         </TooltipTrigger>
         <TooltipContent side="bottom">Create</TooltipContent>
       </Tooltip>
+    );
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setMenuOpen}>
+      {trigger}
       <DropdownMenuContent
         align="start"
-        side="top"
+        side="bottom"
         sideOffset={8}
         className={cn(
           "w-[22rem] rounded-xl border-0 bg-[#282828] p-2 text-white shadow-2xl",

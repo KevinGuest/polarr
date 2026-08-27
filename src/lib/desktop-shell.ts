@@ -14,7 +14,7 @@ export const DESKTOP_QUERY_PARAM = "desktop";
 const STORAGE_KEY = "polarr-desktop";
 const HIDE_STYLE_ID = "polarr-desktop-hide-header";
 const HIDE_CSS =
-  "html[data-polarr-desktop] header,html[data-polarr-desktop] [data-polarr-app-header]{display:none!important;height:0!important;max-height:0!important;min-height:0!important;overflow:hidden!important;border:0!important;padding:0!important;margin:0!important;visibility:hidden!important;pointer-events:none!important;opacity:0!important;position:absolute!important;clip:rect(0,0,0,0)!important;flex:0 0 0!important;}";
+  "html[data-polarr-desktop] [data-polarr-app-header]{display:none!important;height:0!important;max-height:0!important;min-height:0!important;overflow:hidden!important;border:0!important;padding:0!important;margin:0!important;visibility:hidden!important;pointer-events:none!important;opacity:0!important;position:absolute!important;clip:rect(0,0,0,0)!important;flex:0 0 0!important;}";
 
 export type DesktopAuthPayload = {
   authenticated: boolean;

@@ -665,7 +665,7 @@ export function AdminNotificationsClient() {
             <li>
               Copy the{" "}
               <span className="font-medium text-foreground">Client ID</span> —
-              enough for listening status (local Discord desktop).
+              required for listening status.
             </li>
             <li>
               Optional: Client Secret + redirect{" "}
@@ -676,12 +676,16 @@ export function AdminNotificationsClient() {
             </li>
             <li>Click Edit on Rich Presence and paste the values, then Save.</li>
             <li>
-              Users enable{" "}
+              Users open the{" "}
+              <span className="font-medium text-foreground">
+                Polarr desktop app
+              </span>
+              , enable{" "}
               <span className="font-medium text-foreground">
                 Show listening status
               </span>{" "}
-              under Account → Discord. Discord desktop must be running on the
-              same PC (Polarr desktop app recommended).
+              under Settings → Discord, and play a track with Discord desktop
+              running as the same Windows user.
             </li>
           </ol>
         </DialogContent>

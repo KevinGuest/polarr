@@ -2,7 +2,7 @@ manifestVersion: 1
 id: polarr
 category: media
 name: Polarr
-version: "0.6.17"
+version: "0.6.18"
 tagline: Discover, request, and stream your homeserver music
 description: >-
   Polarr is a self-hosted music hub for umbrelOS. Point it at Lidarr (the same
@@ -33,9 +33,8 @@ description: >-
   Polarr does not ship Lidarr itself; install Lidarr from the Umbrel App Store
   first if you want automated *arr-style acquisition.
 releaseNotes: >-
-  Desktop layout lock + artist hero fix; Discord Rich Presence (desktop IPC)
-  and Settings Discord link UX; admin Discord user details; SPA chrome nav
-  without interrupting playback; scrollbar polish.
+  Logo is home (no Home nav); Expand Your Library overlays main until
+  collapsed; Discord presence probe no longer sticks on Connected.
 developer: Polarr
 website: https://github.com/KevinGuest/polarr
 dependencies:

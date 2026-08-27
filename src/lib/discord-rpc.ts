@@ -251,20 +251,25 @@ export async function probeDiscordPresence(
   if (!id) {
     return fail("Discord Client ID is not configured (Admin → Notifications)");
   }
-  if (!getTauriInvoke()) {
+  const invoke = getTauriInvoke();
+  if (!invoke) {
     return fail(
       "Rich Presence only works in the Polarr desktop app with Discord open",
     );
   }
-  // Set a brief placeholder then clear — verifies IPC + Client ID.
-  const set = await setDiscordListeningActivity(id, {
-    title: "Polarr",
-    artist: "Connected",
-    album: "Polarr",
-  });
-  if (!set.ok) return set;
-  await clearDiscordActivity();
-  return ok();
+  // Connect only — never set a placeholder activity (that stuck as “Polarr / Connected”).
+  try {
+    await invoke("discord_probe_presence", { clientId: id });
+    return ok();
+  } catch (e) {
+    const msg =
+      e instanceof Error
+        ? e.message
+        : typeof e === "string"
+          ? e
+          : "Could not connect to Discord (is Discord running?)";
+    return fail(msg);
+  }
 }
 
 export function discordRpcDisconnect() {

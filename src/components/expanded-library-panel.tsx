@@ -247,7 +247,7 @@ export function ExpandedLibraryPanel({
   }
 
   return (
-    <div className="absolute inset-0 z-30 flex min-h-0 flex-col bg-background">
+    <div className="absolute inset-0 z-30 flex min-h-0 flex-col border-r border-border bg-background">
       <div className="shrink-0 px-6 pb-4 pt-6 lg:px-8">
         <div className="mb-5 flex items-center gap-3">
           <h1 className="min-w-0 flex-1 text-2xl font-bold tracking-tight text-foreground">

@@ -11,7 +11,6 @@ import {
   DoorOpen,
   Download,
   Gauge,
-  Home,
   Info,
   ListMusic,
   ListVideo,
@@ -22,6 +21,7 @@ import {
   Users,
   Bell,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ExpandedLibraryPanel } from "@/components/expanded-library-panel";
@@ -50,10 +50,6 @@ import {
   markPolarrDesktop,
 } from "@/lib/desktop-shell";
 import { roleIsStaff } from "@/lib/roles";
-
-const primaryNav = [
-  { href: "/", label: "Home", icon: Home },
-];
 
 const adminNavGroups = [
   {
@@ -130,7 +126,7 @@ function NavLink({
 }: {
   href: string;
   label: string;
-  icon: typeof Home;
+  icon: LucideIcon;
   active: boolean;
   onNavigate?: () => void;
   compact?: boolean;
@@ -496,63 +492,77 @@ function ShellInner({ children }: { children: React.ReactNode }) {
       ) : null}
 
       <div className="flex min-h-0 flex-1">
-        <aside
-          className={cn(
-            "hidden shrink-0 flex-col border-r border-border py-4 transition-[width,padding] duration-200 ease-out lg:flex",
-            isAdminPath
-              ? "w-56 px-3 md:w-60"
-              : libraryCollapsed
-                ? "w-[72px] px-2"
-                : "w-60 px-3 md:w-72",
-          )}
-        >
-          {isAdminPath ? (
-            adminSidebarInner
-          ) : (
-            <TooltipProvider delayDuration={300}>
-              <nav className="space-y-0.5" aria-label="Primary">
-                {primaryNav.map((item) => (
-                  <NavLink
-                    key={item.href}
-                    {...item}
-                    compact={libraryCollapsed}
-                    active={
-                      item.href === "/"
-                        ? pathname === "/"
-                        : pathname.startsWith(item.href)
-                    }
-                  />
-                ))}
-              </nav>
-
-              <div className="mt-4 flex min-h-0 flex-1 flex-col">
-                <Suspense fallback={null}>
-                  <LibrarySidebar
-                    expanded={libraryExpanded}
-                    onExpandedChange={setLibraryExpanded}
-                    collapsed={libraryCollapsed}
-                    onCollapsedChange={setLibraryCollapsed}
-                  />
-                </Suspense>
-                {!libraryCollapsed ? (
-                  <div className="mt-auto">
-                    <BanStatusBox />
-                  </div>
-                ) : null}
-              </div>
-            </TooltipProvider>
-          )}
-        </aside>
-
         <div className="relative flex min-h-0 min-w-0 flex-1">
-          <div className="relative min-h-0 min-w-0 flex-1">
-            {!isAdminPath && libraryExpanded ? (
-              <Suspense fallback={null}>
-                <ExpandedLibraryPanel
-                  onClose={() => setLibraryExpanded(false)}
-                />
-              </Suspense>
-            ) : null}
+          {!isAdminPath && libraryExpanded ? (
+            <Suspense fallback={null}>
+              <ExpandedLibraryPanel
+                onClose={() => setLibraryExpanded(false)}
+              />
+            </Suspense>
+          ) : null}
+          <aside
+            className={cn(
+              "hidden shrink-0 flex-col border-r border-border py-4 transition-[width,padding] duration-200 ease-out lg:flex",
+              isAdminPath
+                ? "w-56 px-3 md:w-60"
+                : libraryCollapsed
+                  ? "w-[72px] px-2"
+                  : "w-60 px-3 md:w-72",
+              libraryExpanded && "pointer-events-none",
+            )}
+            aria-hidden={libraryExpanded || undefined}
+          >
+            {isAdminPath ? (
+              adminSidebarInner
+            ) : (
+              <TooltipProvider delayDuration={300}>
+                {/* Desktop app: no web header — logo in the rail is home. Web: header logo. */}
+                {desktopShell ? (
+                  <Link
+                    href="/"
+                    onClick={() => {
+                      dismissOverlays();
+                      setLibraryExpanded(false);
+                    }}
+                    aria-label="Polarr home"
+                    title="Home"
+                    className={cn(
+                      "mb-3 inline-flex items-center rounded-md text-foreground transition-opacity hover:opacity-90",
+                      libraryCollapsed ? "justify-center px-1" : "px-1",
+                    )}
+                  >
+                    <PolarrMark
+                      className={libraryCollapsed ? "size-8" : "size-9"}
+                    />
+                  </Link>
+                ) : null}
+
+                <div className="mt-1 flex min-h-0 flex-1 flex-col">
+                  <Suspense fallback={null}>
+                    <LibrarySidebar
+                      expanded={libraryExpanded}
+                      onExpandedChange={setLibraryExpanded}
+                      collapsed={libraryCollapsed}
+                      onCollapsedChange={setLibraryCollapsed}
+                    />
+                  </Suspense>
+                  {!libraryCollapsed ? (
+                    <div className="mt-auto">
+                      <BanStatusBox />
+                    </div>
+                  ) : null}
+                </div>
+              </TooltipProvider>
+            )}
+          </aside>
+
+          <div
+            className={cn(
+              "relative min-h-0 min-w-0 flex-1",
+              libraryExpanded && "pointer-events-none",
+            )}
+            aria-hidden={libraryExpanded || undefined}
+          >
             <main className="h-full">
               {useLibraryPageScroll ? (
                 <div
@@ -571,8 +581,8 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             </main>
             {!isAdminPath && <PlayerPanels />}
           </div>
-          {!isAdminPath && <PlayerQueueRail />}
         </div>
+        {!isAdminPath && <PlayerQueueRail />}
       </div>
 
       {!isAdminPath && <NowPlayingBar />}

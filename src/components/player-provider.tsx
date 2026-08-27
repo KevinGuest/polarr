@@ -112,9 +112,14 @@ let discordPresenceCache: {
   appId: string | null;
 } = { at: 0, presenceOn: false, appId: null };
 
+const PRESENCE_INVALIDATE_EVENT = "polarr-discord-presence-invalidate";
+
 /** Call after Settings toggles Discord presence so the player picks it up. */
 export function invalidateDiscordPresenceCache() {
   discordPresenceCache.at = 0;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(PRESENCE_INVALIDATE_EVENT));
+  }
 }
 
 async function fetchLikedPlayerTracks(): Promise<PlayerTrack[]> {
@@ -1437,11 +1442,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(id);
   }, [playing, track, isOwner]);
 
-  // Discord Rich Presence (desktop IPC bridge or local Discord WebSocket RPC).
+  // Discord Rich Presence (desktop IPC only).
+  useEffect(() => {
+    const onInvalidate = () => setPresenceRev((n) => n + 1);
+    window.addEventListener(PRESENCE_INVALIDATE_EVENT, onInvalidate);
+    return () => {
+      window.removeEventListener(PRESENCE_INVALIDATE_EVENT, onInvalidate);
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
-    void (async () => {
+    const pushPresence = async () => {
       try {
         if (
           discordPresenceCache.at === 0 ||
@@ -1502,10 +1515,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           console.warn("[discord-presence]", e);
         }
       }
-    })();
+    };
+
+    void pushPresence();
+
+    // Keep timestamps fresh and recover if a stuck probe/activity was left behind.
+    const interval =
+      playing && track
+        ? window.setInterval(() => {
+            void pushPresence();
+          }, 15_000)
+        : 0;
 
     return () => {
       cancelled = true;
+      if (interval) window.clearInterval(interval);
     };
   }, [playing, track, presenceRev]);
 

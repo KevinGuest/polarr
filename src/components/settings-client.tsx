@@ -651,13 +651,6 @@ export function SettingsClient() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-3">
-              <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                Link your Discord
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Linking lets you sign in with Discord on the login page and show
-                your listening status.
-              </p>
               {!discordOAuthReady ? (
                 <p className="text-sm text-muted-foreground">
                   An admin hasn’t finished Discord setup yet (Admin →

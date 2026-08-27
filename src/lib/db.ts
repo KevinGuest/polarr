@@ -1796,7 +1796,7 @@ export function discordAvatarUrl(
   }
   let index = 0;
   try {
-    if (id) index = Number((BigInt(id) >> 22n) % 6n);
+    if (id) index = Number((BigInt(id) >> BigInt(22)) % BigInt(6));
   } catch {
     index = 0;
   }

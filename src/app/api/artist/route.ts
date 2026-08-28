@@ -1,4 +1,4 @@
-import { json } from "@/lib/api";
+import { json, requireAuth } from "@/lib/api";
 import {
   fetchArtistPopularTracks,
   hydratePopularWithLibrary,
@@ -66,6 +66,9 @@ async function lookupDiscography(
 }
 
 export async function GET(req: Request) {
+  const auth = await requireAuth();
+  if (auth.response) return auth.response;
+
   const url = new URL(req.url);
   const artist = (url.searchParams.get("name") || "").trim();
   const foreignFromQuery = (

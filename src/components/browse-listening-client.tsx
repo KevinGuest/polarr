@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
 import { setDragTrack } from "@/lib/drag-track";
 import { LISTEN_CREDITED_EVENT } from "@/lib/ui-events";
+import { OTHERS_LISTENING_POLL_MS } from "@/lib/listen";
 
 type OthersItem = PlayerTrack & {
   playedAt: string;
@@ -44,14 +45,19 @@ export function BrowseListeningClient() {
     void load();
     const t = window.setInterval(() => {
       void load();
-    }, 15_000);
+    }, OTHERS_LISTENING_POLL_MS);
     const onListen = () => {
       void load();
     };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
     window.addEventListener(LISTEN_CREDITED_EVENT, onListen);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.clearInterval(t);
       window.removeEventListener(LISTEN_CREDITED_EVENT, onListen);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [load]);
 
@@ -97,7 +103,7 @@ export function BrowseListeningClient() {
         </div>
       ) : items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          Tracks other people on this server play for 15+ seconds show up
+          Tracks other people on this server play for 30+ seconds show up
           here. Your own plays stay in Recently played.
         </p>
       ) : (

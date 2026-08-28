@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { json } from "@/lib/api";
 import { authenticate } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH } from "@/lib/auth-password";
-import { getRequestIp, normalizeHwid } from "@/lib/request-client";
+import { getRequestIpFromRequest, normalizeHwid } from "@/lib/request-client";
 import {
   loginBlockedForMs,
   recordLoginFailure,
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
-  const ip = await getRequestIp();
+  const ip = getRequestIpFromRequest(req);
 
   const waitMs = loginBlockedForMs(ip, parsed.data.username);
   if (waitMs > 0) {
@@ -70,14 +70,14 @@ export async function POST(req: Request) {
     result.token,
     await sessionCookieOptions(),
   );
-  const { notifyDiscord } = await import("@/lib/admin-notify");
+  const { notifyDiscord, notifyIpField } = await import("@/lib/admin-notify");
   notifyDiscord("userLogin", {
     title: "User signed in",
     description: `${result.user.username} signed in`,
     fields: [
       { name: "User", value: result.user.username, inline: true },
       { name: "Method", value: "password", inline: true },
-      ...(ip ? [{ name: "IP", value: ip, inline: true }] : []),
+      notifyIpField(ip),
     ],
   });
   return json({ token: result.token, user: result.user });

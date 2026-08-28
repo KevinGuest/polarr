@@ -26,6 +26,24 @@ export function getAuthUserFromRequest(req: Request) {
   return getUserByToken(tokenFromCookieHeader(req.headers.get("cookie")));
 }
 
+export function unauthorizedJson() {
+  return json({ error: "Unauthorized" }, { status: 401 });
+}
+
+/** Route Handlers with a Request — stream, live, status, etc. */
+export function requireAuthFromRequest(req: Request) {
+  const user = getAuthUserFromRequest(req);
+  if (!user) return { user: null as null, response: unauthorizedJson() };
+  return { user, response: null as null };
+}
+
+/** Route Handlers using Next cookies()/headers(). */
+export async function requireAuth() {
+  const user = await getAuthUser();
+  if (!user) return { user: null as null, response: unauthorizedJson() };
+  return { user, response: null as null };
+}
+
 export async function getAuthUser() {
   const headerStore = await headers();
   const auth = headerStore.get("authorization");

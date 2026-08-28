@@ -5,7 +5,15 @@
  */
 
 import { namesMatch, normalizeArtistName } from "@/lib/artist-portrait";
-import { scoreSearchHit } from "@/lib/track-match";
+import {
+  artistNameMatchesQuery,
+  isArtistNameQuery,
+  scoreArtistSearchHit,
+  scoreSearchHit,
+  scoreTrackMatch,
+  TRACK_MATCH_MIN_SCORE,
+} from "@/lib/track-match";
+import { titleLooksExplicit } from "@/lib/utils";
 import type { LocalSourceBadge } from "@/lib/track-source-badge";
 
 export type CatalogTrackHit = {
@@ -63,6 +71,28 @@ type DeezerAlbum = {
   artist?: { name?: string };
 };
 
+type DeezerAlbumDetail = {
+  title?: string;
+  cover_big?: string;
+  cover_medium?: string;
+  artist?: { name?: string };
+  tracks?: {
+    data?: {
+      title?: string;
+      duration?: number;
+      track_position?: number;
+      explicit_lyrics?: boolean;
+    }[];
+  };
+};
+
+export type CatalogAlbumTrack = {
+  title: string;
+  trackNumber: number;
+  duration: number;
+  explicit: boolean;
+};
+
 type DeezerArtist = {
   id?: number;
   name?: string;
@@ -77,6 +107,7 @@ type ItunesResult = {
   kind?: string;
   trackName?: string;
   trackId?: number;
+  trackNumber?: number;
   collectionName?: string;
   collectionId?: number;
   artistName?: string;
@@ -161,6 +192,11 @@ function trackQueryVariants(q: string): string[] {
   if (!term) return [];
   const variants = new Set<string>([term]);
   const tokens = term.split(" ").filter(Boolean);
+  if (tokens.length <= 3) {
+    variants.add(`artist:"${term}"`);
+    variants.add(`feat ${term}`);
+    variants.add(`feat. ${term}`);
+  }
   if (tokens.length >= 2) {
     // Last token as artist hint, rest as title
     const title = tokens.slice(0, -1).join(" ");
@@ -180,7 +216,7 @@ function trackQueryVariants(q: string): string[] {
 }
 
 async function searchDeezerTracksMulti(q: string, limit: number) {
-  const variants = trackQueryVariants(q).slice(0, 4);
+  const variants = trackQueryVariants(q).slice(0, 6);
   const lists = await Promise.all(
     variants.map((v) =>
       searchDeezerTracks(v, Math.min(limit, 20)).catch(
@@ -391,9 +427,15 @@ function mergeTracks(
   }
   const out = [...byKey.values()];
   if (query?.trim()) {
-    out.sort(
-      (a, b) => scoreSearchHit(query, b) - scoreSearchHit(query, a),
-    );
+    const artistQuery = isArtistNameQuery(query);
+    out.sort((a, b) => {
+      if (artistQuery) {
+        const d =
+          scoreArtistSearchHit(query, b) - scoreArtistSearchHit(query, a);
+        if (d) return d;
+      }
+      return scoreSearchHit(query, b) - scoreSearchHit(query, a);
+    });
   }
   return out.slice(0, limit);
 }
@@ -449,6 +491,7 @@ function mergeAlbums(
 function mergeArtists(
   lists: CatalogArtistHit[][],
   limit: number,
+  query?: string,
 ): CatalogArtistHit[] {
   const byKey = new Map<string, CatalogArtistHit>();
   for (const list of lists) {
@@ -464,10 +507,150 @@ function mergeArtists(
       }
     }
   }
-  // Prefer artists that already have photos
+  const q = (query || "").trim();
   return [...byKey.values()]
-    .sort((a, b) => Number(Boolean(b.image)) - Number(Boolean(a.image)))
+    .sort((a, b) => {
+      if (q) {
+        const ae = artistNameMatchesQuery(a.name, q) ? 1 : 0;
+        const be = artistNameMatchesQuery(b.name, q) ? 1 : 0;
+        if (ae !== be) return be - ae;
+        const an = normalizeArtistName(a.name);
+        const bn = normalizeArtistName(b.name);
+        const qn = normalizeArtistName(q);
+        const aStarts = qn && an.startsWith(qn) ? 1 : 0;
+        const bStarts = qn && bn.startsWith(qn) ? 1 : 0;
+        if (aStarts !== bStarts) return bStarts - aStarts;
+      }
+      return Number(Boolean(b.image)) - Number(Boolean(a.image));
+    })
     .slice(0, limit);
+}
+
+function pickBestAlbumHit<
+  T extends { title: string; artist: string; year?: number },
+>(hits: T[], artist: string, album: string, year?: number): T | null {
+  let best: T | null = null;
+  let bestScore = 0;
+  for (const hit of hits) {
+    let score = scoreTrackMatch(hit, artist, album);
+    if (year != null && hit.year != null) {
+      const delta = Math.abs(hit.year - year);
+      if (delta === 0) score += 8;
+      else if (delta === 1) score += 4;
+      else if (delta > 3) score -= 6;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = hit;
+    }
+  }
+  return bestScore >= TRACK_MATCH_MIN_SCORE ? best : null;
+}
+
+function parseDeezerAlbumId(id: string): number | null {
+  const m = /^deezer:album:(\d+)$/.exec(id.trim());
+  if (!m) return null;
+  const n = Number.parseInt(m[1]!, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function parseItunesAlbumId(id: string): number | null {
+  const m = /^itunes:album:(\d+)$/.exec(id.trim());
+  if (!m) return null;
+  const n = Number.parseInt(m[1]!, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+async function deezerAlbumTracklist(
+  albumId: number,
+): Promise<CatalogAlbumTrack[]> {
+  const body = await fetchJson<DeezerAlbumDetail>(
+    `https://api.deezer.com/album/${albumId}`,
+  );
+  const raw = body?.tracks?.data || [];
+  const out: CatalogAlbumTrack[] = [];
+  let fallbackNum = 1;
+  for (const t of raw) {
+    const title = (t.title || "").trim();
+    if (!title) continue;
+    const trackNumber =
+      typeof t.track_position === "number" && t.track_position > 0
+        ? t.track_position
+        : fallbackNum;
+    out.push({
+      title,
+      trackNumber,
+      duration: typeof t.duration === "number" ? t.duration : 0,
+      explicit: Boolean(t.explicit_lyrics) || titleLooksExplicit(title),
+    });
+    fallbackNum += 1;
+  }
+  return out.sort((a, b) => a.trackNumber - b.trackNumber);
+}
+
+async function itunesAlbumTracklist(
+  collectionId: number,
+): Promise<CatalogAlbumTrack[]> {
+  const body = await fetchJson<{ results?: ItunesResult[] }>(
+    `https://itunes.apple.com/lookup?id=${collectionId}&entity=song`,
+  );
+  const songs = (body?.results || []).filter(
+    (r) => r.wrapperType === "track" || r.kind === "song",
+  );
+  const out: CatalogAlbumTrack[] = [];
+  for (const r of songs) {
+    const title = (r.trackName || "").trim();
+    if (!title) continue;
+    const trackNumber =
+      typeof r.trackNumber === "number" && r.trackNumber > 0
+        ? r.trackNumber
+        : out.length + 1;
+    out.push({
+      title,
+      trackNumber,
+      duration: r.trackTimeMillis
+        ? Math.round(r.trackTimeMillis / 1000)
+        : 0,
+      explicit: titleLooksExplicit(title),
+    });
+  }
+  return out.sort((a, b) => a.trackNumber - b.trackNumber);
+}
+
+/** Tracklist for a published album when Lidarr / MusicBrainz have nothing. */
+export async function catalogAlbumTracks(
+  artist: string,
+  album: string,
+  opts?: { year?: number },
+): Promise<CatalogAlbumTrack[]> {
+  const a = artist.trim();
+  const t = album.trim();
+  if (!a || !t) return [];
+
+  const query = `${a} ${t}`;
+  const year = opts?.year;
+
+  const deezerHits = await searchDeezerAlbums(query, 15);
+  const deezerBest = pickBestAlbumHit(deezerHits, a, t, year);
+  if (deezerBest) {
+    const albumId = parseDeezerAlbumId(deezerBest.id);
+    if (albumId) {
+      const tracks = await deezerAlbumTracklist(albumId);
+      if (tracks.length > 0) return tracks;
+    }
+  }
+
+  const itunesHits = await searchItunesAlbums(query, 15);
+  const itunesBest = pickBestAlbumHit(itunesHits, a, t, year);
+  if (itunesBest) {
+    const collectionId = parseItunesAlbumId(itunesBest.id);
+    if (collectionId) {
+      const tracks = await itunesAlbumTracklist(collectionId);
+      if (tracks.length > 0) return tracks;
+    }
+  }
+
+  return [];
 }
 
 /** Search tracks / albums / artists without Lidarr. */
@@ -510,6 +693,6 @@ export async function searchCatalog(q: string, limit = 24): Promise<{
   return {
     tracks,
     albums: mergeAlbums([deezerAlbums, itunesAlbums], limit, term),
-    artists: mergeArtists([deezerArtists, itunesArtists], limit),
+    artists: mergeArtists([deezerArtists, itunesArtists], limit, term),
   };
 }

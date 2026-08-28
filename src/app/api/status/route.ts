@@ -1,4 +1,4 @@
-import { json } from "@/lib/api";
+import { json, requireAuthFromRequest } from "@/lib/api";
 import { getSettings, hasUsers } from "@/lib/db";
 import { LidarrClient } from "@/lib/lidarr";
 import { ffmpegAvailable, ytDlpAvailable } from "@/lib/tools";
@@ -18,7 +18,7 @@ type StatusPayload = {
 
 const statusCache = new TtlCache<StatusPayload>(30_000, 4);
 
-export async function GET() {
+export async function GET(req: Request) {
   const payload = await statusCache.getOrSet("status", async () => {
     const settings = getSettings();
     let lidarr: { ok: boolean; version?: string; error?: string } = {
@@ -39,7 +39,7 @@ export async function GET() {
 
     return {
       app: "polarr",
-      version: process.env.POLARR_APP_VERSION || "0.6.15",
+      version: process.env.POLARR_APP_VERSION || "0.6.19",
       setupComplete: settings.setupComplete,
       hasUsers: hasUsers(),
       serverName: settings.serverName,
@@ -51,6 +51,16 @@ export async function GET() {
       },
     };
   });
+
+  const auth = requireAuthFromRequest(req);
+  if (!auth.user && payload.setupComplete && payload.hasUsers) {
+    return json({
+      app: payload.app,
+      version: payload.version,
+      setupComplete: true,
+      hasUsers: true,
+    });
+  }
 
   return json(payload);
 }

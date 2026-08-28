@@ -1,4 +1,4 @@
-import { json } from "@/lib/api";
+import { json, requireAuthFromRequest } from "@/lib/api";
 import {
   ensureKaraokeInstrumental,
   getKaraokeInfo,
@@ -33,6 +33,9 @@ export async function GET(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const auth = requireAuthFromRequest(req);
+  if (auth.response) return auth.response;
+
   const { id } = await ctx.params;
   if (!id) return json({ error: "Missing track id" }, { status: 400 });
   return json(getKaraokeInfo(id, metaFromUrl(req)));
@@ -43,6 +46,9 @@ export async function POST(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const auth = requireAuthFromRequest(req);
+  if (auth.response) return auth.response;
+
   const { id } = await ctx.params;
   if (!id) return json({ error: "Missing track id" }, { status: 400 });
   const meta = await metaFromBody(req);

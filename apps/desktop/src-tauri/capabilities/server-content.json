@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2/capability",
+  "identifier": "server-content",
+  "description": "Polarr server content webview — first-party cookies + Discord/offline IPC",
+  "webviews": ["server"],
+  "local": false,
+  "remote": {
+    "urls": ["http://*:*/*", "https://*:*/*", "http://*/*", "https://*/*"]
+  },
+  "permissions": [
+    "core:event:default",
+    "allow-desktop-chrome-up",
+    "allow-discord-set-presence",
+    "allow-discord-clear-presence",
+    "allow-discord-probe-presence",
+    "allow-offline-set-session",
+    "allow-offline-list",
+    "allow-offline-has",
+    "allow-offline-ids",
+    "allow-offline-remove",
+    "allow-offline-clear-all",
+    "allow-offline-begin-download"
+  ]
+}

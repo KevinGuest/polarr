@@ -16,6 +16,7 @@ import {
   serializeNotifyEvents,
   type NotifyEventFlags,
 } from "./notify-events";
+import { LISTEN_QUALIFY_SECONDS } from "./listen";
 import {
   isUserRole,
   type UserRole,
@@ -2221,6 +2222,7 @@ export function redeemInvite(
   code: string,
   username: string,
   password: string,
+  client?: { ip?: string | null; hwid?: string | null },
 ) {
   const invite = getInviteByCode(code);
   if (!invite) throw new Error("Invalid invite code");
@@ -2248,6 +2250,11 @@ export function redeemInvite(
         {
           name: "Emailed to",
           value: invite.emailedTo?.trim() || "—",
+          inline: true,
+        },
+        {
+          name: "IP",
+          value: (client?.ip || "").trim() || "unknown",
           inline: true,
         },
       ],
@@ -3582,6 +3589,62 @@ export function searchTracksLocal(q: string, limit = 50): TrackRow[] {
     .map(mapTrack)
     .sort((a, b) => scoreLocalSearchHit(term, b) - scoreLocalSearchHit(term, a))
     .slice(0, limit);
+}
+
+/** Library tracks whose cached lyrics contain the query (phrase or tokens). */
+export function searchTracksByLyrics(q: string, limit = 24): TrackRow[] {
+  const term = q.trim().replace(/\s+/g, " ");
+  if (term.length < 4) return [];
+
+  const seen = new Set<string>();
+  const out: TrackRow[] = [];
+
+  function pushTrack(track: TrackRow | null) {
+    if (!track || seen.has(track.id)) return;
+    seen.add(track.id);
+    out.push(track);
+  }
+
+  const phraseLike = `%${term.toLowerCase()}%`;
+  const phraseRows = getDb()
+    .prepare(
+      `SELECT artist, title
+       FROM lyrics_cache
+       WHERE lower(lines_json) LIKE ?
+          OR lower(coalesce(genius_json, '')) LIKE ?
+       LIMIT ?`,
+    )
+    .all(phraseLike, phraseLike, Math.min(limit * 4, 96)) as {
+    artist: string;
+    title: string;
+  }[];
+
+  for (const row of phraseRows) {
+    pushTrack(findTrack(row.artist, row.title));
+    if (out.length >= limit) return out;
+  }
+
+  const tokens = tokenizeSearchQuery(term).filter(
+    (t) => t.length >= 4 && !SEARCH_STOP.has(t),
+  );
+  for (const token of tokens.slice(0, 4)) {
+    const like = `%${token.toLowerCase()}%`;
+    const rows = getDb()
+      .prepare(
+        `SELECT artist, title
+         FROM lyrics_cache
+         WHERE lower(lines_json) LIKE ?
+            OR lower(coalesce(genius_json, '')) LIKE ?
+         LIMIT ?`,
+      )
+      .all(like, like, 32) as { artist: string; title: string }[];
+    for (const row of rows) {
+      pushTrack(findTrack(row.artist, row.title));
+      if (out.length >= limit) return out;
+    }
+  }
+
+  return out;
 }
 
 export function getTrack(id: string): TrackRow | null {
@@ -5721,7 +5784,8 @@ export function creditTrackListen(
     const prev = Number(existing.listenedSeconds) || 0;
     const next = prev + add;
     // Bump played_at whenever this listen qualifies (or already had).
-    const bumpPlayedAt = next >= 15 || prev >= 15;
+    const bumpPlayedAt =
+      next >= LISTEN_QUALIFY_SECONDS || prev >= LISTEN_QUALIFY_SECONDS;
     qualified = bumpPlayedAt;
     getDb()
       .prepare(
@@ -5738,7 +5802,7 @@ export function creditTrackListen(
          VALUES (?, ?, ?, ?, ?)`,
       )
       .run(newId(), userId, resolvedId, at, add);
-    qualified = add >= 15;
+    qualified = add >= LISTEN_QUALIFY_SECONDS;
   }
 
   if (qualified) {

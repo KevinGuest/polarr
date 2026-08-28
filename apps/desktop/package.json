@@ -1,0 +1,28 @@
+{
+  "name": "polarr-desktop",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Polarr desktop shell (Tauri 2) — loads your self-hosted Polarr server",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:build:mac": "tauri build --target universal-apple-darwin",
+    "icons": "tauri icon public/polarr-icon.png",
+    "installer-assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-installer-assets.ps1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.5.0",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.5.0",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.2"
+  }
+}

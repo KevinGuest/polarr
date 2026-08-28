@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { json, getAuthUser, getStaffUser } from "@/lib/api";
+import { json, getAuthUser, getStaffUser, requireAuth } from "@/lib/api";
 import {
   createRequest,
   findTrack,
@@ -32,6 +32,8 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   // Stats OK for dashboard badges; full log is admin-only.
   if (searchParams.get("stats") === "1") {
+    const auth = await requireAuth();
+    if (auth.response) return auth.response;
     return json({ stats: requestStats() });
   }
   const admin = await getStaffUser();

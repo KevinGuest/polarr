@@ -31,6 +31,13 @@ export type DiscordNotifyField = {
   inline?: boolean;
 };
 
+export function notifyIpField(
+  ip: string | null | undefined,
+): DiscordNotifyField {
+  const value = (ip || "").trim() || "unknown";
+  return { name: "IP", value, inline: true };
+}
+
 /** Debounce noisy stream errors (Range retries, etc.). */
 const streamErrorSeen = new Map<string, number>();
 const STREAM_ERROR_TTL_MS = 5 * 60_000;

@@ -3,7 +3,7 @@ export const AVATAR_UPDATED_EVENT = "polarr:avatar-updated";
 export const LIKES_CHANGED_EVENT = "polarr:likes-changed";
 export const LIBRARY_CHANGED_EVENT = "polarr:library-changed";
 export const LIBRARY_PINS_CHANGED_EVENT = "polarr:library-pins-changed";
-/** Fired after a ≥15s listen heartbeat is credited (recent / others feed). */
+/** Fired after a ≥30s listen heartbeat is credited (recent / others feed). */
 export const LISTEN_CREDITED_EVENT = "polarr:listen-credited";
 export const RECENT_PLAYED_CHANGED_EVENT = "polarr:recent-played-changed";
 

@@ -1,4 +1,4 @@
-import { json } from "@/lib/api";
+import { json, requireAuth } from "@/lib/api";
 import { resolveLyrics } from "@/lib/lyrics";
 
 export const runtime = "nodejs";
@@ -9,6 +9,9 @@ export const dynamic = "force-dynamic";
  * Prefer /api/lyrics/session for full karaoke session payload.
  */
 export async function GET(req: Request) {
+  const auth = await requireAuth();
+  if (auth.response) return auth.response;
+
   const url = new URL(req.url);
   const artist = (url.searchParams.get("artist") || "").trim();
   const title = (url.searchParams.get("title") || "").trim();

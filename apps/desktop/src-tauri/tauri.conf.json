@@ -1,0 +1,88 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Polarr",
+  "version": "0.2.0",
+  "identifier": "app.polarr.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Polarr",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 1024,
+        "minHeight": 620,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "decorations": false,
+        "shadow": true,
+        "backgroundColor": "#09090b",
+        "theme": "Dark"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": ["nsis", "msi", "dmg"],
+    "publisher": "Polarr",
+    "category": "Music",
+    "shortDescription": "Self-hosted Polarr music hub client",
+    "longDescription": "Desktop companion that connects to your self-hosted Polarr server for library, karaoke, streaming, and offline downloads.",
+    "copyright": "Polarr",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "entitlements": "Entitlements.plist",
+      "infoPlist": "Info.plist",
+      "dmg": {
+        "appPosition": { "x": 180, "y": 170 },
+        "applicationFolderPosition": { "x": 480, "y": 170 },
+        "windowSize": { "width": 660, "height": 400 }
+      }
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "headerImage": "installer-assets/nsis-header.bmp",
+        "sidebarImage": "installer-assets/nsis-sidebar.bmp",
+        "uninstallerHeaderImage": "installer-assets/nsis-header.bmp"
+      },
+      "wix": {
+        "bannerPath": "installer-assets/wix-banner.bmp",
+        "dialogImagePath": "installer-assets/wix-dialog.bmp"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE4MTY1MTk5QjdCM0Y1OTQKUldTVTliTzNtVkVXcUY4Q0pOQXdUeXFMU2JwMnF0WDAxUER3cUdmbk54MXF6MlQ4UUR3T1p3b3oK",
+      "endpoints": [
+        "https://github.com/KevinGuest/polarr/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

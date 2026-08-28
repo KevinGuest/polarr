@@ -1,4 +1,4 @@
-import { json, getAdminUser, getAuthUser } from "@/lib/api";
+import { json, getAdminUser, getAuthUser, requireAuth } from "@/lib/api";
 import {
   deleteTrack,
   getTrack,
@@ -14,6 +14,9 @@ export async function GET(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const auth = await requireAuth();
+  if (auth.response) return auth.response;
+
   const { id } = await ctx.params;
   const track = getTrack(id);
   if (!track) return json({ error: "Not found" }, { status: 404 });
@@ -22,8 +25,8 @@ export async function GET(
     artist: track.artist,
     album: track.album,
   });
-  const user = await getAuthUser();
-  const offline = user ? listOfflineTrackIds(user.id).includes(id) : false;
+  const user = auth.user;
+  const offline = listOfflineTrackIds(user.id).includes(id);
   return json({
     track: {
       ...track,

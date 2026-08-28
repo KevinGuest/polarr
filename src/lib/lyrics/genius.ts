@@ -116,6 +116,27 @@ async function searchPublic(q: string): Promise<GeniusHit[]> {
   return hits;
 }
 
+/** Song search for catalog / lyric-style queries (title + artist hits). */
+export async function searchGeniusTracks(
+  q: string,
+  limit = 12,
+): Promise<{ id: string; title: string; artist: string }[]> {
+  const term = q.trim();
+  if (!term) return [];
+  let hits: GeniusHit[] = [];
+  try {
+    const token = accessToken();
+    hits = token ? await searchOfficial(term, token) : await searchPublic(term);
+  } catch {
+    hits = await searchPublic(term).catch(() => []);
+  }
+  return hits.slice(0, limit).map((h) => ({
+    id: `genius:${h.id}`,
+    title: h.title,
+    artist: h.primaryArtist || "",
+  }));
+}
+
 function pickHit(
   hits: GeniusHit[],
   artist: string,

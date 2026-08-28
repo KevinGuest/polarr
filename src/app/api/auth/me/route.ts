@@ -3,6 +3,7 @@ import { json, getAuthUser } from "@/lib/api";
 import { banPublicPayload, getActiveBan } from "@/lib/bans";
 import { getPublicProfileById, getUserEmail } from "@/lib/db";
 import { scrambleUserId } from "@/lib/user-id";
+import { getRequestIpFromRequest } from "@/lib/request-client";
 
 export const dynamic = "force-dynamic";
 
@@ -42,16 +43,19 @@ export async function GET() {
   });
 }
 
-export async function DELETE() {
+export async function DELETE(req: Request) {
   const user = await getAuthUser();
   const cookieStore = await cookies();
   cookieStore.delete("polarr_token");
   if (user) {
-    const { notifyDiscord } = await import("@/lib/admin-notify");
+    const { notifyDiscord, notifyIpField } = await import("@/lib/admin-notify");
     notifyDiscord("userLogout", {
       title: "User signed out",
       description: `${user.username} signed out`,
-      fields: [{ name: "User", value: user.username, inline: true }],
+      fields: [
+        { name: "User", value: user.username, inline: true },
+        notifyIpField(getRequestIpFromRequest(req)),
+      ],
     });
   }
   return json({ ok: true });

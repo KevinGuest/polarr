@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { json } from "@/lib/api";
 import {
+  enforceAuthRateLimit,
+  recordAuthRateFailure,
+  recordAuthRateSuccess,
+} from "@/lib/auth-rate-limit";
+import {
   consumePasswordResetToken,
   getDb,
   passwordResetTokenValid,
@@ -17,21 +22,33 @@ const schema = z.object({
 });
 
 export async function GET(req: Request) {
+  const limited = enforceAuthRateLimit(req, "reset");
+  if (limited) return limited;
+
   const token = new URL(req.url).searchParams.get("token") || "";
-  return json({ valid: passwordResetTokenValid(token) });
+  const valid = passwordResetTokenValid(token);
+  if (!valid) recordAuthRateFailure(req, "reset");
+  else recordAuthRateSuccess(req, "reset");
+  return json({ valid });
 }
 
 export async function POST(req: Request) {
+  const limited = enforceAuthRateLimit(req, "reset");
+  if (limited) return limited;
+
   const parsed = schema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
+    recordAuthRateFailure(req, "reset");
     return json({ error: "Enter a new password" }, { status: 400 });
   }
   if (parsed.data.password !== parsed.data.confirmPassword) {
+    recordAuthRateFailure(req, "reset");
     return json({ error: "Passwords do not match" }, { status: 400 });
   }
 
   const userId = consumePasswordResetToken(parsed.data.token);
   if (!userId) {
+    recordAuthRateFailure(req, "reset");
     return json(
       { error: "This reset link is invalid or has expired" },
       { status: 400 },
@@ -40,8 +57,11 @@ export async function POST(req: Request) {
 
   const result = setUserPassword(userId, parsed.data.password);
   if (!result.ok) {
+    recordAuthRateFailure(req, "reset");
     return json({ error: result.error }, { status: 400 });
   }
+
+  recordAuthRateSuccess(req, "reset");
 
   const username =
     (

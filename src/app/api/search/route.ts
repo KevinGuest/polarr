@@ -1,7 +1,9 @@
-import { json } from "@/lib/api";
+import { json, requireAuth } from "@/lib/api";
 import {
   findTrack,
+  listTracksByArtist,
   searchPublicProfiles,
+  searchTracksByLyrics,
   searchTracksLocal,
   type TrackRow,
 } from "@/lib/db";
@@ -11,16 +13,20 @@ import {
   type CatalogArtistHit,
   type CatalogTrackHit,
 } from "@/lib/catalog-search";
-import { resolveArtistPortrait } from "@/lib/artist-portrait";
+import { listTracksFeaturingArtist } from "@/lib/artist-catalog";
 import { coverFromMap, getAlbumCoverMap, LidarrClient } from "@/lib/lidarr";
 import {
+  artistNameMatchesQuery,
+  isArtistNameQuery,
   namesMatch,
   normalizeArtistName,
   primaryArtistName,
+  scoreArtistSearchHit,
   scoreLibrarySearchHit,
   trackMatchKey,
 } from "@/lib/track-match";
 import { localSourceBadge } from "@/lib/track-source-badge";
+import { searchGeniusTracks } from "@/lib/lyrics/genius";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -121,6 +127,7 @@ function hydrateCatalogTracks(
   local: TrackRow[],
   q: string,
   covers?: Map<string, string>,
+  artistName?: string,
 ): CatalogTrackHit[] {
   const byKey = new Map<string, TrackRow>();
   for (const t of local) {
@@ -168,11 +175,18 @@ function hydrateCatalogTracks(
     hydrated.push(trackToHit(t, covers));
   }
 
-  return hydrated.sort(
-    (a, b) =>
+  return hydrated.sort((a, b) => {
+    if (artistName) {
+      const d =
+        scoreArtistSearchHit(artistName, b, Boolean(b.onPolarr)) -
+        scoreArtistSearchHit(artistName, a, Boolean(a.onPolarr));
+      if (d) return d;
+    }
+    return (
       scoreLibrarySearchHit(q, b, Boolean(b.onPolarr)) -
-      scoreLibrarySearchHit(q, a, Boolean(a.onPolarr)),
-  );
+      scoreLibrarySearchHit(q, a, Boolean(a.onPolarr))
+    );
+  });
 }
 
 function markAlbumsInLibrary(
@@ -194,7 +208,36 @@ function markAlbumsInLibrary(
   });
 }
 
-function profileHits(q: string) {
+function mergeLocalTracks(...groups: TrackRow[][]): TrackRow[] {
+  const byId = new Map<string, TrackRow>();
+  for (const group of groups) {
+    for (const t of group) {
+      if (!byId.has(t.id)) byId.set(t.id, t);
+    }
+  }
+  return [...byId.values()];
+}
+
+function rankArtists(
+  artists: CatalogArtistHit[],
+  q: string,
+): CatalogArtistHit[] {
+  return [...artists].sort((a, b) => {
+    const ae = artistNameMatchesQuery(a.name, q) ? 1 : 0;
+    const be = artistNameMatchesQuery(b.name, q) ? 1 : 0;
+    if (ae !== be) return be - ae;
+    return Number(Boolean(b.image)) - Number(Boolean(a.image));
+  });
+}
+
+function localHitsForArtistQuery(q: string, already: TrackRow[]): TrackRow[] {
+  if (!isArtistNameQuery(q)) return already;
+  return mergeLocalTracks(
+    already,
+    listTracksByArtist(q, 48),
+    listTracksFeaturingArtist(q, 24),
+  );
+}
   return searchPublicProfiles(q, 12).map((u) => ({
     id: u.publicId,
     username: u.username,
@@ -210,6 +253,9 @@ function profileHits(q: string) {
  * without waiting on Deezer/iTunes.
  */
 export async function GET(req: Request) {
+  const auth = await requireAuth();
+  if (auth.response) return auth.response;
+
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get("q") || "").trim();
   const libraryOnly = searchParams.get("library") === "1";
@@ -225,16 +271,30 @@ export async function GET(req: Request) {
   }
 
   const profiles = profileHits(q);
-  const local = searchTracksLocal(q, 48);
+  const local = localHitsForArtistQuery(
+    q,
+    mergeLocalTracks(searchTracksLocal(q, 48), searchTracksByLyrics(q, 24)),
+  );
   const covers = await getAlbumCoverMap();
   const localAlbums = albumsFromLocal(local, q, covers);
-  const localArtists = artistsFromLocal(local);
+  const localArtists = rankArtists(artistsFromLocal(local), q);
 
   if (libraryOnly) {
+    const artistName = localArtists.find((a) =>
+      artistNameMatchesQuery(a.name, q),
+    )?.name;
+    const localTracks = local.map((t) => trackToHit(t, covers));
+    if (artistName) {
+      localTracks.sort(
+        (a, b) =>
+          scoreArtistSearchHit(artistName, b, true) -
+          scoreArtistSearchHit(artistName, a, true),
+      );
+    }
     return json({
       query: q,
       local,
-      tracks: local.map((t) => trackToHit(t, covers)),
+      tracks: localTracks,
       albums: localAlbums,
       artists: localArtists,
       profiles,
@@ -252,9 +312,11 @@ export async function GET(req: Request) {
     error: null as string | null,
   };
 
-  const [catalog, lidarrBundle] = await Promise.all([
+  const lyricStyle = q.split(/\s+/).filter(Boolean).length >= 3;
+
+  const [catalog, lidarrBundle, geniusTracks] = await Promise.all([
     withTimeout(
-      searchCatalog(q, 30).catch(() => emptyCatalog),
+      searchCatalog(q, isArtistNameQuery(q) ? 40 : 30).catch(() => emptyCatalog),
       2500,
       emptyCatalog,
     ),
@@ -275,7 +337,23 @@ export async function GET(req: Request) {
       2500,
       emptyLidarr,
     ),
+    lyricStyle
+      ? withTimeout(searchGeniusTracks(q, 15).catch(() => []), 2200, [])
+      : Promise.resolve([] as Awaited<ReturnType<typeof searchGeniusTracks>>),
   ]);
+
+  const geniusCatalog: CatalogTrackHit[] = geniusTracks.map((g) => ({
+    id: g.id,
+    title: g.title,
+    artist: g.artist,
+    album: g.title,
+    onPolarr: false,
+  }));
+  const catalogMerged = {
+    tracks: [...geniusCatalog, ...catalog.tracks],
+    albums: catalog.albums,
+    artists: catalog.artists,
+  };
 
   const albumByKey = new Map<string, CatalogAlbumHit>();
   for (const a of localAlbums) {
@@ -283,7 +361,7 @@ export async function GET(req: Request) {
       ...a,
     });
   }
-  for (const a of catalog.albums) {
+  for (const a of catalogMerged.albums) {
     const key = `${a.artist.toLowerCase()}::${a.title.toLowerCase()}`;
     const prev = albumByKey.get(key);
     albumByKey.set(key, {
@@ -317,7 +395,7 @@ export async function GET(req: Request) {
   for (const a of localArtists) {
     artistByKey.set(a.name.toLowerCase(), { ...a });
   }
-  for (const a of catalog.artists) {
+  for (const a of catalogMerged.artists) {
     const key = a.name.toLowerCase();
     const prev = artistByKey.get(key);
     artistByKey.set(key, {
@@ -341,19 +419,21 @@ export async function GET(req: Request) {
     });
   }
 
-  const artistsRaw = [...artistByKey.values()];
-  const artists = await Promise.all(
-    artistsRaw.map(async (a, i) => {
-      if (i >= 16) return a;
-      const portrait = await resolveArtistPortrait({
-        artist: a.name,
-        foreignArtistId: a.foreignArtistId,
-      }).catch(() => null);
-      return portrait ? { ...a, image: portrait } : a;
-    }),
+  const artists = rankArtists(
+    [...artistByKey.values()].map((a) => ({ ...a })),
+    q,
   );
+  const matchedArtistName = artists.find((a) =>
+    artistNameMatchesQuery(a.name, q),
+  )?.name;
 
-  const tracks = hydrateCatalogTracks(catalog.tracks, local, q, covers);
+  const tracks = hydrateCatalogTracks(
+    catalogMerged.tracks,
+    local,
+    q,
+    covers,
+    matchedArtistName,
+  );
   const albums = markAlbumsInLibrary([...albumByKey.values()], local).sort(
     (a, b) => Number(Boolean(b.alreadyInLibrary)) - Number(Boolean(a.alreadyInLibrary)),
   );

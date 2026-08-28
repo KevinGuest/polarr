@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { getAuthUserFromRequest, json } from "@/lib/api";
+import { requireAuthFromRequest, json } from "@/lib/api";
 import { isRickrollTrack, streamPolicy } from "@/lib/bans";
 import { getTrack } from "@/lib/db";
 import { resolvePlayableAudioPath } from "@/lib/audio-path";
@@ -22,30 +22,31 @@ export async function GET(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
+  const auth = requireAuthFromRequest(req);
+  if (auth.response) return auth.response;
+  const user = auth.user;
+
   const track = getTrack(id);
   if (!track) return json({ error: "Track not found" }, { status: 404 });
 
-  const user = getAuthUserFromRequest(req);
-  if (user) {
-    const policy = streamPolicy(user.id);
-    if (!policy.ok) {
-      return json(
-        { error: policy.error || "Streaming banned" },
-        { status: 403 },
-      );
-    }
-    if (
-      policy.forceRickroll &&
-      !isRickrollTrack(track.artist, track.title)
-    ) {
-      return json(
-        {
-          error:
-            "Playback restricted — only Never Gonna Give You Up is allowed.",
-        },
-        { status: 403 },
-      );
-    }
+  const policy = streamPolicy(user.id);
+  if (!policy.ok) {
+    return json(
+      { error: policy.error || "Streaming banned" },
+      { status: 403 },
+    );
+  }
+  if (
+    policy.forceRickroll &&
+    !isRickrollTrack(track.artist, track.title)
+  ) {
+    return json(
+      {
+        error:
+          "Playback restricted — only Never Gonna Give You Up is allowed.",
+      },
+      { status: 403 },
+    );
   }
 
   const filePath = resolvePlayableAudioPath(track.path);

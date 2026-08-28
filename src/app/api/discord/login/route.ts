@@ -1,6 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { json } from "@/lib/api";
+import {
+  enforceAuthRateLimit,
+  recordAuthRateFailure,
+} from "@/lib/auth-rate-limit";
 import { discordOAuthConfigured, getSettings } from "@/lib/db";
 import {
   getDiscordRedirectUri,
@@ -13,9 +17,13 @@ export const dynamic = "force-dynamic";
  * Start Discord OAuth for sign-in (no Polarr session required).
  * Only succeeds in the callback if this Discord account is already linked.
  */
-export async function GET() {
+export async function GET(req: Request) {
+  const limited = enforceAuthRateLimit(req, "discord-login");
+  if (limited) return limited;
+
   const settings = getSettings();
   if (!discordOAuthConfigured(settings)) {
+    recordAuthRateFailure(req, "discord-login");
     return json(
       {
         error: "Discord sign-in isn’t configured on this server.",

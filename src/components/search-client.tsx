@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -10,6 +10,7 @@ import {
   CirclePlus,
   Play,
   Search,
+  Loader2,
   X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +20,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { albumHref } from "@/lib/album-ref";
 import {
   MediaShelfGrid,
+  MediaShelfRow,
   MediaTileShell,
   ShelfHeader,
 } from "@/components/media-shelf";
@@ -27,6 +29,11 @@ import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
 import { cn, formatTrackArtistLine, titleLooksExplicit } from "@/lib/utils";
+import {
+  artistNameMatchesQuery,
+  creditIncludesArtist,
+  isPrimaryArtistCredit,
+} from "@/lib/track-match";
 import type { LocalSourceBadge } from "@/lib/track-source-badge";
 import { RECENT_PLAYED_CHANGED_EVENT } from "@/lib/ui-events";
 import { MobileSearchHeader } from "@/components/mobile-search-header";
@@ -109,6 +116,19 @@ function artistPageHref(hit: CatalogArtist) {
   return `/artist?${qs.toString()}`;
 }
 
+function partitionArtistTracks(tracks: CatalogTrack[], artistName: string) {
+  const own: CatalogTrack[] = [];
+  const features: CatalogTrack[] = [];
+  const rest: CatalogTrack[] = [];
+  for (const t of tracks) {
+    if (isPrimaryArtistCredit(t.artist, artistName)) own.push(t);
+    else if (creditIncludesArtist(t.artist, t.title, artistName)) {
+      features.push(t);
+    } else rest.push(t);
+  }
+  return { own, features, rest };
+}
+
 function parseFilter(raw: string | null): SearchFilter {
   if (
     raw === "songs" ||
@@ -148,8 +168,46 @@ export function SearchClient() {
   const [profiles, setProfiles] = useState<CatalogProfile[]>([]);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [catalogPending, setCatalogPending] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const loadGenRef = useRef(0);
+  const loadAbortRef = useRef<AbortController | null>(null);
+
+  function cancelPendingLoads() {
+    loadAbortRef.current?.abort();
+    loadAbortRef.current = null;
+    loadGenRef.current += 1;
+    setBusy(null);
+  }
+
+  function startLoad(busyKey: string): { gen: number; signal: AbortSignal } {
+    loadAbortRef.current?.abort();
+    const gen = ++loadGenRef.current;
+    const ac = new AbortController();
+    loadAbortRef.current = ac;
+    setBusy(busyKey);
+    return { gen, signal: ac.signal };
+  }
+
+  function isActiveLoad(gen: number) {
+    return gen === loadGenRef.current;
+  }
+
+  function finishLoad(gen: number) {
+    if (!isActiveLoad(gen)) return;
+    setBusy(null);
+    loadAbortRef.current = null;
+  }
+
+  function navigateTo(href: string) {
+    cancelPendingLoads();
+    router.push(href);
+  }
+
+  function coverLoading(kind: "track" | "album", id: string) {
+    return busy === `${kind}:${id}`;
+  }
   const [recentVersion, setRecentVersion] = useState(0);
 
   const recentItems = useMemo(
@@ -160,6 +218,12 @@ export function SearchClient() {
   function bumpRecent() {
     setRecentVersion((v) => v + 1);
   }
+
+  useEffect(() => {
+    return () => {
+      loadAbortRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     function onRecentPlayed() {
@@ -180,11 +244,14 @@ export function SearchClient() {
       setProfiles([]);
       setCatalogError(null);
       setLoading(false);
+      setCatalogPending(false);
       return;
     }
     let cancelled = false;
     let gotFull = false;
+    cancelPendingLoads();
     setLoading(true);
+    setCatalogPending(true);
 
     function applySearch(
       data: {
@@ -216,7 +283,12 @@ export function SearchClient() {
             ? data.lidarrError || "No matches — try another spelling."
             : null,
       );
-      if (hasHits || isFull) setLoading(false);
+      if (!isFull) {
+        setLoading(false);
+      } else {
+        setLoading(false);
+        setCatalogPending(false);
+      }
     }
 
     const handle = setTimeout(() => {
@@ -246,8 +318,9 @@ export function SearchClient() {
             err instanceof Error ? err.message : "Search failed",
           );
           setLoading(false);
+          setCatalogPending(false);
         });
-    }, 200);
+    }, 150);
     return () => {
       cancelled = true;
       clearTimeout(handle);
@@ -276,26 +349,27 @@ export function SearchClient() {
   }, [artists, scope]);
 
   const topResult = useMemo((): MixedRow | null => {
-    const term = q.trim().toLowerCase();
+    const term = q.trim();
     if (!term) return null;
 
+    const exactArtist = scopedArtists.find((a) =>
+      artistNameMatchesQuery(a.name, term),
+    );
+    if (exactArtist) return { kind: "artist", hit: exactArtist };
+
+    const termLower = term.toLowerCase();
     const exactTrack = scopedTracks.find(
-      (t) => t.title.trim().toLowerCase() === term,
+      (t) => t.title.trim().toLowerCase() === termLower,
     );
     if (exactTrack) return { kind: "track", hit: exactTrack };
 
     const prefixTrack = scopedTracks.find((t) =>
-      t.title.trim().toLowerCase().startsWith(term),
+      t.title.trim().toLowerCase().startsWith(termLower),
     );
     if (prefixTrack) return { kind: "track", hit: prefixTrack };
 
-    const exactArtist = scopedArtists.find(
-      (a) => a.name.trim().toLowerCase() === term,
-    );
-    if (exactArtist) return { kind: "artist", hit: exactArtist };
-
-    if (scopedTracks[0]) return { kind: "track", hit: scopedTracks[0] };
     if (scopedArtists[0]) return { kind: "artist", hit: scopedArtists[0] };
+    if (scopedTracks[0]) return { kind: "track", hit: scopedTracks[0] };
     if (scopedAlbums[0]) return { kind: "album", hit: scopedAlbums[0] };
     return null;
   }, [q, scopedTracks, scopedArtists, scopedAlbums]);
@@ -343,6 +417,7 @@ export function SearchClient() {
 
   async function playCatalogTrack(hit: CatalogTrack) {
     if (hit.localTrackId) {
+      cancelPendingLoads();
       const pt: PlayerTrack = {
         id: hit.localTrackId,
         title: hit.title,
@@ -356,7 +431,7 @@ export function SearchClient() {
       play(pt, [pt]);
       return;
     }
-    setBusy(`track:${hit.id}`);
+    const { gen, signal } = startLoad(`track:${hit.id}`);
     setMessage(null);
     try {
       const liveRes = await fetch("/api/live", {
@@ -367,8 +442,11 @@ export function SearchClient() {
           artist: hit.artist,
           album: hit.album,
         }),
+        signal,
       });
+      if (!isActiveLoad(gen)) return;
       const live = await liveRes.json().catch(() => null);
+      if (!isActiveLoad(gen)) return;
       if (!liveRes.ok || !live?.track?.id) {
         setMessage(live?.error || "Couldn’t start playback");
         return;
@@ -388,14 +466,80 @@ export function SearchClient() {
       };
       play(pt, [pt]);
     } catch (err) {
+      if (!isActiveLoad(gen)) return;
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setMessage(err instanceof Error ? err.message : "Playback failed");
     } finally {
-      setBusy(null);
+      finishLoad(gen);
+    }
+  }
+
+  function catalogHitsToQueue(hits: CatalogTrack[]): PlayerTrack[] {
+    return hits.map((hit) => ({
+      id: hit.localTrackId || `stream:${hit.id}`,
+      title: hit.title,
+      artist: formatTrackArtistLine(hit.artist, hit.title),
+      resolveArtist: hit.artist,
+      album: hit.album,
+      coverPath: hit.image || null,
+      duration: hit.duration,
+      quality: hit.localTrackId ? ("local" as const) : ("youtube" as const),
+    }));
+  }
+
+  async function playCatalogTracks(hits: CatalogTrack[]) {
+    const first = hits[0];
+    if (!first) return;
+    const queue = catalogHitsToQueue(hits);
+    if (first.localTrackId) {
+      play(queue[0]!, queue);
+      return;
+    }
+    const { gen, signal } = startLoad(`track:${first.id}`);
+    setMessage(null);
+    try {
+      const liveRes = await fetch("/api/live", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: first.title,
+          artist: first.artist,
+          album: first.album,
+        }),
+        signal,
+      });
+      if (!isActiveLoad(gen)) return;
+      const live = await liveRes.json().catch(() => null);
+      if (!isActiveLoad(gen)) return;
+      if (!liveRes.ok || !live?.track?.id) {
+        setMessage(live?.error || "Couldn’t start playback");
+        return;
+      }
+      const ready: PlayerTrack = {
+        ...queue[0]!,
+        id: live.track.id,
+        title: live.track.title || first.title,
+        artist: formatTrackArtistLine(
+          live.track.artist || first.artist,
+          live.track.title || first.title,
+        ),
+        album: live.track.album || first.album,
+        coverPath: first.image || live.track.coverPath || null,
+        streamUrl: live.streamUrl || live.track.streamUrl,
+        quality: live.mode === "library" ? "local" : "youtube",
+      };
+      play(ready, [ready, ...queue.slice(1)]);
+    } catch (err) {
+      if (!isActiveLoad(gen)) return;
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      setMessage(err instanceof Error ? err.message : "Playback failed");
+    } finally {
+      finishLoad(gen);
     }
   }
 
   async function playCatalogAlbum(hit: CatalogAlbum) {
-    setBusy(`album:${hit.id}`);
+    const { gen, signal } = startLoad(`album:${hit.id}`);
     setMessage(null);
     try {
       const qs = new URLSearchParams({
@@ -408,8 +552,11 @@ export function SearchClient() {
       }
       const res = await fetch(`/api/album?${qs.toString()}`, {
         cache: "no-store",
+        signal,
       });
+      if (!isActiveLoad(gen)) return;
       const data = await res.json().catch(() => null);
+      if (!isActiveLoad(gen)) return;
       const list = Array.isArray(data?.tracks) ? data.tracks : [];
       if (!res.ok || list.length === 0) {
         setMessage(data?.error || "No tracks to play on this album");
@@ -440,15 +587,18 @@ export function SearchClient() {
       const first = queue[0]!;
       play(first, queue);
     } catch (err) {
+      if (!isActiveLoad(gen)) return;
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setMessage(err instanceof Error ? err.message : "Playback failed");
     } finally {
-      setBusy(null);
+      finishLoad(gen);
     }
   }
 
   const term = q.trim();
   const empty =
     !loading &&
+    !catalogPending &&
     term &&
     mixedRows.length === 0 &&
     !topResult &&
@@ -555,7 +705,7 @@ export function SearchClient() {
       <button
         type="button"
         aria-label={opts.label}
-        disabled={opts.busy || Boolean(busy)}
+        disabled={opts.busy}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -566,10 +716,14 @@ export function SearchClient() {
           sizeClass,
         )}
       >
-        <Play
-          className={cn(iconClass, "translate-x-0.5")}
-          fill="currentColor"
-        />
+        {opts.busy ? (
+          <Loader2 className={cn(iconClass, "animate-spin")} aria-hidden />
+        ) : (
+          <Play
+            className={cn(iconClass, "translate-x-0.5")}
+            fill="currentColor"
+          />
+        )}
       </button>
     );
   }
@@ -584,7 +738,7 @@ export function SearchClient() {
       const hit = row.hit;
       const explicit = titleLooksExplicit(hit.title);
       const artistLine = formatTrackArtistLine(hit.artist, hit.title);
-      const playing = busy === `track:${hit.id}`;
+      const playing = coverLoading("track", hit.id);
       return (
         <div
           key={`top:${mixedRowKey(row)}`}
@@ -599,6 +753,7 @@ export function SearchClient() {
             <CoverArt
               seed={hit.title}
               image={hit.image}
+              loading={playing}
               className={cn(artSize, "rounded-md shadow-md")}
             />
           </button>
@@ -631,7 +786,7 @@ export function SearchClient() {
               className="text-muted-foreground"
             />
             {renderPlayControl({
-              busy: playing || Boolean(busy),
+              busy: playing,
               onPlay: () => void playCatalogTrack(hit),
               label: `Play ${hit.title}`,
               size: "lg",
@@ -644,7 +799,7 @@ export function SearchClient() {
     if (row.kind === "album") {
       const hit = row.hit;
       const href = albumPageHref(hit);
-      const playing = busy === `album:${hit.id}`;
+      const playing = coverLoading("album", hit.id);
       return (
         <div
           key={`top:${mixedRowKey(row)}`}
@@ -652,18 +807,19 @@ export function SearchClient() {
         >
           <button
             type="button"
-            onClick={() => router.push(href)}
+            onClick={() => navigateTo(href)}
             className="shrink-0 text-left"
           >
             <CoverArt
               seed={hit.title}
               image={hit.image}
+              loading={playing}
               className={cn(artSize, "rounded-md shadow-md")}
             />
           </button>
           <button
             type="button"
-            onClick={() => router.push(href)}
+            onClick={() => navigateTo(href)}
             className="min-w-0 flex-1 text-left"
           >
             <div className={cn("truncate text-foreground", titleClass)}>
@@ -675,7 +831,7 @@ export function SearchClient() {
           </button>
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             {renderPlayControl({
-              busy: playing || Boolean(busy),
+              busy: playing,
               onPlay: () => void playCatalogAlbum(hit),
               label: `Play ${hit.title}`,
               size: "lg",
@@ -687,27 +843,49 @@ export function SearchClient() {
 
     const hit = row.hit;
     const href = artistPageHref(hit);
+    const ownTracks = partitionArtistTracks(scopedTracks, hit.name).own;
+    const playing = ownTracks[0]
+      ? coverLoading("track", ownTracks[0].id)
+      : false;
     return (
-      <button
-        type="button"
+      <div
         key={`top:${mixedRowKey(row)}`}
-        onClick={() => router.push(href)}
-        className="flex w-full min-w-0 items-center gap-4 rounded-xl bg-muted/40 p-3 text-left sm:gap-5 sm:p-4"
+        className="flex min-w-0 items-center gap-4 rounded-xl bg-muted/40 p-3 sm:gap-5 sm:p-4"
       >
-        <CoverArt
-          seed={hit.name}
-          image={hit.image}
-          className={cn(artSize, "rounded-full shadow-md")}
-        />
-        <div className="min-w-0 flex-1">
+        <button
+          type="button"
+          onClick={() => navigateTo(href)}
+          className="shrink-0 text-left"
+        >
+          <CoverArt
+            seed={hit.name}
+            image={hit.image}
+            className={cn(artSize, "rounded-full shadow-md")}
+          />
+        </button>
+        <button
+          type="button"
+          onClick={() => navigateTo(href)}
+          className="min-w-0 flex-1 text-left"
+        >
           <div className={cn("truncate text-foreground", titleClass)}>
             {hit.name}
           </div>
           <div className="mt-1 truncate text-sm text-muted-foreground">
             Artist
           </div>
-        </div>
-      </button>
+        </button>
+        {ownTracks.length > 0 ? (
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            {renderPlayControl({
+              busy: playing,
+              onPlay: () => void playCatalogTracks(ownTracks),
+              label: `Play ${hit.name}`,
+              size: "lg",
+            })}
+          </div>
+        ) : null}
+      </div>
     );
   }
 
@@ -727,7 +905,7 @@ export function SearchClient() {
           <div className={cn("group/row flex min-w-0 items-center gap-3", pad)}>
             <button
               type="button"
-              onClick={() => router.push(href)}
+              onClick={() => navigateTo(href)}
               className="flex min-w-0 flex-1 items-center gap-3 text-left"
             >
               <CoverArt
@@ -773,7 +951,7 @@ export function SearchClient() {
         <li key={mixedRowKey(row)}>
           <button
             type="button"
-            onClick={() => router.push(href)}
+            onClick={() => navigateTo(href)}
             className={cn(
               "group/row flex w-full min-w-0 items-center gap-3 text-left transition-colors hover:bg-muted/30",
               pad,
@@ -815,6 +993,7 @@ export function SearchClient() {
       explicit,
     };
 
+    const trackLoading = coverLoading("track", hit.id);
     const body = (
       <div className={cn("group/row flex min-w-0 items-center gap-3", pad)}>
         <button
@@ -825,6 +1004,7 @@ export function SearchClient() {
           <CoverArt
             seed={hit.title}
             image={hit.image}
+            loading={trackLoading}
             className={cn(thumb, "rounded-md")}
           />
           <div className="min-w-0 flex-1">
@@ -917,7 +1097,7 @@ export function SearchClient() {
       <li key={`profile:${hit.id}`}>
         <button
           type="button"
-          onClick={() => router.push(hit.href)}
+          onClick={() => navigateTo(hit.href)}
           className={cn(
             "group/row flex w-full min-w-0 items-center gap-3 text-left transition-colors hover:bg-muted/30",
             mobile ? "py-2.5" : "rounded-md px-2 py-2.5 sm:px-3",
@@ -942,6 +1122,7 @@ export function SearchClient() {
   }
 
   function applySuggestion(text: string) {
+    cancelPendingLoads();
     const qs = new URLSearchParams();
     qs.set("q", text);
     if (scope === "library") qs.set("scope", "library");
@@ -971,11 +1152,117 @@ export function SearchClient() {
 
   const mobileEmpty =
     !loading &&
+    !catalogPending &&
     term &&
     !topResult &&
     mixedRows.length === 0 &&
     profiles.length === 0 &&
     querySuggestions.length === 0;
+
+  function renderSearchingHint(mobile?: boolean) {
+    if (!loading && !catalogPending) return null;
+    return (
+      <p
+        className={cn(
+          "text-sm text-muted-foreground",
+          mobile ? "py-2" : "py-1",
+        )}
+      >
+        {loading ? "Searching…" : "Finding more matches…"}
+      </p>
+    );
+  }
+
+  function renderArtistSearchBody(artist: CatalogArtist, mobile: boolean) {
+    const { own, features } = partitionArtistTracks(scopedTracks, artist.name);
+    const songs = own.length > 0 ? own : scopedTracks;
+    const songRows: MixedRow[] = songs.map((hit) => ({
+      kind: "track",
+      hit,
+    }));
+    const featureAlbums = scopedAlbums.filter(
+      (a) =>
+        creditIncludesArtist(a.artist, a.title, artist.name) &&
+        !isPrimaryArtistCredit(a.artist, artist.name),
+    );
+    const featureTiles: Array<
+      | { kind: "track"; hit: CatalogTrack }
+      | { kind: "album"; hit: CatalogAlbum }
+    > = [
+      ...features.map((hit) => ({ kind: "track" as const, hit })),
+      ...featureAlbums.map((hit) => ({ kind: "album" as const, hit })),
+    ];
+
+    return (
+      <>
+        {featureTiles.length > 0 ? (
+          <MediaShelfRow
+            title={`Featuring ${artist.name}`}
+            itemCount={featureTiles.length}
+            minItemPx={140}
+            fillRow={false}
+          >
+            {(visible) =>
+              featureTiles.slice(0, visible).map((tile) => {
+                if (tile.kind === "album") {
+                  const hit = tile.hit;
+                  return (
+                    <MediaTileShell
+                      key={`feat-al:${hit.id}`}
+                      title={hit.title}
+                      subtitle={hit.artist}
+                      ariaLabel={`Open ${hit.title}`}
+                      onOpen={() => navigateTo(albumPageHref(hit))}
+                      cover={
+                        <CoverArt
+                          seed={hit.title}
+                          image={hit.image}
+                          className="size-full rounded-md"
+                        />
+                      }
+                    />
+                  );
+                }
+                const hit = tile.hit;
+                return (
+                  <MediaTileShell
+                    key={`feat-tr:${hit.id}`}
+                    title={hit.title}
+                    subtitle={formatTrackArtistLine(hit.artist, hit.title)}
+                    ariaLabel={`Play ${hit.title}`}
+                    onOpen={() => void playCatalogTrack(hit)}
+                    cover={
+                      <CoverArt
+                        seed={hit.title}
+                        image={hit.image}
+                        loading={coverLoading("track", hit.id)}
+                        className="size-full rounded-md"
+                      />
+                    }
+                  />
+                );
+              })
+            }
+          </MediaShelfRow>
+        ) : null}
+
+        {songRows.length > 0 ? (
+          <section className="min-w-0 space-y-2">
+            {!mobile ? (
+              <ShelfHeader title="Songs" />
+            ) : (
+              <h2 className="text-base font-semibold text-foreground">Songs</h2>
+            )}
+            <ul>
+              {songRows
+                .slice(0, 10)
+                .map((row) => renderResultRow(row, { mobile }))}
+            </ul>
+          </section>
+        ) : null}
+      </>
+    );
+  }
 
   function renderAllResults(mobile: boolean) {
     const rows = listForFilter();
@@ -993,9 +1280,9 @@ export function SearchClient() {
     if (filter === "profiles") {
       return (
         <div className="space-y-3">
-          {loading && profiles.length === 0 ? (
-            <p className="py-2 text-sm text-muted-foreground">Searching…</p>
-          ) : profiles.length === 0 ? (
+          {loading && profiles.length === 0
+            ? renderSearchingHint(mobile)
+            : profiles.length === 0 ? (
             <p className="py-2 text-sm text-muted-foreground">
               No profiles found.
             </p>
@@ -1010,13 +1297,21 @@ export function SearchClient() {
       <div className="space-y-5">
         {showTop ? renderTopResultCard(topResult, mobile) : null}
 
-        {loading && rows.length === 0 && !showTop ? (
-          <p className="py-2 text-sm text-muted-foreground">Searching…</p>
-        ) : null}
+        {showTop && topResult.kind === "artist"
+          ? renderArtistSearchBody(topResult.hit, mobile)
+          : null}
 
-        {rows.length > 0 ? (
+        {loading && rows.length === 0 && !showTop
+          ? renderSearchingHint(mobile)
+          : null}
+
+        {catalogPending && !loading && rows.length > 0
+          ? renderSearchingHint(mobile)
+          : null}
+
+        {showTop && topResult.kind === "artist" ? null : rows.length > 0 ? (
           <ul>{rows.map((row) => renderResultRow(row, { mobile }))}</ul>
-        ) : !loading && !showTop && filter !== "all" ? (
+        ) : !loading && !catalogPending && !showTop && filter !== "all" ? (
           <p className="py-2 text-sm text-muted-foreground">No matches.</p>
         ) : null}
 
@@ -1179,7 +1474,7 @@ export function SearchClient() {
                 title={hit.name}
                 subtitle="Artist"
                 ariaLabel={`Open ${hit.name}`}
-                onOpen={() => router.push(artistPageHref(hit))}
+                onOpen={() => navigateTo(artistPageHref(hit))}
                 coverShape="circle"
                 cover={
                   <CoverArt
@@ -1212,9 +1507,6 @@ export function SearchClient() {
         ) : null}
         {empty && !catalogError ? (
           <p className="text-sm text-muted-foreground">No matches.</p>
-        ) : null}
-        {loading && term && !topResult && mixedRows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Searching…</p>
         ) : null}
 
         {term ? (

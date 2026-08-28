@@ -24,6 +24,7 @@ import type {
   DiscoverReleaseCard,
 } from "@/lib/discover-types";
 import { LISTEN_CREDITED_EVENT } from "@/lib/ui-events";
+import { OTHERS_LISTENING_POLL_MS } from "@/lib/listen";
 import { formatTrackArtistLine } from "@/lib/utils";
 
 function catalogAlbumHref(r: {
@@ -164,7 +165,7 @@ export function HomeClient({
 
   const loadOthers = useCallback(async () => {
     try {
-      const res = await fetch("/api/listening?limit=48");
+      const res = await fetch("/api/listening?limit=48", { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
       const next = Array.isArray(data.items) ? data.items : [];
@@ -210,14 +211,19 @@ export function HomeClient({
     void loadOthers();
     const t = window.setInterval(() => {
       void loadOthers();
-    }, 30_000);
+    }, OTHERS_LISTENING_POLL_MS);
     const onListen = () => {
       void loadOthers();
     };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadOthers();
+    };
     window.addEventListener(LISTEN_CREDITED_EVENT, onListen);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.clearInterval(t);
       window.removeEventListener(LISTEN_CREDITED_EVENT, onListen);
+      document.removeEventListener("visibilitychange", onVisible);
     };
     // intentionally once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps

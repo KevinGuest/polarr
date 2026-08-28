@@ -1349,6 +1349,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
             tracks={offlineTracks}
           />
           <PlaylistActionsDrawer
+            variant="menu"
             playlistId={playlistId}
             title={displayTitle}
             subtitle={metaLine || undefined}

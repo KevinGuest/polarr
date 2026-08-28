@@ -1,0 +1,104 @@
+[[permission]]
+identifier = "allow-get-server-url"
+description = "Read the saved Polarr server URL"
+commands.allow = ["get_server_url"]
+
+[[permission]]
+identifier = "allow-set-server-url"
+description = "Save the Polarr server URL"
+commands.allow = ["set_server_url"]
+
+[[permission]]
+identifier = "allow-clear-server-url"
+description = "Clear the saved Polarr server URL"
+commands.allow = ["clear_server_url"]
+
+[[permission]]
+identifier = "allow-open-server-webview"
+description = "Open the Polarr server webview"
+commands.allow = ["open_server_webview"]
+
+[[permission]]
+identifier = "allow-hide-server-webview"
+description = "Hide the Polarr server webview"
+commands.allow = ["hide_server_webview"]
+
+[[permission]]
+identifier = "allow-show-server-webview"
+description = "Show the Polarr server webview"
+commands.allow = ["show_server_webview"]
+
+[[permission]]
+identifier = "allow-close-server-webview"
+description = "Close the Polarr server webview"
+commands.allow = ["close_server_webview"]
+
+[[permission]]
+identifier = "allow-server-history-back"
+description = "Navigate the Polarr server webview back"
+commands.allow = ["server_history_back"]
+
+[[permission]]
+identifier = "allow-server-history-forward"
+description = "Navigate the Polarr server webview forward"
+commands.allow = ["server_history_forward"]
+
+[[permission]]
+identifier = "allow-desktop-chrome-up"
+description = "Relay desktop chrome auth/ready messages from the server webview to the shell"
+commands.allow = ["desktop_chrome_up"]
+
+[[permission]]
+identifier = "allow-get-server-webview-href"
+description = "Read the current URL of the Polarr server webview"
+commands.allow = ["get_server_webview_href"]
+
+[[permission]]
+identifier = "allow-discord-set-presence"
+description = "Set Discord Rich Presence listening activity"
+commands.allow = ["discord_set_presence"]
+
+[[permission]]
+identifier = "allow-discord-clear-presence"
+description = "Clear Discord Rich Presence"
+commands.allow = ["discord_clear_presence"]
+
+[[permission]]
+identifier = "allow-discord-probe-presence"
+description = "Probe Discord Rich Presence IPC connection"
+commands.allow = ["discord_probe_presence"]
+
+[[permission]]
+identifier = "allow-offline-set-session"
+description = "Store offline download session cookie"
+commands.allow = ["offline_set_session"]
+
+[[permission]]
+identifier = "allow-offline-list"
+description = "List offline downloaded tracks"
+commands.allow = ["offline_list"]
+
+[[permission]]
+identifier = "allow-offline-has"
+description = "Check if a track is downloaded offline"
+commands.allow = ["offline_has"]
+
+[[permission]]
+identifier = "allow-offline-ids"
+description = "List offline track ids"
+commands.allow = ["offline_ids"]
+
+[[permission]]
+identifier = "allow-offline-remove"
+description = "Remove an offline download"
+commands.allow = ["offline_remove"]
+
+[[permission]]
+identifier = "allow-offline-clear-all"
+description = "Clear all offline downloads"
+commands.allow = ["offline_clear_all"]
+
+[[permission]]
+identifier = "allow-offline-begin-download"
+description = "Begin an offline track download"
+commands.allow = ["offline_begin_download"]

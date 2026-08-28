@@ -14,6 +14,7 @@ import { primaryArtistName } from "@/lib/track-match";
 import { pushRecentPlayedTrack } from "@/lib/recent-searches";
 import { formatDuration, titleLooksExplicit } from "@/lib/utils";
 import { emitListenCredited } from "@/lib/ui-events";
+import { LISTEN_HEARTBEAT_SECONDS } from "@/lib/listen";
 import { offlineStreamUrl } from "@/lib/desktop-offline";
 
 export type KaraokeUiStatus =
@@ -47,6 +48,28 @@ export type PlayerTrack = {
   /** Catalog duration in seconds — passed to live/YTM match when resolving. */
   duration?: number | null;
 };
+
+function postListenCredit(seconds: number, track: PlayerTrack) {
+  const sec = Math.max(0, Math.min(3600, Math.floor(seconds)));
+  if (sec <= 0) return;
+  void fetch("/api/listen", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      seconds: sec,
+      trackId: track.id,
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      coverPath: track.coverPath ?? null,
+    }),
+    keepalive: true,
+  })
+    .then((res) => {
+      if (res.ok) emitListenCredited({ trackId: track.id });
+    })
+    .catch(() => null);
+}
 
 /** Infer Local vs YouTube from id / stream URL / explicit stamp. */
 export function playbackQuality(track: PlayerTrack): PlaybackQuality {
@@ -111,6 +134,15 @@ let discordPresenceCache: {
   presenceOn: boolean;
   appId: string | null;
 } = { at: 0, presenceOn: false, appId: null };
+
+let discordPresenceClearTimer: number | null = null;
+
+function cancelDiscordPresenceClear() {
+  if (discordPresenceClearTimer != null) {
+    window.clearTimeout(discordPresenceClearTimer);
+    discordPresenceClearTimer = null;
+  }
+}
 
 const PRESENCE_INVALIDATE_EVENT = "polarr-discord-presence-invalidate";
 
@@ -627,6 +659,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const playingRef = useRef(false);
   const progressRef = useRef(0);
   const durationRef = useRef(0);
+  const presenceClockRef = useRef<{
+    trackId: string;
+    startUnix: number;
+    durationSec: number;
+  } | null>(null);
   const volumeRef = useRef(0.8);
   const vocalLevelRef = useRef(1);
   const attachAudioListenersRef = useRef<(el: HTMLAudioElement) => void>(
@@ -645,6 +682,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       : `tab-${Math.random().toString(36).slice(2)}`,
   );
   const channelRef = useRef<BroadcastChannel | null>(null);
+  const listenAnchorRef = useRef<{ trackId: string; at: number } | null>(null);
   const applyingRemoteRef = useRef(false);
   const publishRef = useRef<(partial?: Partial<SyncPayload>) => void>(() => {});
 
@@ -1252,6 +1290,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     instReadyRef.current = false;
     attach(audio);
 
+    let remoteTabAlive = false;
+    const markRemoteAlive = () => {
+      remoteTabAlive = true;
+    };
+
     let channel: BroadcastChannel | null = null;
     try {
       channel = new BroadcastChannel(PLAYER_CHANNEL);
@@ -1261,6 +1304,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (!msg || typeof msg !== "object") return;
         if (msg.kind === "hello") {
           if (msg.tabId === tabIdRef.current) return;
+          markRemoteAlive();
           if (isOwner() && (trackRef.current || queueRef.current.length)) {
             publishRef.current();
           }
@@ -1268,6 +1312,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
         if (msg.kind === "sync") {
           if (msg.payload.ownerId === tabIdRef.current) return;
+          markRemoteAlive();
           applyRemote(msg.payload);
         }
       };
@@ -1276,6 +1321,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
 
     const stored = readStored();
+    const staleOwnerId =
+      stored?.ownerId && stored.ownerId !== tabIdRef.current
+        ? stored.ownerId
+        : null;
     if (stored?.track) {
       applyingRemoteRef.current = true;
       // Another tab owns active playback — mirror UI only until hello/sync.
@@ -1356,11 +1405,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       tabId: tabIdRef.current,
     } satisfies SyncMsg);
 
+    const staleOwnerTimer = window.setTimeout(() => {
+      if (remoteTabAlive || !staleOwnerId) return;
+      ownerIdRef.current = tabIdRef.current;
+      publishRef.current({
+        ownerId: tabIdRef.current,
+        playing: false,
+      });
+    }, 2500);
+
     const onStorage = (e: StorageEvent) => {
       if (e.key !== PLAYER_STORAGE_KEY || !e.newValue) return;
       try {
         const payload = JSON.parse(e.newValue) as SyncPayload;
         if (payload.ownerId === tabIdRef.current) return;
+        markRemoteAlive();
         applyRemote(payload);
       } catch {
         /* ignore */
@@ -1399,6 +1458,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener("pagehide", onUnload);
 
     return () => {
+      window.clearTimeout(staleOwnerTimer);
       window.clearInterval(syncTick);
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("pagehide", onUnload);
@@ -1417,30 +1477,49 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
   }, [applyRemote, isOwner]);
 
+  const flushListenCredit = useCallback(() => {
+    if (!isOwner()) return;
+    const audio = audioRef.current;
+    const t = trackRef.current;
+    if (!audio || !t) return;
+    const anchor = listenAnchorRef.current;
+    if (!anchor || anchor.trackId !== t.id) return;
+    const delta = Math.max(
+      0,
+      Math.min(3600, Math.floor(audio.currentTime - anchor.at)),
+    );
+    if (delta <= 0) return;
+    listenAnchorRef.current = { trackId: t.id, at: audio.currentTime };
+    postListenCredit(delta, t);
+  }, [isOwner]);
+
   useEffect(() => {
-    if (!playing || !track || !isOwner()) return;
-    const tickSec = 15;
+    if (!track || !isOwner()) {
+      listenAnchorRef.current = null;
+      return;
+    }
+
+    if (!playing) {
+      flushListenCredit();
+      listenAnchorRef.current = null;
+      return;
+    }
+
+    listenAnchorRef.current = {
+      trackId: track.id,
+      at: audioRef.current?.currentTime ?? progressRef.current ?? 0,
+    };
+
+    const tickMs = LISTEN_HEARTBEAT_SECONDS * 1000;
     const id = window.setInterval(() => {
-      void fetch("/api/listen", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          seconds: tickSec,
-          trackId: track.id,
-          title: track.title,
-          artist: track.artist,
-          album: track.album,
-          coverPath: track.coverPath ?? null,
-        }),
-        keepalive: true,
-      })
-        .then((res) => {
-          if (res.ok) emitListenCredited({ trackId: track.id });
-        })
-        .catch(() => null);
-    }, tickSec * 1000);
-    return () => window.clearInterval(id);
-  }, [playing, track, isOwner]);
+      flushListenCredit();
+    }, tickMs);
+    return () => {
+      window.clearInterval(id);
+      flushListenCredit();
+      listenAnchorRef.current = null;
+    };
+  }, [playing, track, isOwner, flushListenCredit]);
 
   // Discord Rich Presence (desktop IPC only).
   useEffect(() => {
@@ -1453,6 +1532,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    cancelDiscordPresenceClear();
 
     const pushPresence = async () => {
       try {
@@ -1486,29 +1566,48 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const { setDiscordListeningActivity, clearDiscordActivity } =
           await import("@/lib/discord-rpc");
         if (cancelled) return;
-        if (playing && track) {
+        // Keep presence on the current track even while paused / between
+        // song advances (`playing` briefly goes false on ended).
+        if (!track) {
+          presenceClockRef.current = null;
+          await clearDiscordActivity();
+          return;
+        }
+
+        const durationSec =
+          durationRef.current ||
+          (typeof track.duration === "number" ? track.duration : 0) ||
+          0;
+        let clock = presenceClockRef.current;
+        if (!clock || clock.trackId !== track.id) {
           const progressSec =
             audioRef.current?.currentTime ?? progressRef.current ?? 0;
-          const durationSec =
-            durationRef.current ||
-            (typeof track.duration === "number" ? track.duration : 0) ||
-            0;
-          const result = await setDiscordListeningActivity(
-            discordPresenceCache.appId,
-            {
-              title: track.title,
-              artist: track.artist,
-              album: track.album,
-              coverUrl: track.coverPath,
-              progressSec,
-              durationSec,
-            },
-          );
-          if (!result.ok && process.env.NODE_ENV === "development") {
-            console.warn("[discord-presence]", result.error);
-          }
-        } else {
-          await clearDiscordActivity();
+          const now = Math.floor(Date.now() / 1000);
+          clock = {
+            trackId: track.id,
+            startUnix: now - Math.max(0, Math.floor(progressSec)),
+            durationSec: durationSec > 0 ? durationSec : 0,
+          };
+          presenceClockRef.current = clock;
+        } else if (durationSec > 0 && clock.durationSec <= 0) {
+          clock = { ...clock, durationSec };
+          presenceClockRef.current = clock;
+        }
+
+        const now = Math.floor(Date.now() / 1000);
+        const result = await setDiscordListeningActivity(
+          discordPresenceCache.appId,
+          {
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            coverUrl: track.coverPath,
+            progressSec: Math.max(0, now - clock.startUnix),
+            durationSec: clock.durationSec,
+          },
+        );
+        if (!result.ok && process.env.NODE_ENV === "development") {
+          console.warn("[discord-presence]", result.error);
         }
       } catch (e) {
         if (process.env.NODE_ENV === "development") {
@@ -1519,30 +1618,41 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     void pushPresence();
 
-    // Keep timestamps fresh and recover if a stuck probe/activity was left behind.
-    const interval =
-      playing && track
-        ? window.setInterval(() => {
-            void pushPresence();
-          }, 15_000)
-        : 0;
+    const interval = track
+      ? window.setInterval(() => {
+          void pushPresence();
+        }, 45_000)
+      : 0;
 
     return () => {
       cancelled = true;
       if (interval) window.clearInterval(interval);
     };
-  }, [playing, track, presenceRev]);
+  }, [
+    track?.id,
+    track?.title,
+    track?.artist,
+    track?.album,
+    track?.coverPath,
+    duration,
+    presenceRev,
+  ]);
 
-  // Clear presence when the player unmounts (navigation away / logout shell).
+  // Clear presence when the player unmounts — delayed so React remounts
+  // (Strict Mode / shell swap) don't flicker Discord off.
   useEffect(() => {
+    cancelDiscordPresenceClear();
     return () => {
-      void import("@/lib/discord-rpc")
-        .then(({ clearDiscordActivity }) => clearDiscordActivity())
-        .catch(() => null);
+      discordPresenceClearTimer = window.setTimeout(() => {
+        discordPresenceClearTimer = null;
+        void import("@/lib/discord-rpc")
+          .then(({ clearDiscordActivity }) => clearDiscordActivity())
+          .catch(() => null);
+      }, 800);
     };
   }, []);
 
-  // Recently played / listening feed are driven by /api/listen after ≥15s.
+  // Recently played / listening feed are driven by /api/listen after qualify threshold.
 
   const play = useCallback(
     (next: PlayerTrack, nextQueue?: PlayerTrack[]) => {

@@ -13,7 +13,7 @@ import {
   oauthStateCookieName,
 } from "@/app/api/discord/oauth/route";
 import { resolvePublicBaseUrl } from "@/lib/public-url";
-import { getRequestIp } from "@/lib/request-client";
+import { getRequestIpFromRequest } from "@/lib/request-client";
 import {
   loginBlockedForMs,
   recordLoginFailure,
@@ -106,7 +106,7 @@ export async function GET(req: Request) {
     const expected = `login:${state}`;
     if (!raw || raw !== expected) return goLogin("discord=state");
 
-    const ip = await getRequestIp();
+    const ip = getRequestIpFromRequest(req);
     const waitMs = loginBlockedForMs(ip, "discord");
     if (waitMs > 0) {
       return goLogin("discord=rate");
@@ -154,14 +154,14 @@ export async function GET(req: Request) {
       result.token,
       await sessionCookieOptions(),
     );
-    const { notifyDiscord } = await import("@/lib/admin-notify");
+    const { notifyDiscord, notifyIpField } = await import("@/lib/admin-notify");
     notifyDiscord("userLogin", {
       title: "User signed in",
       description: `${result.user.username} signed in with Discord`,
       fields: [
         { name: "User", value: result.user.username, inline: true },
         { name: "Method", value: "discord", inline: true },
-        ...(ip ? [{ name: "IP", value: ip, inline: true }] : []),
+        notifyIpField(ip),
       ],
     });
     return NextResponse.redirect(`${publicBase}/`);

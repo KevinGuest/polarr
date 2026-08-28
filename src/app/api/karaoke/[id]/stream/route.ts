@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { getInstrumentalFile, type KaraokeRequestMeta } from "@/lib/karaoke-stems";
-import { json } from "@/lib/api";
+import { requireAuthFromRequest, json } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +17,9 @@ export async function GET(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const auth = requireAuthFromRequest(req);
+  if (auth.response) return auth.response;
+
   const { id } = await ctx.params;
   const filePath = getInstrumentalFile(id, metaFromUrl(req));
   if (!filePath) {

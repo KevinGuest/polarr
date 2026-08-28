@@ -8,7 +8,7 @@ import {
 } from "@/lib/db";
 import { sendPasswordResetEmail } from "@/lib/password-reset-email";
 import { resolvePublicBaseUrl } from "@/lib/public-url";
-import { getRequestIp } from "@/lib/request-client";
+import { getRequestIpFromRequest } from "@/lib/request-client";
 import {
   loginBlockedForMs,
   recordLoginFailure,
@@ -41,7 +41,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const ip = await getRequestIp();
+  const ip = getRequestIpFromRequest(req);
   const waitMs = loginBlockedForMs(ip, `forgot:${parsed.data.email}`);
   if (waitMs > 0) {
     const seconds = Math.ceil(waitMs / 1000);
@@ -68,13 +68,14 @@ export async function POST(req: Request) {
       resetUrl: `${base}/reset-password?token=${encodeURIComponent(token)}`,
     });
     recordLoginSuccess(ip, `forgot:${parsed.data.email}`);
-    const { notifyDiscord } = await import("@/lib/admin-notify");
+    const { notifyDiscord, notifyIpField } = await import("@/lib/admin-notify");
     notifyDiscord("passwordResetRequested", {
       title: "Password reset requested",
       description: `${user.username} requested a password reset`,
       fields: [
         { name: "User", value: user.username, inline: true },
         { name: "Email", value: user.email, inline: true },
+        notifyIpField(ip),
       ],
     });
   } catch (err) {

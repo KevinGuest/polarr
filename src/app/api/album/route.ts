@@ -1,4 +1,4 @@
-import { getAuthUser, json } from "@/lib/api";
+import { json, requireAuth } from "@/lib/api";
 import {
   findTrackFast,
   getSettings,
@@ -23,6 +23,7 @@ import { ytDlpAvailable } from "@/lib/fallback-download";
 import { resolveArtistPortrait } from "@/lib/artist-portrait";
 import { namesMatch, primaryArtistName } from "@/lib/track-match";
 import { titleLooksExplicit, formatTrackArtistLine } from "@/lib/utils";
+import { catalogAlbumTracks } from "@/lib/catalog-search";
 import { localSourceBadge, type LocalSourceBadge } from "@/lib/track-source-badge";
 
 export const dynamic = "force-dynamic";
@@ -56,7 +57,7 @@ type AlbumPayload = {
     lidarrAlbumId: number | null;
   };
   tracks: AlbumTrackDto[];
-  source: "lidarr" | "musicbrainz" | "library" | "none";
+  source: "lidarr" | "musicbrainz" | "library" | "catalog" | "none";
   fallbackReady: boolean;
   error: string | null;
 };
@@ -160,8 +161,11 @@ function cacheKey(params: URLSearchParams): string {
  * Resolves album by lidarr id, foreign MBID, or artist+title lookup.
  */
 export async function GET(req: Request) {
+  const auth = await requireAuth();
+  if (auth.response) return auth.response;
+
   const { searchParams } = new URL(req.url);
-  const user = await getAuthUser();
+  const user = auth.user;
   const offline = new Set(user ? listOfflineTrackIds(user.id) : []);
   const key = cacheKey(searchParams);
   const cached = albumResponseCache.get(key);
@@ -193,7 +197,8 @@ export async function GET(req: Request) {
   const client = LidarrClient.fromSettings();
 
   let tracks: AlbumTrackDto[] = [];
-  let source: "lidarr" | "musicbrainz" | "library" | "none" = "none";
+  let source: "lidarr" | "musicbrainz" | "library" | "catalog" | "none" =
+    "none";
   let resolvedImage = image;
   let year: number | undefined;
   let error: string | null = null;
@@ -436,6 +441,39 @@ export async function GET(req: Request) {
       source = "library";
       tracks = local;
       error = null;
+    }
+  }
+
+  // Deezer / iTunes when MB + Lidarr + local all miss (published catalog albums)
+  if (tracks.length === 0) {
+    try {
+      const catalog = await catalogAlbumTracks(artist, title, { year });
+      if (catalog.length > 0) {
+        source = "catalog";
+        tracks = mergeAvailability(
+          catalog.map((t) => ({
+            key: `cat-${t.trackNumber}-${t.title}`,
+            title: t.title,
+            trackNumber: t.trackNumber,
+            duration: t.duration,
+            available: false,
+            downloaded: false,
+            hasFile: false,
+            localTrackId: null,
+            streamUrl: null,
+            localSource: null,
+            explicit: t.explicit,
+            artists: formatTrackArtistLine(artist, t.title),
+          })),
+          artist,
+        );
+        error = null;
+      }
+    } catch (err) {
+      if (!error) {
+        error =
+          err instanceof Error ? err.message : "Catalog tracklist failed";
+      }
     }
   }
 

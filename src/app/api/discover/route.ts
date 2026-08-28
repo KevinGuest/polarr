@@ -1,4 +1,4 @@
-import { json, getAuthUser } from "@/lib/api";
+import { json, requireAuth } from "@/lib/api";
 import { getDiscoverFeed } from "@/lib/discover";
 
 export const dynamic = "force-dynamic";
@@ -8,8 +8,10 @@ export const dynamic = "force-dynamic";
  * Response is process-cached ~10m per user (see getDiscoverFeed).
  */
 export async function GET() {
-  const user = await getAuthUser();
-  const payload = await getDiscoverFeed(user?.id ?? null);
+  const auth = await requireAuth();
+  if (auth.response) return auth.response;
+
+  const payload = await getDiscoverFeed(auth.user.id);
   return json(payload, {
     headers: {
       // Browser may reuse briefly; server TTL is the real warm path.

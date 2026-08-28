@@ -11,6 +11,13 @@ import {
 } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { Dialog, DialogOverlay, DialogPortal } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toastError, toastSuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +32,8 @@ type PlaylistActionsDrawerProps = {
   onEditPlaylist: () => void;
   onEditDetails: () => void;
   onDelete: () => void;
+  /** Bottom sheet on mobile; compact menu on desktop/web. */
+  variant?: "sheet" | "menu";
 };
 
 function ActionRow({
@@ -66,9 +75,30 @@ function ActionRow({
   );
 }
 
+async function sharePlaylist(playlistId: string, title: string) {
+  const path = `/playlist/${encodeURIComponent(playlistId)}`;
+  const url =
+    typeof window !== "undefined" ? `${window.location.origin}${path}` : path;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title, url });
+    } else {
+      await navigator.clipboard.writeText(url);
+      toastSuccess("Link copied");
+    }
+  } catch {
+    try {
+      await navigator.clipboard.writeText(url);
+      toastSuccess("Link copied");
+    } catch {
+      toastError("Couldn’t share");
+    }
+  }
+}
+
 /**
- * Mobile/desktop playlist ⋯ sheet. Intentionally omits Spotify-only actions
- * (device downloads, cover art AI, video, Jam).
+ * Playlist ⋯ — mobile bottom sheet, desktop compact menu (same items as
+ * the library right-click menu).
  */
 export function PlaylistActionsDrawer({
   playlistId,
@@ -81,6 +111,7 @@ export function PlaylistActionsDrawer({
   onEditPlaylist,
   onEditDetails,
   onDelete,
+  variant = "sheet",
 }: PlaylistActionsDrawerProps) {
   const [open, setOpen] = useState(false);
 
@@ -88,33 +119,64 @@ export function PlaylistActionsDrawer({
     coverUrl && /^https?:\/\//i.test(coverUrl) ? coverUrl : undefined;
 
   async function share() {
-    const path = `/playlist/${encodeURIComponent(playlistId)}`;
-    const url =
-      typeof window !== "undefined"
-        ? `${window.location.origin}${path}`
-        : path;
-    try {
-      if (navigator.share) {
-        await navigator.share({ title, url });
-      } else {
-        await navigator.clipboard.writeText(url);
-        toastSuccess("Link copied");
-      }
-    } catch {
-      try {
-        await navigator.clipboard.writeText(url);
-        toastSuccess("Link copied");
-      } catch {
-        toastError("Couldn’t share");
-      }
-    }
+    await sharePlaylist(playlistId, title);
     setOpen(false);
   }
 
   function run(action: () => void) {
     setOpen(false);
     // Let the sheet close before opening another dialog.
-    setTimeout(action, 180);
+    setTimeout(action, variant === "menu" ? 0 : 180);
+  }
+
+  if (variant === "menu") {
+    return (
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-56">
+          <DropdownMenuItem
+            className="gap-2.5 font-medium"
+            onSelect={() => void share()}
+          >
+            <Share2 className="size-4 shrink-0 text-muted-foreground" />
+            Share
+          </DropdownMenuItem>
+          {canEdit ? (
+            <>
+              <DropdownMenuItem
+                className="gap-2.5 font-medium"
+                onSelect={() => run(onAddSongs)}
+              >
+                <CirclePlus className="size-4 shrink-0 text-muted-foreground" />
+                Add to this playlist
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="gap-2.5 font-medium"
+                onSelect={() => run(onEditPlaylist)}
+              >
+                <ListFilter className="size-4 shrink-0 text-muted-foreground" />
+                Edit playlist
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="gap-2.5 font-medium"
+                onSelect={() => run(onEditDetails)}
+              >
+                <Pencil className="size-4 shrink-0 text-muted-foreground" />
+                Name & details
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="gap-2.5 font-medium text-destructive focus:bg-destructive/10 focus:text-destructive"
+                onSelect={() => run(onDelete)}
+              >
+                <Trash2 className="size-4 shrink-0" />
+                Delete playlist
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
   }
 
   return (

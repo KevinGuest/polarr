@@ -3,6 +3,8 @@
  * Used so local library wins before yt-dlp live fallback.
  */
 
+import { extractFeaturedArtists } from "@/lib/utils";
+
 /** Primary credit only — drop “feat.” / comma lists / & pairs. */
 export function primaryArtistName(credit: string): string {
   let s = credit.trim();
@@ -252,4 +254,72 @@ export function tokenizeSearchQuery(q: string): string[] {
     if (out.length >= 8) break;
   }
   return out;
+}
+
+function creditParts(credit: string): string[] {
+  return credit
+    .split(/\s*[,&]\s*|\s+(?:feat\.?|ft\.?|featuring|and|x|with)\s+/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** True when this name is the lead (primary) credit. */
+export function isPrimaryArtistCredit(
+  artistCredit: string,
+  target: string,
+): boolean {
+  return namesMatch(primaryArtistName(artistCredit) || artistCredit, target);
+}
+
+/**
+ * True when the artist is on the track as lead or a featured / collab credit.
+ */
+export function creditIncludesArtist(
+  artistCredit: string,
+  title: string,
+  target: string,
+): boolean {
+  if (!target.trim()) return false;
+  if (isPrimaryArtistCredit(artistCredit, target)) return true;
+  if (creditParts(artistCredit).some((p) => namesMatch(p, target))) return true;
+  return extractFeaturedArtists(title).some((f) => namesMatch(f, target));
+}
+
+/**
+ * 1–3 word queries that look like an artist name (e.g. “KILLY”), not a lyric line.
+ */
+export function isArtistNameQuery(query: string): boolean {
+  const term = query.trim();
+  if (!term) return false;
+  const words = term.split(/\s+/).filter(Boolean);
+  return words.length >= 1 && words.length <= 3 && term.length >= 2;
+}
+
+export function artistNameMatchesQuery(
+  artistName: string,
+  query: string,
+): boolean {
+  if (!isArtistNameQuery(query)) return false;
+  if (namesMatch(artistName, query)) return true;
+  const a = normalizeArtistName(artistName);
+  const q = normalizeArtistName(query);
+  return Boolean(a && q && a === q);
+}
+
+/**
+ * Rank tracks for an artist-name search: their songs first, then features.
+ */
+export function scoreArtistSearchHit(
+  artistName: string,
+  hit: SearchHitFields,
+  onPolarr = false,
+): number {
+  let score = 0;
+  if (isPrimaryArtistCredit(hit.artist, artistName)) score += 8_000;
+  else if (creditIncludesArtist(hit.artist, hit.title, artistName))
+    score += 5_500;
+  else return scoreSearchHit(artistName, hit) + (onPolarr ? 250 : 0);
+
+  if (onPolarr) score += 400;
+  return score;
 }

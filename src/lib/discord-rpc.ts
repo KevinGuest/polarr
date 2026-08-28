@@ -28,8 +28,23 @@ type TauriInvoke = (
   args?: Record<string, unknown>,
 ) => Promise<unknown>;
 
+let lastSentKey: string | null = null;
+let lastSentAt = 0;
+const RESEND_SAME_MS = 45_000;
 let unloadHooked = false;
 let lastError: string | null = null;
+
+function activityKey(appId: string, fields: ReturnType<typeof activityFields>) {
+  return [
+    appId.trim(),
+    fields.details,
+    fields.state,
+    fields.albumText,
+    fields.coverUrl || "",
+    String(fields.startUnix ?? ""),
+    String(fields.endUnix ?? ""),
+  ].join("|");
+}
 
 function clip(s: string, max = 128) {
   const t = s.trim();
@@ -174,6 +189,8 @@ function ok(): DiscordPresenceResult {
 
 /** Clear Discord activity (desktop IPC only). */
 export async function clearDiscordActivity(): Promise<DiscordPresenceResult> {
+  lastSentKey = null;
+  lastSentAt = 0;
   const invoke = getTauriInvoke();
   if (!invoke) {
     return ok(); // Browser: nothing to clear
@@ -219,6 +236,12 @@ export async function setDiscordListeningActivity(
   }
 
   const fields = activityFields(track);
+  const key = activityKey(id, fields);
+  const now = Date.now();
+  if (lastSentKey === key && now - lastSentAt < RESEND_SAME_MS) {
+    return ok();
+  }
+
   try {
     await invoke("discord_set_presence", {
       payload: {
@@ -231,6 +254,8 @@ export async function setDiscordListeningActivity(
         endUnix: fields.endUnix,
       },
     });
+    lastSentKey = key;
+    lastSentAt = now;
     return ok();
   } catch (e) {
     const msg =

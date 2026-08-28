@@ -59,15 +59,15 @@ Image build notes (kept fast on purpose):
 
 ## Umbrel package
 
-Draft package lives in `umbrel-package/polarr/`:
+The Umbrel store package lives in **[polarr-app](https://github.com/KevinGuest/polarr-app)** (not this repo):
 
-- `umbrel-app.yml` — manifest (`port: 3647`, dependency on `lidarr`, `STORAGE_DOWNLOADS`)
-- `docker-compose.yml` — `app_proxy` → web on internal `3000`, music mount under shared Downloads
+- `polarr-app/umbrel-app.yml` — manifest (`port: 3647`, dependency on `lidarr`, `STORAGE_DOWNLOADS`)
+- `polarr-app/docker-compose.yml` — `app_proxy` → web on internal `3000`, music mount under shared Downloads
 
 Before a store PR:
 
-1. Publish multi-arch images from [polarr-app](https://github.com/KevinGuest/polarr-app) (`ghcr.io/kevinguest/polarr-app`)
-2. Pin the image digest in the Umbrel compose file
+1. Publish images from [polarr-app](https://github.com/KevinGuest/polarr-app) (`ghcr.io/kevinguest/polarr-app`)
+2. Pin the image digest in that repo’s Umbrel compose file
 3. Follow skills from [umbrel-apps](https://github.com/getumbrel/umbrel-apps): develop → package → test
 4. Galleries are left empty; Umbrel team supplies assets
 

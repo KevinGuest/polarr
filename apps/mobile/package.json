@@ -1,0 +1,26 @@
+{
+  "name": "polarr-mobile",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Polarr iOS client shell (Capacitor) — loads your self-hosted Polarr server",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "cap:sync": "npm run build && npx cap sync ios",
+    "cap:open": "npx cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/app": "^7.0.1",
+    "@capacitor/core": "^7.2.0",
+    "@capacitor/ios": "^7.2.0",
+    "@capacitor/preferences": "^7.0.1",
+    "@capacitor/status-bar": "^7.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.2.0",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.2"
+  }
+}

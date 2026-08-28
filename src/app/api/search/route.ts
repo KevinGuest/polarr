@@ -238,6 +238,8 @@ function localHitsForArtistQuery(q: string, already: TrackRow[]): TrackRow[] {
     listTracksFeaturingArtist(q, 24),
   );
 }
+
+function profileHits(q: string) {
   return searchPublicProfiles(q, 12).map((u) => ({
     id: u.publicId,
     username: u.username,

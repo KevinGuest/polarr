@@ -21,6 +21,13 @@ export default defineConfig({
     },
   },
   envPrefix: ["VITE_", "TAURI_"],
+  // Inline PostCSS so Vite does not walk up to the Next.js
+  // `postcss.config.mjs` (Tailwind) at the repo root.
+  css: {
+    postcss: {
+      plugins: [],
+    },
+  },
   build: {
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
     minify: !process.env.TAURI_DEBUG ? "esbuild" : false,

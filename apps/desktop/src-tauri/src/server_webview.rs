@@ -535,7 +535,7 @@ fn pin_shell_to_titlebar(app: &AppHandle) -> Result<(), String> {
         .get_window("main")
         .ok_or_else(|| "main window missing".to_string())?;
     let Some(shell) = app.get_webview("main") else {
-        return Err("shell webview missing".into());
+        return Err("shell webview missing".to_string());
     };
     let logical = window_logical_size(&window)?;
     set_webview_frame(
@@ -701,7 +701,8 @@ fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> 
 
     #[cfg(target_os = "macos")]
     {
-        return run_on_main_sync(&app, move || create_or_reveal_server(&app, parsed, url));
+        let handle = app.clone();
+        return run_on_main_sync(&app, move || create_or_reveal_server(&handle, parsed, url));
     }
     #[cfg(not(target_os = "macos"))]
     {

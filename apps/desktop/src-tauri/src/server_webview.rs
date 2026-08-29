@@ -55,9 +55,14 @@ fn kick_server_load(wv: &tauri::Webview, url: &str) {
         let _ = wv.navigate(parsed);
     }
     if let Ok(href) = serde_json::to_string(url) {
-        let _ = wv.eval(&format!(
-            "(function(){{try{{var u={href};var h=String(location.href||'');if(!h||h==='about:blank'||h.indexOf('about:')===0){{location.replace(u);}}}}catch(e){{try{{location.replace({href});}}catch(_){{}}}}}}})();"
-        ));
+        // Concatenate so JS braces cannot break format!.
+        let script = [
+            "(function(){ var u = ",
+            href.as_str(),
+            "; var h = String(location.href || ''); if (!h || h === 'about:blank' || h.indexOf('about:') === 0) location.replace(u); })();",
+        ]
+        .concat();
+        let _ = wv.eval(&script);
     }
 }
 

@@ -7,47 +7,55 @@ const SERVER_KEY = "polarr_server_url";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
-app.innerHTML = `
-  <main class="shell">
-    <div class="card">
-      <img class="logo" src="/polarr-icon.png" alt="Polarr" width="72" height="72" />
+const SETUP_HTML = `
+  <main class="shell" id="setup">
+    <div class="setup">
+      <img class="logo" src="/polarr-icon.png" alt="" width="72" height="72" />
       <h1>Polarr</h1>
-      <p class="lede" id="lede">Connect to your self-hosted music hub.</p>
       <form id="server-form" autocomplete="on">
-        <label for="server-url">Server URL</label>
-        <input
-          id="server-url"
-          name="serverUrl"
-          type="url"
-          inputmode="url"
-          enterkeyhint="go"
-          placeholder="http://192.168.1.10:3647"
-          required
-          spellcheck="false"
-          autocapitalize="off"
-          autocorrect="off"
-        />
-        <p class="hint">Same URL you use in Safari. Umbrel: http://umbrel.local:3647</p>
+        <div class="field-group">
+          <input
+            id="server-url"
+            name="serverUrl"
+            type="url"
+            inputmode="url"
+            enterkeyhint="go"
+            placeholder="Server URL"
+            aria-label="Server URL"
+            required
+            spellcheck="false"
+            autocapitalize="off"
+            autocorrect="off"
+          />
+        </div>
         <p id="error" class="error" hidden></p>
         <button type="submit" id="connect">Connect</button>
       </form>
-      <button type="button" id="reset" class="ghost" hidden>Change server</button>
     </div>
   </main>
   <div id="toast" class="toast" hidden role="status"></div>
 `;
 
-const form = document.querySelector<HTMLFormElement>("#server-form")!;
-const input = document.querySelector<HTMLInputElement>("#server-url")!;
-const errorEl = document.querySelector<HTMLParagraphElement>("#error")!;
-const button = document.querySelector<HTMLButtonElement>("#connect")!;
-const resetBtn = document.querySelector<HTMLButtonElement>("#reset")!;
-const lede = document.querySelector<HTMLParagraphElement>("#lede")!;
-const toastEl = document.querySelector<HTMLDivElement>("#toast")!;
+const BOOT_HTML = `
+  <main class="boot" id="boot">
+    <img src="/polarr-icon.png" alt="Polarr" width="88" height="88" />
+  </main>
+`;
+
+function showBoot() {
+  app.innerHTML = BOOT_HTML;
+}
+
+function showSetup() {
+  app.innerHTML = SETUP_HTML;
+  wireSetup();
+}
 
 let toastTimer: number | null = null;
 
 function showToast(message: string) {
+  const toastEl = document.querySelector<HTMLDivElement>("#toast");
+  if (!toastEl) return;
   toastEl.textContent = message;
   toastEl.hidden = false;
   if (toastTimer) window.clearTimeout(toastTimer);
@@ -58,11 +66,15 @@ function showToast(message: string) {
 }
 
 function showError(message: string) {
+  const errorEl = document.querySelector<HTMLParagraphElement>("#error");
+  if (!errorEl) return;
   errorEl.hidden = false;
   errorEl.textContent = message;
 }
 
 function clearError() {
+  const errorEl = document.querySelector<HTMLParagraphElement>("#error");
+  if (!errorEl) return;
   errorEl.hidden = true;
   errorEl.textContent = "";
 }
@@ -152,11 +164,42 @@ function goToServer(url: string) {
 async function bootstrapNativeChrome() {
   if (!Capacitor.isNativePlatform()) return;
   try {
+    await StatusBar.setOverlaysWebView({ overlay: true });
     await StatusBar.setStyle({ style: Style.Dark });
-    await StatusBar.setBackgroundColor({ color: "#0c0b12" });
+    await StatusBar.setBackgroundColor({ color: "#09090b" });
   } catch {
     // Status bar plugin may be unavailable in browser preview.
   }
+}
+
+function wireSetup() {
+  const form = document.querySelector<HTMLFormElement>("#server-form")!;
+  const input = document.querySelector<HTMLInputElement>("#server-url")!;
+  const button = document.querySelector<HTMLButtonElement>("#connect")!;
+
+  void loadUrl().then((existing) => {
+    if (existing) input.value = existing;
+  });
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    clearError();
+    button.disabled = true;
+    button.textContent = "Checking…";
+    try {
+      const url = normalizeUrl(input.value);
+      await probePolarr(url);
+      await saveUrl(url);
+      showBoot();
+      goToServer(url);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showToast("URL not valid");
+      showError(message || "URL not valid");
+      button.disabled = false;
+      button.textContent = "Connect";
+    }
+  });
 }
 
 async function bootstrap() {
@@ -169,68 +212,21 @@ async function bootstrap() {
   }
 
   const existing = await loadUrl();
-  if (!existing) return;
+  if (!existing) {
+    showSetup();
+    return;
+  }
 
-  input.value = existing;
-  resetBtn.hidden = false;
-  form.hidden = true;
-  lede.textContent = "Opening your Polarr server…";
-  button.textContent = "Open now";
-
-  let cancelled = false;
-  resetBtn.addEventListener(
-    "click",
-    async () => {
-      cancelled = true;
-      await clearUrl();
-      form.hidden = false;
-      resetBtn.hidden = true;
-      input.value = "";
-      lede.textContent = "Connect to your self-hosted music hub.";
-      button.disabled = false;
-      button.textContent = "Connect";
-      clearError();
-    },
-    { once: true },
-  );
-
-  // Short grace period so users can tap Change server without reinstalling.
-  await new Promise((r) => setTimeout(r, 1200));
-  if (cancelled) return;
-
+  showBoot();
   try {
     const url = normalizeUrl(existing);
     await probePolarr(url);
     if (url !== existing) await saveUrl(url);
     goToServer(url);
   } catch {
-    form.hidden = false;
-    resetBtn.hidden = false;
-    lede.textContent = "Connect to your self-hosted music hub.";
-    button.disabled = false;
-    button.textContent = "Connect";
+    showSetup();
     showToast("URL not valid");
   }
 }
-
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  clearError();
-  button.disabled = true;
-  button.textContent = "Checking…";
-  try {
-    const url = normalizeUrl(input.value);
-    await probePolarr(url);
-    await saveUrl(url);
-    button.textContent = "Connecting…";
-    goToServer(url);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    showToast("URL not valid");
-    showError(message || "URL not valid");
-    button.disabled = false;
-    button.textContent = "Connect";
-  }
-});
 
 void bootstrap();

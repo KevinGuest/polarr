@@ -1,6 +1,6 @@
 :root {
   color-scheme: dark;
-  --bg: #0c0b12;
+  --bg: #09090b;
   --panel: #14131c;
   --text: #f4f4f5;
   --muted: #a1a1aa;
@@ -18,10 +18,13 @@
 }
 
 html,
-body {
+body,
+#app {
   margin: 0;
-  min-height: 100%;
-  background: radial-gradient(900px 500px at 50% -8%, #1a1830 0%, var(--bg) 55%);
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--bg);
   color: var(--text);
   -webkit-tap-highlight-color: transparent;
 }
@@ -31,92 +34,90 @@ body {
   min-height: 100dvh;
 }
 
-.shell {
-  min-height: 100vh;
+.boot {
+  height: 100%;
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: calc(24px + var(--safe-top)) 20px calc(24px + var(--safe-bottom));
+  background: var(--bg);
 }
 
-.card {
-  width: min(420px, 100%);
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 36px 24px 24px;
-  text-align: center;
+.boot img {
+  width: 88px;
+  height: 88px;
+  border-radius: 22px;
+}
+
+.shell {
+  height: 100%;
+  min-height: 100dvh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: calc(20px + var(--safe-top)) 24px calc(24px + var(--safe-bottom));
+}
+
+.setup {
+  width: 100%;
+  max-width: 22.5rem;
+  margin: 0 auto;
 }
 
 .logo {
   display: block;
-  margin: 0 auto 18px;
-  border-radius: 16px;
+  margin: 0 auto 24px;
+  border-radius: 22px;
 }
 
 h1 {
-  margin: 0;
-  font-size: 1.8rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-}
-
-.lede {
-  margin: 8px 0 28px;
-  color: var(--muted);
-  font-size: 0.95rem;
-  line-height: 1.45;
-}
-
-form {
-  text-align: left;
-}
-
-label {
-  display: block;
-  font-size: 0.8rem;
+  margin: 0 0 40px;
+  font-size: 1.75rem;
   font-weight: 600;
-  color: var(--muted);
-  margin-bottom: 8px;
+  letter-spacing: -0.03em;
+  text-align: center;
+}
+
+.field-group {
+  overflow: hidden;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 input {
   width: 100%;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: #0a0910;
+  height: 56px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text);
-  padding: 14px 14px;
+  padding: 0 16px;
   font: inherit;
-  font-size: 16px;
+  font-size: 17px;
   outline: none;
 }
 
-input:focus {
-  border-color: rgba(255, 255, 255, 0.28);
-}
-
-.hint {
-  margin: 10px 0 0;
+input::placeholder {
   color: var(--muted);
-  font-size: 0.78rem;
-  line-height: 1.4;
 }
 
 .error {
   margin: 12px 0 0;
   color: var(--danger);
   font-size: 0.85rem;
+  text-align: center;
 }
 
 button {
-  margin-top: 20px;
+  margin-top: 24px;
   width: 100%;
   border: 0;
-  border-radius: 12px;
-  padding: 14px 16px;
+  border-radius: 999px;
+  padding: 16px 16px;
   font: inherit;
-  font-weight: 650;
+  font-size: 17px;
+  font-weight: 600;
   cursor: pointer;
   color: #0c0a14;
   background: var(--accent);
@@ -124,13 +125,6 @@ button {
 
 button:disabled {
   opacity: 0.7;
-}
-
-.ghost {
-  margin-top: 12px;
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--border);
 }
 
 .toast {

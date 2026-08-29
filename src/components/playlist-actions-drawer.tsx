@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { Dialog, DialogOverlay, DialogPortal } from "@/components/ui/dialog";
+import { InsetGroup } from "@/components/media-shelf";
+import { SHEET_PANEL, SheetHandle } from "@/components/sheet-chrome";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,20 +54,20 @@ function ActionRow({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-4 rounded-lg px-1 py-3.5 text-left transition-colors hover:bg-muted/50",
-        destructive && "text-destructive hover:bg-destructive/10",
+        "flex h-14 w-full items-center gap-3 px-4 text-left",
+        destructive && "text-destructive",
       )}
     >
       <Icon
         className={cn(
-          "size-6 shrink-0",
-          destructive ? "text-destructive" : "text-foreground",
+          "size-5 shrink-0",
+          destructive ? "text-destructive" : "text-muted-foreground",
         )}
         strokeWidth={1.75}
       />
       <span
         className={cn(
-          "text-[15px] font-medium",
+          "text-[17px]",
           destructive ? "text-destructive" : "text-foreground",
         )}
       >
@@ -197,37 +199,29 @@ export function PlaylistActionsDrawer({
           <DialogOverlay className="z-[70] bg-black/55" />
           <DialogPrimitive.Content
             aria-describedby={undefined}
-            className={cn(
-              "fixed inset-x-0 bottom-0 z-[70] flex max-h-[min(88vh,640px)] flex-col rounded-t-2xl border-t border-border bg-background text-foreground shadow-2xl outline-none",
-              "data-[state=open]:animate-in data-[state=closed]:animate-out",
-              "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-              "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
-              "duration-300",
-            )}
+            className={cn(SHEET_PANEL, "z-[70] max-h-[min(88vh,640px)]")}
             onOpenAutoFocus={(e) => e.preventDefault()}
           >
-            <div
-              className="mx-auto mb-1 mt-2 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/35"
-              aria-hidden
-            />
+            <SheetHandle />
 
-            <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+            <div className="flex items-center gap-3 px-5 pb-4 pt-1">
               <CoverArt
                 seed={title}
                 image={cover}
-                className="size-12 shrink-0 rounded-md"
+                className="size-12 shrink-0 rounded-xl"
               />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[15px] font-semibold">{title}</div>
+                <div className="truncate text-[17px] font-semibold">{title}</div>
                 {subtitle ? (
-                  <div className="truncate text-sm text-muted-foreground">
+                  <div className="truncate text-[13px] text-muted-foreground">
                     {subtitle}
                   </div>
                 ) : null}
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1rem,var(--safe-bottom))] pt-1">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-[max(1rem,var(--safe-bottom))]">
+              <InsetGroup>
               <ActionRow
                 icon={Share2}
                 label="Share"
@@ -250,13 +244,18 @@ export function PlaylistActionsDrawer({
                     label="Name & details"
                     onClick={() => run(onEditDetails)}
                   />
+                </>
+              ) : null}
+              </InsetGroup>
+              {canEdit ? (
+                <InsetGroup>
                   <ActionRow
                     icon={Trash2}
                     label="Delete playlist"
                     destructive
                     onClick={() => run(onDelete)}
                   />
-                </>
+                </InsetGroup>
               ) : null}
             </div>
           </DialogPrimitive.Content>

@@ -10,6 +10,7 @@ import {
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Check, CirclePlus, Plus, Search } from "lucide-react";
 import { Dialog, DialogOverlay, DialogPortal } from "@/components/ui/dialog";
+import { SHEET_PANEL, SheetHandle } from "@/components/sheet-chrome";
 import { PromptDialog } from "@/components/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { LikedSongsCover } from "@/components/liked-songs-cover";
@@ -530,19 +531,13 @@ export function SavedInDrawer({
           <DialogPrimitive.Content
             aria-describedby={undefined}
             className={cn(
-              "fixed inset-x-0 bottom-0 z-[110] flex max-h-[min(88vh,720px)] flex-col rounded-t-2xl border-t border-border bg-background text-foreground shadow-2xl outline-none",
-              "data-[state=open]:animate-in data-[state=closed]:animate-out",
-              "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-              "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
-              "duration-300",
+              SHEET_PANEL,
+              "z-[110] max-h-[min(88vh,720px)]",
               expanded && "max-h-[92vh]",
             )}
             onOpenAutoFocus={(event) => event.preventDefault()}
           >
-            <div
-              className="mx-auto mb-2 mt-2 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/35"
-              aria-hidden
-            />
+            <SheetHandle />
 
             <div className="flex items-center justify-between px-4 pb-2">
               <button

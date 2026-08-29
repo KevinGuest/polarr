@@ -100,16 +100,16 @@ export function MobileBottomDock() {
 
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 lg:hidden">
-      <div className="pointer-events-auto border-t border-white/10 bg-background/72 shadow-[0_-8px_32px_rgba(0,0,0,0.35)] backdrop-blur-xl backdrop-saturate-150">
+      <div className="pointer-events-auto bg-gradient-to-t from-background from-[32%] to-transparent px-3 pb-[max(0.2rem,var(--safe-bottom))] pt-4">
         {track ? (
-          <div className="relative border-b border-white/8">
+          <div className="relative mb-2 overflow-hidden rounded-2xl bg-white/[0.1] backdrop-blur-xl backdrop-saturate-150">
             <div className="absolute inset-x-0 top-0 h-[2px] bg-foreground/15">
               <div
                 className="h-full bg-foreground transition-[width] duration-150"
                 style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
               />
             </div>
-            <div className="flex items-center gap-2 px-3 py-2">
+            <div className="flex items-center gap-2 px-2.5 py-2">
               <button
                 type="button"
                 onClick={() => togglePanel("nowPlaying")}
@@ -119,13 +119,13 @@ export function MobileBottomDock() {
                 <CoverArt
                   seed={track.album || track.title}
                   image={coverUrl || undefined}
-                  className="size-9 shrink-0 rounded-md"
+                  className="size-10 shrink-0 rounded-lg"
                 />
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-foreground">
+                  <div className="truncate text-[15px] font-medium text-foreground">
                     {track.title}
                   </div>
-                  <div className="truncate text-xs text-muted-foreground">
+                  <div className="truncate text-[13px] text-muted-foreground">
                     {formatTrackArtistLine(track.artist, track.title)}
                   </div>
                 </div>
@@ -159,7 +159,7 @@ export function MobileBottomDock() {
 
         <nav
           aria-label="Primary"
-          className="flex items-stretch justify-around px-1 pb-[max(0.35rem,var(--safe-bottom))] pt-1"
+          className="flex items-stretch justify-around px-1 pt-0.5"
         >
           {navTabs.map((tab) => {
             const active = tab.match(pathname);
@@ -171,7 +171,7 @@ export function MobileBottomDock() {
                 aria-current={active ? "page" : undefined}
                 onClick={dismiss}
                 className={cn(
-                  "flex min-h-[44px] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-1 text-[10px] font-medium transition-colors",
+                  "flex min-h-[44px] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-1 text-[11px] font-medium transition-colors",
                   active
                     ? "text-foreground"
                     : "text-muted-foreground hover:text-foreground",

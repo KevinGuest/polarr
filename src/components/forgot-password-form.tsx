@@ -4,8 +4,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  AUTH_CONTROL,
+  AUTH_SUBMIT,
+  AuthFieldGroup,
+  AuthScreen,
+} from "@/components/auth-screen";
 import { toastError, toastSuccess } from "@/lib/toast";
 
 /**
@@ -58,69 +62,48 @@ export function ForgotPasswordForm() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-md">
-      <div className="mb-8 text-center">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/polarr-icon.png"
-          alt=""
-          aria-hidden
-          className="mx-auto mb-4 size-14 rounded-xl object-cover"
-        />
-        <h1 className="text-3xl font-semibold tracking-tight">
-          Forgot password
-        </h1>
-        <p className="mt-2 text-muted-foreground">
-          Enter the email on your account and we’ll send a reset link.
-        </p>
-      </div>
-
-      <Card>
-        <CardContent className="space-y-4 pt-6">
-          {sent ? (
-            <div className="space-y-4 text-center">
-              <p className="text-sm text-muted-foreground">
-                If that email is on an account, the link is on its way. It
-                expires in one hour.
-              </p>
-              <Button asChild variant="outline" className="w-full">
-                <Link href="/login">Back to sign in</Link>
-              </Button>
-            </div>
-          ) : mounted ? (
-            <form className="space-y-4" onSubmit={(e) => void onSubmit(e)}>
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  autoFocus
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-              <Button type="submit" className="w-full" disabled={submitting}>
-                {submitting ? "Sending…" : "Send reset link"}
-              </Button>
-              <p className="text-center text-xs text-muted-foreground">
-                <Link href="/login" className="underline underline-offset-2">
-                  Back to sign in
-                </Link>
-              </p>
-            </form>
-          ) : (
-            <div className="space-y-4" aria-hidden>
-              <div className="space-y-2">
-                <div className="h-4 w-16 rounded bg-muted/50" />
-                <div className="h-10 rounded-md border border-border bg-background" />
-              </div>
-              <div className="h-10 w-full rounded-md bg-muted/40" />
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+    <AuthScreen
+      title="Forgot password"
+      description="Enter the email on your account and we’ll send a reset link."
+    >
+      {sent ? (
+        <div className="flex flex-col">
+          <p className="text-center text-[15px] leading-snug text-muted-foreground">
+            If that email is on an account, the link is on its way. It expires
+            in one hour.
+          </p>
+          <Button asChild className={AUTH_SUBMIT}>
+            <Link href="/login">Back to sign in</Link>
+          </Button>
+        </div>
+      ) : mounted ? (
+        <form className="flex flex-col" onSubmit={(e) => void onSubmit(e)}>
+          <AuthFieldGroup>
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              autoFocus
+              aria-label="Email"
+              placeholder="Email"
+              className={AUTH_CONTROL}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </AuthFieldGroup>
+          <Button type="submit" className={AUTH_SUBMIT} disabled={submitting}>
+            {submitting ? "Sending…" : "Send reset link"}
+          </Button>
+          <p className="mt-8 text-center text-[15px] text-muted-foreground">
+            <Link href="/login">Back to sign in</Link>
+          </p>
+        </form>
+      ) : (
+        <div className="overflow-hidden rounded-2xl bg-white/[0.06]" aria-hidden>
+          <div className="h-14" />
+        </div>
+      )}
+    </AuthScreen>
   );
 }

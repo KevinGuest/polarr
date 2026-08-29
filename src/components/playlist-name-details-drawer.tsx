@@ -5,6 +5,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Lock, LockOpen, Music2, Pencil, Trash2 } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { Dialog, DialogOverlay, DialogPortal } from "@/components/ui/dialog";
+import { SHEET_PANEL, SheetHandle } from "@/components/sheet-chrome";
 import { emitLibraryChanged } from "@/lib/ui-events";
 import { toastError, toastSuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -115,19 +116,10 @@ export function PlaylistNameDetailsDrawer({
         <DialogOverlay className="z-[75] bg-black/60" />
         <DialogPrimitive.Content
           aria-describedby={undefined}
-          className={cn(
-            "fixed inset-x-0 bottom-0 z-[75] flex max-h-[min(92vh,40rem)] flex-col rounded-t-2xl border-t border-border bg-background text-foreground shadow-2xl outline-none",
-            "data-[state=open]:animate-in data-[state=closed]:animate-out",
-            "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-            "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
-            "duration-300",
-          )}
+          className={cn(SHEET_PANEL, "z-[75] max-h-[min(92vh,40rem)]")}
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
-          <div
-            className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/35"
-            aria-hidden
-          />
+          <SheetHandle />
 
           <header className="grid shrink-0 grid-cols-[4.5rem_1fr_4.5rem] items-center px-3 py-3">
             <button

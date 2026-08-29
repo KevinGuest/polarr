@@ -159,22 +159,24 @@ app.innerHTML = `
 
     <main class="content" id="content">
       <div class="setup" id="setup-view">
-        <div class="card">
-          <img class="logo" src="/polarr-icon.png" alt="Polarr" width="112" height="112" />
+        <div class="setup-inner">
+          <img class="logo" src="/polarr-icon.png" alt="" width="72" height="72" />
           <h1>Polarr</h1>
-          <p class="lede">Connect to your self-hosted music hub.</p>
           <form id="server-form" autocomplete="on">
-            <label for="server-url">Server URL</label>
-            <input
-              id="server-url"
-              name="serverUrl"
-              type="url"
-              inputmode="url"
-              placeholder="http://192.168.1.10:3647"
-              required
-              spellcheck="false"
-            />
-            <p class="hint">Use the same URL you open in a browser. Umbrel: http://umbrel.local:3647</p>
+            <div class="field-group">
+              <input
+                id="server-url"
+                name="serverUrl"
+                type="url"
+                inputmode="url"
+                placeholder="Server URL"
+                aria-label="Server URL"
+                required
+                spellcheck="false"
+                autocapitalize="off"
+                autocorrect="off"
+              />
+            </div>
             <p id="error" class="error" hidden></p>
             <button type="submit" id="connect">Connect</button>
           </form>

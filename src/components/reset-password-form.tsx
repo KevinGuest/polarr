@@ -4,9 +4,13 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  AUTH_CONTROL,
+  AUTH_SUBMIT,
+  AuthFieldGroup,
+  AuthScreen,
+} from "@/components/auth-screen";
 import {
   isPasswordLongEnough,
   MIN_PASSWORD_LENGTH,
@@ -93,87 +97,61 @@ export function ResetPasswordForm() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-md">
-      <div className="mb-8 text-center">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/polarr-icon.png"
-          alt=""
-          aria-hidden
-          className="mx-auto mb-4 size-14 rounded-xl object-cover"
-        />
-        <h1 className="text-3xl font-semibold tracking-tight">
-          New password
-        </h1>
-        <p className="mt-2 text-muted-foreground">
-          Pick a new password for your Polarr account.
+    <AuthScreen title="New password" description="Pick a new password for your account.">
+      {tokenState === "checking" ? (
+        <p className="py-6 text-center text-[15px] text-muted-foreground">
+          Checking link…
         </p>
-      </div>
-
-      <Card>
-        <CardContent className="space-y-4 pt-6">
-          {tokenState === "checking" ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              Checking link…
-            </p>
-          ) : tokenState === "bad" ? (
-            <div className="space-y-4 text-center">
-              <p className="text-sm text-muted-foreground">
-                This reset link is invalid or has expired.
-              </p>
-              <Button asChild className="w-full">
-                <Link href="/forgot-password">Request a new link</Link>
-              </Button>
-              <p className="text-center text-xs text-muted-foreground">
-                <Link href="/login" className="underline underline-offset-2">
-                  Back to sign in
-                </Link>
-              </p>
-            </div>
-          ) : !mounted ? (
-            <div className="space-y-4" aria-hidden>
-              <div className="space-y-2">
-                <div className="h-4 w-24 rounded bg-muted/50" />
-                <div className="h-10 rounded-md border border-border bg-background" />
-              </div>
-              <div className="space-y-2">
-                <div className="h-4 w-28 rounded bg-muted/50" />
-                <div className="h-10 rounded-md border border-border bg-background" />
-              </div>
-              <div className="h-10 w-full rounded-md bg-muted/40" />
-            </div>
-          ) : (
-            <form className="space-y-4" onSubmit={(e) => void onSubmit(e)}>
-              <div className="space-y-2">
-                <Label htmlFor="new-password">New password</Label>
-                <PasswordInput
-                  id="new-password"
-                  name="password"
-                  autoComplete="new-password"
-                  minLength={MIN_PASSWORD_LENGTH}
-                  autoFocus
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirm-password">Confirm password</Label>
-                <PasswordInput
-                  id="confirm-password"
-                  name="confirmPassword"
-                  autoComplete="new-password"
-                  minLength={MIN_PASSWORD_LENGTH}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                />
-              </div>
-              <Button type="submit" className="w-full" disabled={submitting}>
-                {submitting ? "Saving…" : "Update password"}
-              </Button>
-            </form>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+      ) : tokenState === "bad" ? (
+        <div className="flex flex-col">
+          <p className="text-center text-[15px] leading-snug text-muted-foreground">
+            This reset link is invalid or has expired.
+          </p>
+          <Button asChild className={AUTH_SUBMIT}>
+            <Link href="/forgot-password">Request a new link</Link>
+          </Button>
+          <p className="mt-8 text-center text-[15px] text-muted-foreground">
+            <Link href="/login">Back to sign in</Link>
+          </p>
+        </div>
+      ) : !mounted ? (
+        <div className="overflow-hidden rounded-2xl bg-white/[0.06]" aria-hidden>
+          <div className="h-14" />
+          <div className="mx-4 h-px bg-border" />
+          <div className="h-14" />
+        </div>
+      ) : (
+        <form className="flex flex-col" onSubmit={(e) => void onSubmit(e)}>
+          <AuthFieldGroup>
+            <PasswordInput
+              id="new-password"
+              name="password"
+              autoComplete="new-password"
+              minLength={MIN_PASSWORD_LENGTH}
+              autoFocus
+              aria-label="New password"
+              placeholder="New password"
+              className={AUTH_CONTROL}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <PasswordInput
+              id="confirm-password"
+              name="confirmPassword"
+              autoComplete="new-password"
+              minLength={MIN_PASSWORD_LENGTH}
+              aria-label="Confirm password"
+              placeholder="Confirm password"
+              className={AUTH_CONTROL}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+            />
+          </AuthFieldGroup>
+          <Button type="submit" className={AUTH_SUBMIT} disabled={submitting}>
+            {submitting ? "Saving…" : "Update password"}
+          </Button>
+        </form>
+      )}
+    </AuthScreen>
   );
 }

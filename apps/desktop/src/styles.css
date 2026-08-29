@@ -597,7 +597,7 @@ html.mac .titlebar-center:has(.titlebar-search:not([hidden])) {
   display: grid;
   place-items: center;
   padding: 32px 20px;
-  background: radial-gradient(1200px 600px at 50% -10%, #18181b 0%, var(--bg) 55%);
+  background: var(--bg);
 }
 
 /* Author `display: grid` would otherwise beat UA [hidden] in WebView2. */
@@ -605,99 +605,76 @@ html.mac .titlebar-center:has(.titlebar-search:not([hidden])) {
   display: none !important;
 }
 
-.card {
-  width: min(420px, 100%);
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 36px 28px 28px;
-  text-align: center;
-  backdrop-filter: blur(12px);
+.setup-inner {
+  width: 100%;
+  max-width: 22.5rem;
 }
 
-.logo {
+.setup .logo {
   display: block;
-  width: 112px;
-  height: 112px;
-  margin: 0 auto 20px;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 24px;
   border-radius: 22px;
 }
 
-h1 {
-  margin: 0;
+.setup h1 {
+  margin: 0 0 40px;
   font-size: 1.75rem;
-  font-weight: 650;
-  letter-spacing: -0.03em;
-}
-
-.lede {
-  margin: 8px 0 28px;
-  color: var(--muted);
-  font-size: 0.95rem;
-  line-height: 1.45;
-}
-
-form {
-  text-align: left;
-}
-
-label {
-  display: block;
-  font-size: 0.8rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--muted);
-  margin-bottom: 8px;
+  letter-spacing: -0.03em;
+  text-align: center;
 }
 
-#server-url {
+.setup .field-group {
+  overflow: hidden;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.setup #server-url {
   width: 100%;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: #09090b;
+  height: 56px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text);
-  padding: 12px 14px;
+  padding: 0 16px;
   font: inherit;
+  font-size: 17px;
   outline: none;
-  text-align: left;
 }
 
-#server-url:focus {
-  border-color: rgba(255, 255, 255, 0.28);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
-}
-
-.hint {
-  margin: 10px 0 0;
+.setup #server-url::placeholder {
   color: var(--muted);
-  font-size: 0.78rem;
-  line-height: 1.4;
 }
 
-.error {
+.setup .error {
   margin: 12px 0 0;
   color: var(--danger);
   font-size: 0.85rem;
+  text-align: center;
 }
 
-#connect {
-  margin-top: 20px;
+.setup #connect {
+  margin-top: 24px;
   width: 100%;
   border: 0;
-  border-radius: 12px;
-  padding: 12px 16px;
+  border-radius: 999px;
+  padding: 16px;
   font: inherit;
-  font-weight: 650;
+  font-size: 17px;
+  font-weight: 600;
   cursor: pointer;
   color: #09090b;
   background: var(--accent);
 }
 
-#connect:hover:not(:disabled) {
+.setup #connect:hover:not(:disabled) {
   filter: brightness(0.96);
 }
 
-#connect:disabled {
+.setup #connect:disabled {
   opacity: 0.7;
   cursor: progress;
 }

@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /** Large carousel tile — ~2.2 covers + peek. */
@@ -54,6 +54,59 @@ export function useFitCount(minItemPx = 128, gapPx = 16) {
   return { ref, count };
 }
 
+export function InsetGroup({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col overflow-hidden rounded-2xl bg-white/[0.06] [&>*+*]:border-t [&>*+*]:border-border",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function BrowsePageHeader({
+  title,
+  backHref = "/",
+  backLabel = "Home",
+}: {
+  title: string;
+  backHref?: string;
+  backLabel?: string;
+}) {
+  return (
+    <header className="space-y-2">
+      <Link
+        href={backHref}
+        className="-ml-1 inline-flex items-center text-[17px] text-muted-foreground lg:hidden"
+      >
+        <ChevronLeft className="size-6" strokeWidth={1.75} />
+        {backLabel}
+      </Link>
+      <div className="flex items-center gap-3">
+        <Link
+          href={backHref}
+          className="hidden rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground lg:inline-flex"
+          aria-label={`Back to ${backLabel}`}
+        >
+          <ArrowLeft className="size-4" />
+        </Link>
+        <h1 className="min-w-0 text-[2rem] font-semibold tracking-tight">
+          {title}
+        </h1>
+      </div>
+    </header>
+  );
+}
+
 export function ShelfHeader({
   title,
   eyebrow,
@@ -75,10 +128,8 @@ export function ShelfHeader({
   const Title = titleAs;
   const titleClass =
     titleAs === "h1"
-      ? "truncate text-xl font-bold tracking-tight text-foreground lg:font-semibold md:text-2xl"
-      : eyebrow
-        ? "truncate text-lg font-bold leading-tight text-foreground lg:text-xl lg:font-semibold"
-        : "truncate text-lg font-bold leading-tight text-foreground lg:text-lg lg:font-semibold";
+      ? "truncate text-[2rem] font-semibold tracking-tight text-foreground"
+      : "truncate text-[1.375rem] font-semibold leading-tight tracking-tight text-foreground";
   const chevron =
     showSeeAll ? (
       <ChevronRight
@@ -126,14 +177,14 @@ export function ShelfHeader({
         <button
           type="button"
           onClick={onSeeAll}
-          className="shrink-0 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground lg:text-sm lg:font-medium"
+          className="shrink-0 text-[15px] font-normal text-muted-foreground transition-colors hover:text-foreground lg:text-sm lg:font-medium"
         >
           Show all
         </button>
       ) : showSeeAll && seeAllHref ? (
         <Link
           href={seeAllHref}
-          className="shrink-0 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground lg:text-sm lg:font-medium"
+          className="shrink-0 text-[15px] font-normal text-muted-foreground transition-colors hover:text-foreground lg:text-sm lg:font-medium"
         >
           Show all
         </Link>
@@ -185,7 +236,7 @@ export function MediaShelfRow({
     itemCount > 0 ? children(Math.min(itemCount, 24)) : null;
 
   return (
-    <section className="space-y-2.5 lg:space-y-4">
+    <section className="space-y-3 lg:space-y-4">
       <ShelfHeader
         title={title}
         eyebrow={eyebrow}
@@ -239,7 +290,7 @@ export function MediaShelfGrid({
     <div
       className={
         className ??
-        "grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 2xl:grid-cols-8"
+        "grid grid-cols-2 gap-x-4 gap-y-7 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 2xl:grid-cols-8"
       }
     >
       {children}
@@ -278,8 +329,8 @@ export function MediaTileShell({
           onClick={onOpen}
           className={
             coverShape === "circle"
-              ? "relative block aspect-square w-full overflow-hidden rounded-full bg-muted text-left shadow-sm transition-opacity hover:opacity-90"
-              : "relative block aspect-square w-full overflow-hidden rounded-md bg-muted text-left shadow-sm transition-opacity hover:opacity-90"
+              ? "relative block aspect-square w-full overflow-hidden rounded-full bg-muted text-left transition-opacity hover:opacity-90"
+              : "relative block aspect-square w-full overflow-hidden rounded-2xl bg-muted text-left shadow-sm transition-opacity hover:opacity-90"
           }
           aria-label={ariaLabel}
         >

@@ -2,18 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { AUTH_CONTROL, AUTH_SUBMIT, AuthFieldGroup } from "@/components/auth-screen";
+import { InsetGroup } from "@/components/media-shelf";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Switch } from "@/components/ui/switch";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -478,7 +473,7 @@ export function SettingsClient() {
   if (loading) {
     return (
       <div className="mx-auto max-w-2xl space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+        <h1 className="text-[2rem] font-semibold tracking-tight">Settings</h1>
         <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
@@ -490,22 +485,22 @@ export function SettingsClient() {
     <div className="mx-auto max-w-2xl space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="text-[2rem] font-semibold tracking-tight">Settings</h1>
+          <p className="text-[15px] text-muted-foreground">
             Profile, playlists, and Discord.
           </p>
         </div>
-        <nav className="flex flex-wrap gap-1 rounded-lg border border-border p-1">
+        <nav className="flex flex-wrap gap-2">
           {TABS.map((t) => (
             <button
               key={t.id}
               type="button"
               onClick={() => setTab(t.id)}
               className={cn(
-                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                "rounded-full px-3.5 py-2 text-sm font-medium transition-colors",
                 tab === t.id
-                  ? "bg-muted text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
+                  ? "bg-foreground text-background"
+                  : "bg-muted/60 text-foreground hover:bg-muted",
               )}
             >
               {t.label}
@@ -516,112 +511,110 @@ export function SettingsClient() {
 
       {tab === "profile" ? (
         <>
-          <Card>
-            <CardHeader>
-              <CardTitle>Profile</CardTitle>
-              <CardDescription>
-                Username and email for this account.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="account-username">Username</Label>
-                <Input
-                  id="account-username"
-                  autoComplete="username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  maxLength={40}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="account-email">Email</Label>
-                <Input
-                  id="account-email"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                />
-              </div>
-              <Button
-                type="button"
-                disabled={savingProfile || !username.trim() || !email.trim()}
-                onClick={() => void saveProfile()}
-              >
-                {savingProfile ? "Saving…" : "Save profile"}
-              </Button>
-            </CardContent>
-          </Card>
+          <section className="space-y-3">
+            <h2 className="text-[1.375rem] font-semibold tracking-tight">
+              Profile
+            </h2>
+            <p className="text-[15px] text-muted-foreground">
+              Username and email for this account.
+            </p>
+            <AuthFieldGroup>
+              <Input
+                id="account-username"
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                maxLength={40}
+                placeholder="Username"
+                className={AUTH_CONTROL}
+              />
+              <Input
+                id="account-email"
+                type="email"
+                required
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Email"
+                className={AUTH_CONTROL}
+              />
+            </AuthFieldGroup>
+            <Button
+              type="button"
+              className={AUTH_SUBMIT}
+              disabled={savingProfile || !username.trim() || !email.trim()}
+              onClick={() => void saveProfile()}
+            >
+              {savingProfile ? "Saving…" : "Save profile"}
+            </Button>
+          </section>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Password</CardTitle>
-              <CardDescription>Change the password you sign in with.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="current-password">Current password</Label>
-                <PasswordInput
-                  id="current-password"
-                  autoComplete="current-password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="new-password">New password</Label>
-                <PasswordInput
-                  id="new-password"
-                  autoComplete="new-password"
-                  minLength={MIN_PASSWORD_LENGTH}
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  At least {MIN_PASSWORD_LENGTH} characters
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirm-password">Confirm new password</Label>
-                <PasswordInput
-                  id="confirm-password"
-                  autoComplete="new-password"
-                  minLength={MIN_PASSWORD_LENGTH}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                />
-              </div>
-              <Button
-                type="button"
-                disabled={
-                  savingPassword ||
-                  !currentPassword ||
-                  newPassword.length < MIN_PASSWORD_LENGTH ||
-                  !confirmPassword
-                }
-                onClick={() => void savePassword()}
-              >
-                {savingPassword ? "Updating…" : "Update password"}
-              </Button>
-            </CardContent>
-          </Card>
+          <section className="space-y-3">
+            <h2 className="text-[1.375rem] font-semibold tracking-tight">
+              Password
+            </h2>
+            <p className="text-[15px] text-muted-foreground">
+              Change the password you sign in with.
+            </p>
+            <AuthFieldGroup>
+              <PasswordInput
+                id="current-password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder="Current password"
+                className={AUTH_CONTROL}
+              />
+              <PasswordInput
+                id="new-password"
+                autoComplete="new-password"
+                minLength={MIN_PASSWORD_LENGTH}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="New password"
+                className={AUTH_CONTROL}
+              />
+              <PasswordInput
+                id="confirm-password"
+                autoComplete="new-password"
+                minLength={MIN_PASSWORD_LENGTH}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm new password"
+                className={AUTH_CONTROL}
+              />
+            </AuthFieldGroup>
+            <p className="text-[13px] text-muted-foreground">
+              At least {MIN_PASSWORD_LENGTH} characters
+            </p>
+            <Button
+              type="button"
+              className={cn(AUTH_SUBMIT, "mt-2")}
+              disabled={
+                savingPassword ||
+                !currentPassword ||
+                newPassword.length < MIN_PASSWORD_LENGTH ||
+                !confirmPassword
+              }
+              onClick={() => void savePassword()}
+            >
+              {savingPassword ? "Updating…" : "Update password"}
+            </Button>
+          </section>
         </>
       ) : null}
 
       {tab === "playlists" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Import playlist</CardTitle>
-            <CardDescription>
-              Pull a playlist from Spotify, YouTube Music, or Deezer with a link.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {importResult ? (
-              <div className="space-y-2 rounded-md border border-border px-3 py-3 text-sm">
+        <section className="space-y-3">
+          <h2 className="text-[1.375rem] font-semibold tracking-tight">
+            Import playlist
+          </h2>
+          <p className="text-[15px] text-muted-foreground">
+            Pull a playlist from Spotify, YouTube Music, or Deezer with a link.
+          </p>
+          {importResult ? (
+            <InsetGroup>
+              <div className="space-y-1 px-4 py-3.5 text-[15px]">
                 <p className="font-medium text-foreground">
                   Created “{importResult.name}”
                 </p>
@@ -633,110 +626,114 @@ export function SettingsClient() {
                   .
                 </p>
               </div>
-            ) : null}
-            <Button type="button" onClick={() => setImportOpen(true)}>
-              Import playlist
-            </Button>
-          </CardContent>
-        </Card>
+            </InsetGroup>
+          ) : null}
+          <Button
+            type="button"
+            className={AUTH_SUBMIT}
+            onClick={() => setImportOpen(true)}
+          >
+            Import playlist
+          </Button>
+        </section>
       ) : null}
 
       {tab === "discord" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Discord</CardTitle>
-            <CardDescription>
-              Link Discord to sign in and show your listening status.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-3">
-              {!discordOAuthReady ? (
-                <p className="text-sm text-muted-foreground">
-                  An admin hasn’t finished Discord setup yet (Admin →
-                  Notifications).
-                </p>
-              ) : discordLinked ? (
-                <div className="flex items-center gap-3 rounded-lg border border-border px-3 py-3">
-                  <div className="relative size-10 shrink-0 overflow-hidden rounded-full bg-muted">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={
-                        discordAvatarUrl ||
-                        "https://cdn.discordapp.com/embed/avatars/0.png"
-                      }
-                      alt=""
-                      className="size-full object-cover"
-                      referrerPolicy="no-referrer"
-                    />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-foreground">
-                      {discordDisplayName || discordUsername || "Discord"}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      @{discordUsername || "unknown"}
-                      {!discordLoginEnabled ? " · Login off" : ""}
-                    </p>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-8 shrink-0"
-                        disabled={discordBusy}
-                        aria-label="Discord account options"
-                      >
-                        <MoreHorizontal className="size-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-48">
-                      <DropdownMenuItem
-                        disabled={discordBusy}
-                        onSelect={() =>
-                          void setDiscordLogin(!discordLoginEnabled)
-                        }
-                      >
-                        {discordLoginEnabled
-                          ? "Disable for login"
-                          : "Enable for login"}
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        disabled={discordBusy}
-                        className="text-destructive focus:text-destructive"
-                        onSelect={() => void unlinkDiscord()}
-                      >
-                        Unlink Discord
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+        <section className="space-y-3">
+          <h2 className="text-[1.375rem] font-semibold tracking-tight">
+            Discord
+          </h2>
+          <p className="text-[15px] text-muted-foreground">
+            Link Discord to sign in and show your listening status.
+          </p>
+          {!discordOAuthReady ? (
+            <p className="text-[15px] text-muted-foreground">
+              An admin hasn’t finished Discord setup yet (Admin →
+              Notifications).
+            </p>
+          ) : discordLinked ? (
+            <InsetGroup>
+              <div className="flex min-h-14 items-center gap-3 px-3">
+                <div className="relative size-10 shrink-0 overflow-hidden rounded-full bg-muted">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={
+                      discordAvatarUrl ||
+                      "https://cdn.discordapp.com/embed/avatars/0.png"
+                    }
+                    alt=""
+                    className="size-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
                 </div>
-              ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={discordBusy}
-                  onClick={() => void linkDiscord()}
-                >
-                  {discordBusy ? "Opening…" : "Link Discord account"}
-                </Button>
-              )}
-            </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[17px] text-foreground">
+                    {discordDisplayName || discordUsername || "Discord"}
+                  </p>
+                  <p className="truncate text-[13px] text-muted-foreground">
+                    @{discordUsername || "unknown"}
+                    {!discordLoginEnabled ? " · Login off" : ""}
+                  </p>
+                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 shrink-0"
+                      disabled={discordBusy}
+                      aria-label="Discord account options"
+                    >
+                      <MoreHorizontal className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem
+                      disabled={discordBusy}
+                      onSelect={() =>
+                        void setDiscordLogin(!discordLoginEnabled)
+                      }
+                    >
+                      {discordLoginEnabled
+                        ? "Disable for login"
+                        : "Enable for login"}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      disabled={discordBusy}
+                      className="text-destructive focus:text-destructive"
+                      onSelect={() => void unlinkDiscord()}
+                    >
+                      Unlink Discord
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </InsetGroup>
+          ) : (
+            <Button
+              type="button"
+              className={AUTH_SUBMIT}
+              disabled={discordBusy}
+              onClick={() => void linkDiscord()}
+            >
+              {discordBusy ? "Opening…" : "Link Discord account"}
+            </Button>
+          )}
 
-            {discordPresenceReady ? (
+          {discordPresenceReady ? (
+            <InsetGroup>
               <div
                 className={cn(
-                  "flex items-center justify-between gap-4 rounded-lg border border-border px-3 py-3",
+                  "flex min-h-14 items-center justify-between gap-4 px-4",
                   !discordLinked && "opacity-60",
                 )}
               >
                 <div>
-                  <p className="text-sm font-medium">Show listening status</p>
+                  <p className="text-[17px]">Show listening status</p>
                   {!discordLinked ? (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-[13px] text-muted-foreground">
                       Link Discord to enable this.
                     </p>
                   ) : null}
@@ -748,14 +745,14 @@ export function SettingsClient() {
                   aria-label="Show listening status on Discord"
                 />
               </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Listening status needs a Discord Application Client ID (Admin →
-                Notifications).
-              </p>
-            )}
-          </CardContent>
-        </Card>
+            </InsetGroup>
+          ) : (
+            <p className="text-[15px] text-muted-foreground">
+              Listening status needs a Discord Application Client ID (Admin →
+              Notifications).
+            </p>
+          )}
+        </section>
       ) : null}
 
       <Dialog

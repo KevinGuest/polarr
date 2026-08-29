@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { Camera } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
+import { InsetGroup } from "@/components/media-shelf";
 import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -308,7 +309,7 @@ export function ProfileClient({
               Profile
               {profile.isAdmin ? " · Admin" : ""}
             </p>
-            <h1 className="break-all text-2xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
+            <h1 className="break-all text-[2rem] font-semibold tracking-tight sm:text-4xl md:text-5xl">
               {profile.username}
             </h1>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
@@ -330,13 +331,37 @@ export function ProfileClient({
 
       <div className="space-y-10 px-5 md:px-8 lg:px-10">
         <section className="space-y-4">
-          <h2 className="text-xl font-semibold tracking-tight">Playlists</h2>
+          <h2 className="text-[1.375rem] font-semibold tracking-tight">Playlists</h2>
           {playlists.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               {isSelf ? "No playlists yet." : "No playlists."}
             </p>
           ) : (
-            <div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
+            <>
+              <InsetGroup className="lg:hidden">
+                {playlists.map((p) => (
+                  <Link
+                    key={p.id}
+                    href={p.href}
+                    className="flex min-h-14 items-center gap-3 px-3"
+                  >
+                    <CoverArt
+                      seed={p.name}
+                      image={p.coverPath}
+                      className="size-10 shrink-0 rounded-xl"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[17px]">
+                        {p.name}
+                      </span>
+                      <span className="block truncate text-[13px] text-muted-foreground">
+                        {p.trackCount} track{p.trackCount === 1 ? "" : "s"}
+                      </span>
+                    </span>
+                  </Link>
+                ))}
+              </InsetGroup>
+              <div className="-mx-1 hidden gap-4 overflow-x-auto px-1 pb-2 lg:flex">
               {playlists.map((p) => (
                 <Link
                   key={p.id}
@@ -346,7 +371,7 @@ export function ProfileClient({
                   <CoverArt
                     seed={p.name}
                     image={p.coverPath}
-                    className="aspect-square w-full rounded-md shadow-md shadow-black/30"
+                    className="aspect-square w-full rounded-2xl shadow-md shadow-black/30"
                   />
                   <div className="min-w-0 px-0.5">
                     <p className="truncate text-sm font-semibold">{p.name}</p>
@@ -356,12 +381,13 @@ export function ProfileClient({
                   </div>
                 </Link>
               ))}
-            </div>
+              </div>
+            </>
           )}
         </section>
 
         <section className="space-y-4">
-          <h2 className="text-xl font-semibold tracking-tight">
+          <h2 className="text-[1.375rem] font-semibold tracking-tight">
             {albumsKind === "pinned" ? "Saved albums" : "Recently played albums"}
           </h2>
           {albums.length === 0 ? (
@@ -371,7 +397,31 @@ export function ProfileClient({
                 : "No albums to show."}
             </p>
           ) : (
-            <div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
+            <>
+              <InsetGroup className="lg:hidden">
+                {albums.map((a) => (
+                  <Link
+                    key={a.key}
+                    href={a.href}
+                    className="flex min-h-14 items-center gap-3 px-3"
+                  >
+                    <CoverArt
+                      seed={`${a.artist}-${a.title}`}
+                      image={a.coverPath}
+                      className="size-10 shrink-0 rounded-xl"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[17px]">
+                        {a.title}
+                      </span>
+                      <span className="block truncate text-[13px] text-muted-foreground">
+                        {a.artist || "Unknown artist"}
+                      </span>
+                    </span>
+                  </Link>
+                ))}
+              </InsetGroup>
+              <div className="-mx-1 hidden gap-4 overflow-x-auto px-1 pb-2 lg:flex">
               {albums.map((a) => (
                 <Link
                   key={a.key}
@@ -381,7 +431,7 @@ export function ProfileClient({
                   <CoverArt
                     seed={`${a.artist}-${a.title}`}
                     image={a.coverPath}
-                    className="aspect-square w-full rounded-md shadow-md shadow-black/30"
+                    className="aspect-square w-full rounded-2xl shadow-md shadow-black/30"
                   />
                   <div className="min-w-0 px-0.5">
                     <p className="truncate text-sm font-semibold">
@@ -393,7 +443,8 @@ export function ProfileClient({
                   </div>
                 </Link>
               ))}
-            </div>
+              </div>
+            </>
           )}
         </section>
       </div>

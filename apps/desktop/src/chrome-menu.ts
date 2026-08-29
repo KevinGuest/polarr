@@ -14,6 +14,10 @@ const root = document.querySelector<HTMLDivElement>("#root")!;
 const win = getCurrentWindow();
 let closing = false;
 
+if (/Mac/i.test(navigator.userAgent)) {
+  document.documentElement.classList.add("mac");
+}
+
 async function closeMenu() {
   if (closing) return;
   closing = true;

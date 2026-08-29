@@ -262,6 +262,9 @@ const MENU_WINDOW_LABEL = "chrome-menu";
 /** Transparent inset so CSS shadow isn't clipped; OS shadow stays off (Win draws a 1px frame). */
 const MENU_SHADOW_PAD = 14;
 const MENU_WIDTH = 192;
+const isMac =
+  /Macintosh|Mac OS X/i.test(navigator.userAgent) &&
+  !/iPhone|iPad|iPod/i.test(navigator.userAgent);
 /** Which titlebar control owns the open (or just-closed) menu — used for click-to-toggle. */
 let menuAnchorEl: HTMLElement | null = null;
 let menuClosedAt = 0;
@@ -300,13 +303,14 @@ async function openChromeMenu(
   const scale = await appWindow.scaleFactor();
   const outer = await appWindow.outerPosition();
   const logicalOuter = outer.toLogical(scale);
-  const height = estimateMenuHeight(items) + MENU_SHADOW_PAD * 2;
-  const width = MENU_WIDTH + MENU_SHADOW_PAD * 2;
+  const pad = isMac ? 0 : MENU_SHADOW_PAD;
+  const height = estimateMenuHeight(items) + pad * 2;
+  const width = MENU_WIDTH + pad * 2;
   const x =
     align === "end"
-      ? logicalOuter.x + rect.right - MENU_WIDTH - MENU_SHADOW_PAD
-      : logicalOuter.x + rect.left - MENU_SHADOW_PAD;
-  const y = logicalOuter.y + rect.bottom + 6 - MENU_SHADOW_PAD;
+      ? logicalOuter.x + rect.right - MENU_WIDTH - pad
+      : logicalOuter.x + rect.left - pad;
+  const y = logicalOuter.y + rect.bottom + 6 - pad;
 
   let payloadSent = false;
   const sendPayload = () => {
@@ -328,15 +332,17 @@ async function openChromeMenu(
     y: Math.max(0, Math.round(y)),
     resizable: false,
     decorations: false,
-    transparent: true,
+    // WKWebView paints transparent windows white on macOS.
+    transparent: !isMac,
     // On Windows, shadow:true forces a 1px white/DWM frame on undecorated windows.
-    shadow: false,
+    shadow: isMac,
     alwaysOnTop: true,
     skipTaskbar: true,
     focus: true,
     visible: true,
     parent: "main",
-    backgroundColor: "#00000000",
+    theme: "dark",
+    backgroundColor: isMac ? "#09090b" : "#00000000",
   });
 
   try {

@@ -97,6 +97,7 @@ fn clear_server_url(app: AppHandle) -> Result<(), String> {
     if let Some(wv) = app.get_webview(server_webview::SERVER_WEBVIEW_LABEL) {
         let _ = wv.close();
     }
+    let _ = server_webview::fill_shell(&app);
     let _ = app.emit("server-cleared", ());
     Ok(())
 }
@@ -114,6 +115,9 @@ pub fn run() {
         .setup(|app| {
             server_webview::install_chrome_down_relay(app.handle());
             server_webview::install_resize_handler(app.handle());
+            if let Some(window) = app.get_window("main") {
+                let _ = window.set_theme(Some(tauri::Theme::Dark));
+            }
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("polarroffline", |ctx, request, responder| {

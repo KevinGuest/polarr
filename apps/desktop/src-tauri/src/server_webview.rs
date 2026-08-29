@@ -448,16 +448,59 @@ pub const INIT_SCRIPT: &str = r#"
 })();
 "#;
 
-fn content_bounds(window: &tauri::Window) -> Result<(LogicalPosition<f64>, LogicalSize<f64>), String> {
+fn window_logical_size(window: &tauri::Window) -> Result<LogicalSize<f64>, String> {
     let scale = window.scale_factor().map_err(|e| e.to_string())?;
     let physical = window.inner_size().map_err(|e| e.to_string())?;
-    let logical: LogicalSize<f64> = physical.to_logical(scale);
+    Ok(physical.to_logical(scale))
+}
+
+fn content_bounds(window: &tauri::Window) -> Result<(LogicalPosition<f64>, LogicalSize<f64>), String> {
+    let logical = window_logical_size(window)?;
     let height = (logical.height - TITLEBAR_HEIGHT).max(80.0);
     let width = logical.width.max(320.0);
     Ok((
         LogicalPosition::new(0.0, TITLEBAR_HEIGHT),
         LogicalSize::new(width, height),
     ))
+}
+
+/// The shell webview fills the whole window by default. On macOS that opaque
+/// WKWebView covers `add_child` content, so pin it to the 48px title bar while
+/// the server view is open.
+fn pin_shell_to_titlebar(app: &AppHandle) -> Result<(), String> {
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "main window missing".to_string())?;
+    let Some(shell) = app.get_webview("main") else {
+        return Ok(());
+    };
+    let logical = window_logical_size(&window)?;
+    let _ = shell.set_auto_resize(false);
+    shell
+        .set_position(LogicalPosition::new(0.0, 0.0))
+        .map_err(|e| format!("pin shell position: {e}"))?;
+    shell
+        .set_size(LogicalSize::new(logical.width.max(1.0), TITLEBAR_HEIGHT))
+        .map_err(|e| format!("pin shell size: {e}"))?;
+    Ok(())
+}
+
+pub(crate) fn fill_shell(app: &AppHandle) -> Result<(), String> {
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "main window missing".to_string())?;
+    let Some(shell) = app.get_webview("main") else {
+        return Ok(());
+    };
+    let logical = window_logical_size(&window)?;
+    let _ = shell.set_auto_resize(true);
+    shell
+        .set_position(LogicalPosition::new(0.0, 0.0))
+        .map_err(|e| format!("restore shell position: {e}"))?;
+    shell
+        .set_size(logical)
+        .map_err(|e| format!("restore shell size: {e}"))?;
+    Ok(())
 }
 
 fn apply_layout(app: &AppHandle) -> Result<(), String> {
@@ -467,6 +510,7 @@ fn apply_layout(app: &AppHandle) -> Result<(), String> {
     let Some(wv) = app.get_webview(SERVER_WEBVIEW_LABEL) else {
         return Ok(());
     };
+    pin_shell_to_titlebar(app)?;
     let (pos, size) = content_bounds(&window)?;
     wv.set_position(pos)
         .map_err(|e| format!("position server webview: {e}"))?;
@@ -598,11 +642,15 @@ pub async fn open_server_webview(app: AppHandle, url: String) -> Result<(), Stri
     let (pos, size) = content_bounds(&window)?;
     let builder = WebviewBuilder::new(SERVER_WEBVIEW_LABEL, WebviewUrl::External(parsed))
         .initialization_script(INIT_SCRIPT)
-        .focused(true);
+        .focused(true)
+        .background_color(tauri::webview::Color(9, 9, 11, 255));
 
-    window
+    let wv = window
         .add_child(builder, pos, size)
         .map_err(|e| format!("create server webview: {e}"))?;
+    apply_layout(&app)?;
+    let _ = wv.show();
+    let _ = wv.set_focus();
 
     schedule_marker_kicks(app);
     Ok(())
@@ -614,6 +662,7 @@ pub async fn hide_server_webview(app: AppHandle) -> Result<(), String> {
         wv.hide()
             .map_err(|e| format!("hide server webview: {e}"))?;
     }
+    fill_shell(&app)?;
     Ok(())
 }
 
@@ -634,6 +683,7 @@ pub async fn close_server_webview(app: AppHandle) -> Result<(), String> {
         wv.close()
             .map_err(|e| format!("close server webview: {e}"))?;
     }
+    fill_shell(&app)?;
     Ok(())
 }
 

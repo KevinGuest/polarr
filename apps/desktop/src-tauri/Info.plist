@@ -6,6 +6,10 @@
   <dict>
     <key>NSAllowsArbitraryLoads</key>
     <true/>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
   </dict>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Polarr connects to your self-hosted music server on the local network.</string>
 </dict>
 </plist>

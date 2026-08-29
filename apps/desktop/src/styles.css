@@ -673,13 +673,6 @@ label {
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
 }
 
-.hint {
-  margin: 10px 0 0;
-  color: var(--muted);
-  font-size: 0.78rem;
-  line-height: 1.4;
-}
-
 .error {
   margin: 12px 0 0;
   color: var(--danger);

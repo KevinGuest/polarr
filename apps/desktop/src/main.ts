@@ -174,7 +174,6 @@ app.innerHTML = `
               required
               spellcheck="false"
             />
-            <p class="hint">Use the same URL you open in a browser. Umbrel: http://umbrel.local:3647</p>
             <p id="error" class="error" hidden></p>
             <button type="submit" id="connect">Connect</button>
           </form>

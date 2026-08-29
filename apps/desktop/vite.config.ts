@@ -36,6 +36,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         "chrome-menu": resolve(__dirname, "chrome-menu.html"),
+        updater: resolve(__dirname, "updater.html"),
       },
     },
   },

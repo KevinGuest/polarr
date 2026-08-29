@@ -2,8 +2,8 @@
   "$schema": "https://schema.tauri.app/config/2/capability",
   "identifier": "default",
   "description": "Default capabilities for the Polarr desktop shell (chrome webview)",
-  "windows": ["main", "chrome-menu"],
-  "webviews": ["main", "chrome-menu"],
+  "windows": ["main", "chrome-menu", "updater"],
+  "webviews": ["main", "chrome-menu", "updater"],
   "permissions": [
     "core:default",
     "core:menu:default",
@@ -40,6 +40,7 @@
     "allow-get-server-url",
     "allow-set-server-url",
     "allow-clear-server-url",
+    "allow-probe-server-url",
     "allow-open-server-webview",
     "allow-hide-server-webview",
     "allow-show-server-webview",

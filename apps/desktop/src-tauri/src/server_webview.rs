@@ -5,6 +5,8 @@
 //! A child Tauri webview navigates top-level to the server, so SameSite=Lax
 //! session cookies stick.
 
+use std::fs;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -13,6 +15,40 @@ use tauri::{
     webview::WebviewBuilder,
 };
 use url::Url;
+
+fn opening_lock_path(app: &AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("opening.lock"))
+}
+
+pub(crate) fn take_opening_crashed(app: &AppHandle) -> bool {
+    let Some(path) = opening_lock_path(app) else {
+        return false;
+    };
+    if path.exists() {
+        let _ = fs::remove_file(&path);
+        true
+    } else {
+        false
+    }
+}
+
+fn mark_opening(app: &AppHandle) {
+    if let Some(path) = opening_lock_path(app) {
+        if let Some(dir) = path.parent() {
+            let _ = fs::create_dir_all(dir);
+        }
+        let _ = fs::write(path, b"1");
+    }
+}
+
+fn clear_opening(app: &AppHandle) {
+    if let Some(path) = opening_lock_path(app) {
+        let _ = fs::remove_file(path);
+    }
+}
 
 pub const SERVER_WEBVIEW_LABEL: &str = "server";
 /// Must match `--titlebar-h` in apps/desktop/src/styles.css
@@ -510,13 +546,40 @@ fn apply_layout(app: &AppHandle) -> Result<(), String> {
     let Some(wv) = app.get_webview(SERVER_WEBVIEW_LABEL) else {
         return Ok(());
     };
-    pin_shell_to_titlebar(app)?;
+    pin_shell_to_titlebar(app).ok();
     let (pos, size) = content_bounds(&window)?;
     wv.set_position(pos)
         .map_err(|e| format!("position server webview: {e}"))?;
     wv.set_size(size)
         .map_err(|e| format!("size server webview: {e}"))?;
     Ok(())
+}
+
+fn dispatch_layout(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let _ = apply_layout(&handle);
+    });
+}
+
+pub(crate) fn dispatch_fill_shell(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let _ = fill_shell(&handle);
+    });
+}
+
+fn apply_layout_on_main(app: &AppHandle) {
+    let handle = app.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    if app
+        .run_on_main_thread(move || {
+            let _ = tx.send(apply_layout(&handle));
+        })
+        .is_ok()
+    {
+        let _ = rx.recv_timeout(Duration::from_millis(1500));
+    }
 }
 
 fn parse_external(url: &str) -> Result<Url, String> {
@@ -537,12 +600,13 @@ fn schedule_marker_kicks(app: AppHandle) {
     std::thread::spawn(move || {
         for ms in [80_u64, 250, 600, 1200, 2500, 5000] {
             std::thread::sleep(Duration::from_millis(ms));
-            if let Some(wv) = app.get_webview(SERVER_WEBVIEW_LABEL) {
-                reassert_desktop_markers(&wv);
-                let _ = apply_layout(&app);
-            } else {
-                break;
-            }
+            let handle = app.clone();
+            let _ = handle.run_on_main_thread(move || {
+                if let Some(wv) = handle.get_webview(SERVER_WEBVIEW_LABEL) {
+                    reassert_desktop_markers(&wv);
+                    let _ = apply_layout(&handle);
+                }
+            });
         }
     });
 }
@@ -603,7 +667,7 @@ pub fn install_resize_handler(app: &AppHandle) {
                 event,
                 tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }
             ) {
-                let _ = apply_layout(&handle);
+                dispatch_layout(&handle);
             }
         });
     }
@@ -612,6 +676,13 @@ pub fn install_resize_handler(app: &AppHandle) {
 /// Create or reveal the content webview and navigate to `url` (already normalized).
 #[tauri::command]
 pub async fn open_server_webview(app: AppHandle, url: String) -> Result<(), String> {
+    mark_opening(&app);
+    let result = open_server_webview_inner(app.clone(), url).await;
+    clear_opening(&app);
+    result
+}
+
+async fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> {
     let parsed = parse_external(&url)?;
     let window = app
         .get_window("main")
@@ -630,7 +701,7 @@ pub async fn open_server_webview(app: AppHandle, url: String) -> Result<(), Stri
         } else {
             reassert_desktop_markers(&existing);
         }
-        apply_layout(&app)?;
+        apply_layout_on_main(&app);
         existing
             .show()
             .map_err(|e| format!("show server webview: {e}"))?;
@@ -648,7 +719,7 @@ pub async fn open_server_webview(app: AppHandle, url: String) -> Result<(), Stri
     let wv = window
         .add_child(builder, pos, size)
         .map_err(|e| format!("create server webview: {e}"))?;
-    apply_layout(&app)?;
+    apply_layout_on_main(&app);
     let _ = wv.show();
     let _ = wv.set_focus();
 
@@ -662,14 +733,14 @@ pub async fn hide_server_webview(app: AppHandle) -> Result<(), String> {
         wv.hide()
             .map_err(|e| format!("hide server webview: {e}"))?;
     }
-    fill_shell(&app)?;
+    dispatch_fill_shell(&app);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn show_server_webview(app: AppHandle) -> Result<(), String> {
     if let Some(wv) = app.get_webview(SERVER_WEBVIEW_LABEL) {
-        apply_layout(&app)?;
+        apply_layout_on_main(&app);
         wv.show()
             .map_err(|e| format!("show server webview: {e}"))?;
         let _ = wv.set_focus();
@@ -683,7 +754,7 @@ pub async fn close_server_webview(app: AppHandle) -> Result<(), String> {
         wv.close()
             .map_err(|e| format!("close server webview: {e}"))?;
     }
-    fill_shell(&app)?;
+    dispatch_fill_shell(&app);
     Ok(())
 }
 

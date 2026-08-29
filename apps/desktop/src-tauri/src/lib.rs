@@ -16,6 +16,13 @@ struct ServerConfig {
     url: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerLaunchState {
+    url: Option<String>,
+    skip_auto_connect: bool,
+}
+
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -69,16 +76,76 @@ fn normalize_url(raw: &str) -> Result<String, String> {
         _ => return Err("Only http:// and https:// URLs are supported.".into()),
     }
 
-    if parsed.host_str().is_none() {
+    let Some(host) = parsed.host_str() else {
         return Err("URL must include a host.".into());
-    }
+    };
+
+    let with_scheme = if !host.contains('.')
+        && !host.eq_ignore_ascii_case("localhost")
+        && host.parse::<std::net::IpAddr>().is_err()
+    {
+        let mut rewritten = parsed.clone();
+        let mdns = format!("{host}.local");
+        rewritten
+            .set_host(Some(&mdns))
+            .map_err(|_| format!("Could not use host {mdns}"))?;
+        rewritten.to_string()
+    } else {
+        with_scheme
+    };
 
     Ok(with_scheme.trim_end_matches('/').to_string())
 }
 
+fn looks_like_polarr(body: &serde_json::Value) -> bool {
+    if body.get("app").and_then(|v| v.as_str()) == Some("polarr") {
+        return true;
+    }
+    body.get("status").and_then(|v| v.as_str()) == Some("ok")
+        && body.get("setupComplete").is_some()
+        && body.get("hasUsers").is_some()
+}
+
+async fn probe_polarr(base: &str) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(4))
+        .redirect(reqwest::redirect::Policy::limited(3))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    for path in ["/api/v1/status", "/api/status"] {
+        let response = match client.get(format!("{base}{path}")).send().await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        if !response.status().is_success() {
+            continue;
+        }
+        let Ok(body) = response.json::<serde_json::Value>().await else {
+            continue;
+        };
+        if looks_like_polarr(&body) {
+            return Ok(());
+        }
+    }
+
+    Err("URL not valid".into())
+}
+
 #[tauri::command]
-fn get_server_url(app: AppHandle) -> Result<Option<String>, String> {
-    read_config(&app)
+async fn probe_server_url(url: String) -> Result<String, String> {
+    let normalized = normalize_url(&url)?;
+    probe_polarr(&normalized).await?;
+    Ok(normalized)
+}
+
+#[tauri::command]
+fn get_server_url(app: AppHandle) -> Result<ServerLaunchState, String> {
+    let skip_auto_connect = server_webview::take_opening_crashed(&app);
+    Ok(ServerLaunchState {
+        url: read_config(&app)?,
+        skip_auto_connect,
+    })
 }
 
 #[tauri::command]
@@ -97,7 +164,7 @@ fn clear_server_url(app: AppHandle) -> Result<(), String> {
     if let Some(wv) = app.get_webview(server_webview::SERVER_WEBVIEW_LABEL) {
         let _ = wv.close();
     }
-    let _ = server_webview::fill_shell(&app);
+    let _ = server_webview::dispatch_fill_shell(&app);
     let _ = app.emit("server-cleared", ());
     Ok(())
 }
@@ -183,6 +250,7 @@ pub fn run() {
             get_server_url,
             set_server_url,
             clear_server_url,
+            probe_server_url,
             server_webview::open_server_webview,
             server_webview::hide_server_webview,
             server_webview::show_server_webview,

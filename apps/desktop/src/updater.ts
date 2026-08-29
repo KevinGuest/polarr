@@ -2,20 +2,18 @@ import { getVersion } from "@tauri-apps/api/app";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 
-let pendingUpdate: Update | null = null;
-let checking = false;
-
 /** Universal macOS builds use a custom updater target in latest.json. */
-function updaterCheckOptions() {
+export function updaterCheckOptions() {
   if (typeof navigator !== "undefined" && navigator.platform?.includes("Mac")) {
     return { target: "macos-universal" as const };
   }
   return {};
 }
 
-export function getPendingUpdate(): Update | null {
-  return pendingUpdate;
-}
+export type UpdateProgress = {
+  received: number;
+  total: number | null;
+};
 
 export async function getAppVersion(): Promise<string> {
   try {
@@ -25,30 +23,37 @@ export async function getAppVersion(): Promise<string> {
   }
 }
 
-export async function checkForAppUpdate(opts?: {
-  silent?: boolean;
-}): Promise<"none" | "available" | "error"> {
-  if (checking) return pendingUpdate ? "available" : "none";
-  checking = true;
+export async function findAppUpdate(): Promise<Update | null> {
   try {
-    const update = await check(updaterCheckOptions());
-    pendingUpdate = update ?? null;
-    if (!update) return "none";
-    return "available";
+    return (await check(updaterCheckOptions())) ?? null;
   } catch {
-    pendingUpdate = null;
-    return opts?.silent ? "none" : "error";
-  } finally {
-    checking = false;
+    return null;
   }
 }
 
-export async function installPendingUpdate(): Promise<boolean> {
-  const update = pendingUpdate;
-  if (!update) return false;
+export async function downloadAndRelaunch(
+  update: Update,
+  onProgress: (progress: UpdateProgress) => void,
+): Promise<void> {
+  let received = 0;
+  let total: number | null = null;
 
-  await update.downloadAndInstall();
-  pendingUpdate = null;
+  await update.downloadAndInstall((event) => {
+    switch (event.event) {
+      case "Started":
+        received = 0;
+        total = event.data.contentLength ?? null;
+        onProgress({ received, total });
+        break;
+      case "Progress":
+        received += event.data.chunkLength;
+        onProgress({ received, total });
+        break;
+      case "Finished":
+        onProgress({ received: total ?? received, total });
+        break;
+    }
+  });
+
   await relaunch();
-  return true;
 }

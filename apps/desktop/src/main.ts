@@ -3,12 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./styles.css";
-import {
-  checkForAppUpdate,
-  getAppVersion,
-  getPendingUpdate,
-  installPendingUpdate,
-} from "./updater";
+import { getAppVersion } from "./updater";
 
 const appWindow = getCurrentWindow();
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -147,13 +142,14 @@ app.innerHTML = `
               required
               spellcheck="false"
             />
-            <p class="hint">Use the same URL you open in a browser (Umbrel default port is 3647).</p>
+            <p class="hint">Use the same URL you open in a browser. Umbrel: http://umbrel.local:3647</p>
             <p id="error" class="error" hidden></p>
             <button type="submit" id="connect">Connect</button>
           </form>
         </div>
       </div>
     </main>
+    <div id="toast" class="toast" hidden role="status"></div>
   </div>
 `;
 
@@ -168,6 +164,7 @@ const setupView = document.querySelector<HTMLDivElement>("#setup-view")!;
 const form = document.querySelector<HTMLFormElement>("#server-form")!;
 const input = document.querySelector<HTMLInputElement>("#server-url")!;
 const errorEl = document.querySelector<HTMLParagraphElement>("#error")!;
+const toastEl = document.querySelector<HTMLDivElement>("#toast")!;
 const button = document.querySelector<HTMLButtonElement>("#connect")!;
 const titlebar = document.querySelector<HTMLElement>("#titlebar")!;
 const menuBtn = document.querySelector<HTMLButtonElement>("#menu-btn")!;
@@ -246,6 +243,17 @@ function applyProfileAvatar(name: string) {
 function showError(message: string) {
   errorEl.hidden = false;
   errorEl.textContent = message;
+}
+
+let toastTimer: number | null = null;
+function showToast(message: string) {
+  toastEl.textContent = message;
+  toastEl.hidden = false;
+  if (toastTimer) window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    toastEl.hidden = true;
+    toastTimer = null;
+  }, 4200);
 }
 
 function clearError() {
@@ -404,6 +412,43 @@ async function toggleChromeMenu(
   await openChromeMenu(anchor, items, align);
 }
 
+const UPDATER_WINDOW_LABEL = "updater";
+
+async function openUpdaterWindow() {
+  // Dev builds have no updater artifacts; skip the window entirely.
+  if (import.meta.env.DEV) return;
+  try {
+    if (await WebviewWindow.getByLabel(UPDATER_WINDOW_LABEL)) return;
+  } catch {
+    return;
+  }
+
+  const updaterWin = new WebviewWindow(UPDATER_WINDOW_LABEL, {
+    url: "updater.html",
+    title: "Polarr Update",
+    width: 360,
+    height: 132,
+    center: true,
+    resizable: false,
+    decorations: false,
+    transparent: false,
+    shadow: isMac,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focus: false,
+    visible: false,
+    parent: "main",
+    theme: "dark",
+    backgroundColor: "#09090b",
+  });
+
+  try {
+    await updaterWin.setShadow(isMac);
+  } catch {
+    /* ignore */
+  }
+}
+
 async function changeServer() {
   try {
     await invoke("discord_clear_presence");
@@ -420,25 +465,13 @@ async function changeServer() {
 
 async function openAppMenu(anchor: HTMLElement) {
   const version = await getAppVersion();
-  const pending = getPendingUpdate();
   const items: ChromeMenuItem[] = [
     { kind: "label", text: `Polarr ${version}` },
-    { kind: "separator" },
-  ];
-  if (pending) {
-    items.push({
-      kind: "action",
-      id: "install-update",
-      text: `Update to v${pending.version}…`,
-    });
-  }
-  items.push(
-    { kind: "action", id: "check-updates", text: "Check for updates…" },
     { kind: "separator" },
     { kind: "action", id: "change-server", text: "Change Server…" },
     { kind: "separator" },
     { kind: "action", id: "quit", text: "Quit Polarr", danger: true },
-  );
+  ];
   await toggleChromeMenu(anchor, items, "start");
 }
 
@@ -671,8 +704,6 @@ async function showSetup(prefill?: string) {
 }
 
 async function showServer(url: string) {
-  setupView.hidden = true;
-  serverOpen = true;
   setChromeAuthenticated(false);
   const target = withDesktopParam(url);
   try {
@@ -685,6 +716,8 @@ async function showServer(url: string) {
     button.textContent = "Connect";
     return;
   }
+  setupView.hidden = true;
+  serverOpen = true;
   startChromeUrlPoll();
   // Announce until the content bridge answers with auth.
   window.setTimeout(sayHelloToServer, 80);
@@ -713,16 +746,21 @@ form.addEventListener("submit", async (event) => {
   const raw = input.value.trim();
   if (!raw) {
     showError("Enter your Polarr server URL.");
+    showToast("URL not valid");
     return;
   }
 
   button.disabled = true;
-  button.textContent = "Connecting…";
+  button.textContent = "Checking…";
   try {
-    const url = await invoke<string>("set_server_url", { url: raw });
+    const url = await invoke<string>("probe_server_url", { url: raw });
+    await invoke<string>("set_server_url", { url });
+    button.textContent = "Connecting…";
     await showServer(url);
   } catch (err) {
-    showError(err instanceof Error ? err.message : String(err));
+    const message = err instanceof Error ? err.message : String(err);
+    showToast("URL not valid");
+    showError(message || "URL not valid");
     button.disabled = false;
     button.textContent = "Connect";
   }
@@ -839,35 +877,6 @@ void listen<{ id?: string }>("polarr-chrome-menu-action", (event) => {
   const id = event.payload?.id;
   if (!id) return;
   switch (id) {
-    case "check-updates":
-      void (async () => {
-        const result = await checkForAppUpdate();
-        const pending = getPendingUpdate();
-        if (result === "none") {
-          window.alert("You're on the latest version.");
-        } else if (result === "available" && pending) {
-          const ok = window.confirm(
-            `Polarr ${pending.version} is available. Download and restart now?`,
-          );
-          if (ok) {
-            void installPendingUpdate().catch(() => {
-              window.alert(
-                "Update failed. Download the latest build from GitHub Releases.",
-              );
-            });
-          }
-        } else if (result === "error") {
-          window.alert(
-            "Couldn't check for updates. Try again later or download from GitHub Releases.",
-          );
-        }
-      })();
-      break;
-    case "install-update":
-      void installPendingUpdate().catch(() => {
-        window.alert("Update failed. Download the latest build from GitHub Releases.");
-      });
-      break;
     case "change-server":
       void changeServer();
       break;
@@ -931,20 +940,38 @@ async function bootstrap() {
   }
 
   try {
-    const existing = await invoke<string | null>("get_server_url");
+    const saved = await invoke<{
+      url: string | null;
+      skipAutoConnect?: boolean;
+    } | string | null>("get_server_url");
+    const existing =
+      typeof saved === "string" ? saved : saved && typeof saved === "object" ? saved.url : null;
+    const skipAuto =
+      saved && typeof saved === "object" && "skipAutoConnect" in saved
+        ? Boolean(saved.skipAutoConnect)
+        : false;
     if (existing) {
       input.value = existing;
-      await showServer(existing);
+    }
+    if (existing && !skipAuto) {
+      try {
+        const url = await invoke<string>("probe_server_url", { url: existing });
+        await showServer(url);
+      } catch {
+        await showSetup(existing);
+        showToast("URL not valid");
+      }
     } else {
-      await showSetup();
+      await showSetup(existing ?? undefined);
+      if (skipAuto) {
+        showToast("URL not valid");
+      }
     }
   } catch {
     await showSetup();
   }
 
-  window.setTimeout(() => {
-    void checkForAppUpdate({ silent: true });
-  }, 4000);
+  void openUpdaterWindow();
 }
 
 void bootstrap();

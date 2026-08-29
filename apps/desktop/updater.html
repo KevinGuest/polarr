@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Polarr Update</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        color-scheme: dark;
+        background: #09090b;
+        font-family:
+          "Segoe UI Variable",
+          "Segoe UI",
+          system-ui,
+          -apple-system,
+          sans-serif;
+        color: #fafafa;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      #root {
+        box-sizing: border-box;
+        height: 100%;
+        padding: 18px 18px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        border: 1px solid #27272a;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+      }
+      .icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        flex: 0 0 auto;
+      }
+      .copy {
+        min-width: 0;
+        flex: 1;
+      }
+      .title {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        line-height: 1.3;
+      }
+      .status {
+        margin-top: 2px;
+        font-size: 12px;
+        color: #a1a1aa;
+        line-height: 1.35;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .status.wrap {
+        white-space: normal;
+      }
+      .bar {
+        position: relative;
+        height: 4px;
+        border-radius: 99px;
+        background: #27272a;
+        overflow: hidden;
+      }
+      .fill {
+        height: 100%;
+        width: 0;
+        border-radius: inherit;
+        background: #fafafa;
+        transition: width 0.16s ease-out;
+      }
+      .bar.indeterminate .fill {
+        width: 36%;
+        animation: slide 1.05s ease-in-out infinite;
+      }
+      @keyframes slide {
+        0% {
+          transform: translateX(-120%);
+        }
+        100% {
+          transform: translateX(320%);
+        }
+      }
+      .actions {
+        display: none;
+        justify-content: flex-end;
+      }
+      .actions.visible {
+        display: flex;
+      }
+      button {
+        appearance: none;
+        border: 0;
+        background: #27272a;
+        color: #fafafa;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 500;
+        padding: 6px 12px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #3f3f46;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="row">
+        <img class="icon" src="/polarr-icon.png" alt="" width="36" height="36" />
+        <div class="copy">
+          <div class="title" id="title">Polarr</div>
+          <div class="status" id="status">Checking for updates…</div>
+        </div>
+      </div>
+      <div class="bar indeterminate" id="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+        <div class="fill" id="fill"></div>
+      </div>
+      <div class="actions" id="actions">
+        <button type="button" id="close-btn">Close</button>
+      </div>
+    </div>
+    <script type="module" src="/src/updater-window.ts"></script>
+  </body>
+</html>

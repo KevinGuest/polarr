@@ -27,6 +27,7 @@ export async function GET() {
   const stats = requestStats();
 
   return json({
+    app: "polarr",
     status: "ok",
     version: "0.1.0",
     setupComplete: settings.setupComplete,

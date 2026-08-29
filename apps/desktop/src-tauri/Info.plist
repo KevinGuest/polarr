@@ -11,5 +11,9 @@
   </dict>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Polarr connects to your self-hosted music server on the local network.</string>
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_http._tcp</string>
+  </array>
 </dict>
 </plist>

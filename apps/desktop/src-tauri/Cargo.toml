@@ -1,6 +1,6 @@
 [package]
 name = "polarr-desktop"
-version = "0.2.2"
+version = "0.2.3"
 description = "Polarr desktop shell"
 authors = ["Polarr"]
 edition = "2021"
@@ -27,3 +27,4 @@ base64 = "0.22"
 tiny_http = "0.12"
 uuid = { version = "1", features = ["v4"] }
 http = "1"
+reqwest = { version = "0.13", features = ["json"] }

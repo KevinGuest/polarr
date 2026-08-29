@@ -27,7 +27,6 @@ app.innerHTML = `
           autocapitalize="off"
           autocorrect="off"
         />
-        <p class="hint">Same URL you use in Safari. Umbrel: http://umbrel.local:3647</p>
         <p id="error" class="error" hidden></p>
         <button type="submit" id="connect">Connect</button>
       </form>

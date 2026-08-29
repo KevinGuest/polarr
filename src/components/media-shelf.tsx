@@ -114,6 +114,7 @@ export function ShelfHeader({
   showSeeAll,
   seeAllHref,
   onSeeAll,
+  actionLabel = "Show all",
   titleAs = "h2",
 }: {
   title: string;
@@ -123,6 +124,7 @@ export function ShelfHeader({
   showSeeAll?: boolean;
   seeAllHref?: string;
   onSeeAll?: () => void;
+  actionLabel?: string;
   titleAs?: "h1" | "h2";
 }) {
   const Title = titleAs;
@@ -154,7 +156,7 @@ export function ShelfHeader({
               <Link
                 href={seeAllHref}
                 className="max-lg:hidden"
-                aria-label={`Show all ${title}`}
+                aria-label={`${actionLabel} ${title}`}
               >
                 {chevron}
               </Link>
@@ -163,7 +165,7 @@ export function ShelfHeader({
                 type="button"
                 onClick={onSeeAll}
                 className="max-lg:hidden"
-                aria-label={`Show all ${title}`}
+                aria-label={`${actionLabel} ${title}`}
               >
                 {chevron}
               </button>
@@ -179,14 +181,14 @@ export function ShelfHeader({
           onClick={onSeeAll}
           className="shrink-0 text-[15px] font-normal text-muted-foreground transition-colors hover:text-foreground lg:text-sm lg:font-medium"
         >
-          Show all
+          {actionLabel}
         </button>
       ) : showSeeAll && seeAllHref ? (
         <Link
           href={seeAllHref}
           className="shrink-0 text-[15px] font-normal text-muted-foreground transition-colors hover:text-foreground lg:text-sm lg:font-medium"
         >
-          Show all
+          {actionLabel}
         </Link>
       ) : null}
     </div>

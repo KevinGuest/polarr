@@ -813,19 +813,21 @@ async function showSetup(prefill?: string) {
 async function showServer(url: string) {
   setChromeAuthenticated(false);
   const target = withDesktopParam(url);
-  setupView.hidden = true;
-  setServerOpenClass(true);
   try {
     await invoke("open_server_webview", { url: target });
   } catch (err) {
     showToast(err instanceof Error ? err.message : String(err));
+    serverOpen = false;
     setupView.hidden = false;
     setServerOpenClass(false);
-    serverOpen = false;
     button.disabled = false;
     button.textContent = "Connect";
     return;
   }
+  // Do not remove the only visible/recoverable UI until native child-webview
+  // creation succeeds. The child covers this area once it is ready.
+  setupView.hidden = true;
+  setServerOpenClass(true);
   serverOpen = true;
   startChromeUrlPoll();
   // Announce until the content bridge answers with auth.

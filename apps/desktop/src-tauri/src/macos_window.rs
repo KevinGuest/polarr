@@ -12,9 +12,11 @@
 //! the inset after those calls and on every resize. Child server webviews are
 //! also framed in Objective-C: overlay windows ignore some wry `set_size` calls,
 //! which left a full-size shell covering the server view (black after Connect).
+//!
+//! `with_webview` requires `Send + 'static` closures, so NSWindow pointers are
+//! carried as `usize` (raw `*mut c_void` is not `Send`).
 
 use std::ffi::c_void;
-use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Manager, Webview};
 
@@ -33,13 +35,9 @@ extern "C" {
     fn polarr_macos_fill_shell(ns_window: *mut c_void, shell_wv: *mut c_void);
 }
 
-fn wk_ptr(wv: &Webview) -> *mut c_void {
-    let slot = Arc::new(Mutex::new(std::ptr::null_mut()));
-    let captured = slot.clone();
-    let _ = wv.with_webview(move |platform| {
-        *captured.lock().expect("wk ptr") = platform.inner().cast();
-    });
-    *slot.lock().expect("wk ptr")
+fn ns_window_addr(app: &AppHandle) -> Option<usize> {
+    let window = app.get_window("main")?;
+    window.ns_window().ok().map(|ptr| ptr as usize)
 }
 
 pub fn apply(app: &AppHandle) {
@@ -84,46 +82,49 @@ pub fn align_traffic_lights(app: &AppHandle) {
 
 /// Pin the shell to the 48px title bar and put the server view under it.
 pub fn layout_connected(app: &AppHandle) {
-    let Some(window) = app.get_window("main") else {
-        return;
-    };
-    let Ok(ns_window) = window.ns_window() else {
+    let Some(ns) = ns_window_addr(app) else {
         return;
     };
     let Some(shell) = app.get_webview("main") else {
         return;
     };
-    let shell_ptr = wk_ptr(&shell);
-    if shell_ptr.is_null() {
-        return;
-    }
-    let server_ptr = app
-        .get_webview(SERVER_WEBVIEW_LABEL)
-        .map(|wv| wk_ptr(&wv))
-        .filter(|p| !p.is_null())
-        .unwrap_or(std::ptr::null_mut());
-    unsafe {
-        polarr_macos_align_traffic_lights(ns_window);
-        polarr_macos_layout_webviews(ns_window, shell_ptr, server_ptr, TITLEBAR_HEIGHT);
+    let server = app.get_webview(SERVER_WEBVIEW_LABEL);
+
+    if let Some(server) = server {
+        let _ = shell.with_webview(move |shell_platform| {
+            let shell_addr = shell_platform.inner() as usize;
+            let _ = server.with_webview(move |server_platform| unsafe {
+                polarr_macos_align_traffic_lights(ns as *mut c_void);
+                polarr_macos_layout_webviews(
+                    ns as *mut c_void,
+                    shell_addr as *mut c_void,
+                    server_platform.inner().cast(),
+                    TITLEBAR_HEIGHT,
+                );
+            });
+        });
+    } else {
+        let _ = shell.with_webview(move |shell_platform| unsafe {
+            polarr_macos_align_traffic_lights(ns as *mut c_void);
+            polarr_macos_layout_webviews(
+                ns as *mut c_void,
+                shell_platform.inner().cast(),
+                std::ptr::null_mut(),
+                TITLEBAR_HEIGHT,
+            );
+        });
     }
 }
 
 pub fn fill_shell(app: &AppHandle) {
-    let Some(window) = app.get_window("main") else {
-        return;
-    };
-    let Ok(ns_window) = window.ns_window() else {
+    let Some(ns) = ns_window_addr(app) else {
         return;
     };
     let Some(shell) = app.get_webview("main") else {
         return;
     };
-    let shell_ptr = wk_ptr(&shell);
-    if shell_ptr.is_null() {
-        return;
-    }
-    unsafe {
-        polarr_macos_align_traffic_lights(ns_window);
-        polarr_macos_fill_shell(ns_window, shell_ptr);
-    }
+    let _ = shell.with_webview(move |platform| unsafe {
+        polarr_macos_align_traffic_lights(ns as *mut c_void);
+        polarr_macos_fill_shell(ns as *mut c_void, platform.inner().cast());
+    });
 }

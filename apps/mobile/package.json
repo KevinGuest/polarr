@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "cap:sync": "npm run build && npx cap sync ios",
-    "cap:open": "npx cap open ios"
+    "cap:open": "npx cap open ios",
+    "ios": "npm run cap:sync && npx cap open ios"
   },
   "dependencies": {
     "@capacitor/app": "^7.0.1",

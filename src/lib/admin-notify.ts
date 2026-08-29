@@ -7,6 +7,7 @@ import { discordConfigured, sendDiscordWebhook } from "@/lib/discord";
 import { getSettings } from "@/lib/db";
 import type { NotifyEventId } from "@/lib/notify-events";
 import { resolvePublicBaseUrl } from "@/lib/public-url";
+import { describeUserAgent } from "@/lib/user-agent";
 
 const COLORS: Partial<Record<NotifyEventId, number>> = {
   requestNew: 0x5865f2,
@@ -36,6 +37,21 @@ export function notifyIpField(
 ): DiscordNotifyField {
   const value = (ip || "").trim() || "unknown";
   return { name: "IP", value, inline: true };
+}
+
+/**
+ * Sign-in/out alert fields describing the client: the platform the user
+ * connected from, plus a device model when the User-Agent exposes one.
+ */
+export function notifyPlatformFields(
+  ua: string | null | undefined,
+): DiscordNotifyField[] {
+  const { platform, device } = describeUserAgent(ua);
+  const fields: DiscordNotifyField[] = [
+    { name: "Platform", value: platform, inline: true },
+  ];
+  if (device) fields.push({ name: "Device", value: device, inline: true });
+  return fields;
 }
 
 /** Debounce noisy stream errors (Range retries, etc.). */

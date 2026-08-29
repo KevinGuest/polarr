@@ -70,7 +70,9 @@ export async function POST(req: Request) {
     result.token,
     await sessionCookieOptions(),
   );
-  const { notifyDiscord, notifyIpField } = await import("@/lib/admin-notify");
+  const { notifyDiscord, notifyIpField, notifyPlatformFields } = await import(
+    "@/lib/admin-notify"
+  );
   notifyDiscord("userLogin", {
     title: "User signed in",
     description: `${result.user.username} signed in`,
@@ -78,6 +80,7 @@ export async function POST(req: Request) {
       { name: "User", value: result.user.username, inline: true },
       { name: "Method", value: "password", inline: true },
       notifyIpField(ip),
+      ...notifyPlatformFields(req.headers.get("user-agent")),
     ],
   });
   return json({ token: result.token, user: result.user });

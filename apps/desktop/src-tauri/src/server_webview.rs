@@ -7,6 +7,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -15,6 +16,55 @@ use tauri::{
     webview::WebviewBuilder,
 };
 use url::Url;
+
+static LAST_SERVER_URL: Mutex<Option<String>> = Mutex::new(None);
+
+fn remember_server_url(url: &str) {
+    if let Ok(mut g) = LAST_SERVER_URL.lock() {
+        *g = Some(url.to_string());
+    }
+}
+
+fn last_server_url() -> Option<String> {
+    LAST_SERVER_URL.lock().ok().and_then(|g| g.clone())
+}
+
+fn clear_server_url_memory() {
+    if let Ok(mut g) = LAST_SERVER_URL.lock() {
+        *g = None;
+    }
+}
+
+pub(crate) fn forget_server_url() {
+    clear_server_url_memory();
+}
+
+fn href_is_blank(s: &str) -> bool {
+    let t = s.trim();
+    t.is_empty() || t.eq_ignore_ascii_case("about:blank") || t.starts_with("about:")
+}
+
+/// Overlay child webviews on macOS often stay at about:blank even when created
+/// with WebviewUrl::External — the pane is WKWebView's default white.
+fn kick_server_load(wv: &tauri::Webview, url: &str) {
+    match wv.url() {
+        Ok(current) if !href_is_blank(current.as_str()) => return,
+        _ => {}
+    }
+    if let Ok(parsed) = Url::parse(url) {
+        let _ = wv.navigate(parsed);
+    }
+    if let Ok(href) = serde_json::to_string(url) {
+        // Concatenate so JS braces cannot break format!.
+        let script = [
+            "(function(){ var u = ",
+            href.as_str(),
+            "; var h = String(location.href || ''); if (!h || h === 'about:blank' || h.indexOf('about:') === 0) location.replace(u); })();",
+        ]
+        .concat();
+        let _ = wv.eval(&script);
+    }
+}
 
 fn opening_lock_path(app: &AppHandle) -> Option<PathBuf> {
     app.path()
@@ -80,7 +130,8 @@ pub const INIT_SCRIPT: &str = r#"
     "html[data-polarr-desktop] [data-slot=scroll-area-viewport]::-webkit-scrollbar," +
     "html[data-polarr-desktop] [data-radix-scroll-area-viewport]::-webkit-scrollbar{" +
     "display:none!important;width:0!important;height:0!important;" +
-    "}";
+    "}" +
+    "html,body{background:#09090b!important;color-scheme:dark;}";
 
   function ensureGlobal() {
     try {
@@ -524,7 +575,7 @@ where
     })
     .map_err(|e| format!("dispatch main thread: {e}"))?;
     rx.recv_timeout(Duration::from_secs(8))
-        .map_err(|_| "timed out waiting for the UI thread".into())?
+        .map_err(|_| "timed out waiting for the UI thread".to_string())?
 }
 
 /// The shell webview fills the whole window by default. On macOS that opaque
@@ -535,7 +586,7 @@ fn pin_shell_to_titlebar(app: &AppHandle) -> Result<(), String> {
         .get_window("main")
         .ok_or_else(|| "main window missing".to_string())?;
     let Some(shell) = app.get_webview("main") else {
-        return Err("shell webview missing".into());
+        return Err("shell webview missing".to_string());
     };
     let logical = window_logical_size(&window)?;
     set_webview_frame(
@@ -558,6 +609,8 @@ pub(crate) fn fill_shell(app: &AppHandle) -> Result<(), String> {
     let _ = shell.set_auto_resize(true);
     set_webview_frame(&shell, LogicalPosition::new(0.0, 0.0), logical)?;
     let _ = shell.show();
+    #[cfg(target_os = "macos")]
+    crate::macos_window::fill_shell(app);
     Ok(())
 }
 
@@ -572,6 +625,17 @@ fn apply_layout(app: &AppHandle) -> Result<(), String> {
     let (pos, size) = content_bounds(&window)?;
     set_webview_frame(&wv, pos, size)?;
     let _ = wv.show();
+    let url = last_server_url().unwrap_or_else(|| {
+        wv.url()
+            .ok()
+            .map(|u| u.to_string())
+            .unwrap_or_default()
+    });
+    if !url.is_empty() {
+        kick_server_load(&wv, &url);
+    }
+    #[cfg(target_os = "macos")]
+    crate::macos_window::layout_connected(app, &url);
     Ok(())
 }
 
@@ -593,7 +657,7 @@ pub(crate) fn dispatch_fill_shell(app: &AppHandle) {
 
 fn apply_layout_on_main(app: &AppHandle) {
     let handle = app.clone();
-    let _ = run_on_main_sync(&handle, move || apply_layout(&handle));
+    let _ = run_on_main_sync(&handle.clone(), move || apply_layout(&handle));
 }
 
 fn parse_external(url: &str) -> Result<Url, String> {
@@ -679,8 +743,12 @@ pub fn install_resize_handler(app: &AppHandle) {
         let _ = window.on_window_event(move |event| {
             if matches!(
                 event,
-                tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }
+                tauri::WindowEvent::Resized(_)
+                    | tauri::WindowEvent::ScaleFactorChanged { .. }
+                    | tauri::WindowEvent::Focused(_)
             ) {
+                #[cfg(target_os = "macos")]
+                crate::macos_window::align_traffic_lights(&handle);
                 dispatch_layout(&handle);
             }
         });
@@ -699,13 +767,33 @@ pub async fn open_server_webview(app: AppHandle, url: String) -> Result<(), Stri
 fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> {
     let parsed = parse_external(&url)?;
 
-    #[cfg(target_os = "macos")]
-    {
-        return run_on_main_sync(&app, move || create_or_reveal_server(&app, parsed, url));
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        create_or_reveal_server(&app, parsed, url)
+    // WebView2 (Windows) and WKWebView (macOS) must be created and driven on the
+    // UI thread. Tauri runs async commands on a worker thread, so hop to main on
+    // every platform. Creating the child webview off the UI thread on Windows
+    // leaves WebView2 painting only its background color — a black content area
+    // below the title bar — until a later main-thread layout or resize forces it
+    // to composite.
+    let handle = app.clone();
+    run_on_main_sync(&app, move || create_or_reveal_server(&handle, parsed, url))
+}
+
+fn schedule_connected_retries(app: AppHandle) {
+    for ms in [80_u64, 200, 500, 1200] {
+        let handle = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(ms));
+            let for_main = handle.clone();
+            let _ = handle.run_on_main_thread(move || {
+                if let Some(url) = last_server_url() {
+                    if let Some(wv) = for_main.get_webview(SERVER_WEBVIEW_LABEL) {
+                        kick_server_load(&wv, &url);
+                    }
+                }
+                if let Err(err) = apply_layout(&for_main) {
+                    eprintln!("polarr layout retry: {err}");
+                }
+            });
+        });
     }
 }
 
@@ -714,16 +802,18 @@ fn create_or_reveal_server(
     parsed: Url,
     url: String,
 ) -> Result<(), String> {
+    remember_server_url(&url);
     let window = app
         .get_window("main")
         .ok_or_else(|| "main window missing".to_string())?;
 
     if let Some(existing) = app.get_webview(SERVER_WEBVIEW_LABEL) {
         let should_navigate = match existing.url() {
-            Ok(current) => !same_origin(&current, &parsed),
+            Ok(current) => href_is_blank(current.as_str()) || !same_origin(&current, &parsed),
             Err(_) => true,
         };
         if should_navigate {
+            let _ = existing.navigate(parsed.clone());
             let href = serde_json::to_string(&url).map_err(|e| e.to_string())?;
             existing
                 .eval(&format!("window.location.replace({href})"))
@@ -737,12 +827,13 @@ fn create_or_reveal_server(
             .map_err(|e| format!("show server webview: {e}"))?;
         let _ = existing.set_focus();
         schedule_marker_kicks(app.clone());
+        schedule_connected_retries(app.clone());
         return Ok(());
     }
 
     let (pos, size) = content_bounds(&window)?;
     pin_shell_to_titlebar(app)?;
-    let builder = WebviewBuilder::new(SERVER_WEBVIEW_LABEL, WebviewUrl::External(parsed))
+    let builder = WebviewBuilder::new(SERVER_WEBVIEW_LABEL, WebviewUrl::External(parsed.clone()))
         .initialization_script(INIT_SCRIPT)
         .focused(true)
         .background_color(tauri::webview::Color(9, 9, 11, 255));
@@ -750,11 +841,16 @@ fn create_or_reveal_server(
     let wv = window
         .add_child(builder, pos, size)
         .map_err(|e| format!("create server webview: {e}"))?;
+    let _ = wv.navigate(parsed);
+    kick_server_load(&wv, &url);
     apply_layout(app)?;
     let _ = wv.show();
     let _ = wv.set_focus();
+    #[cfg(target_os = "macos")]
+    crate::macos_window::layout_connected(app, &url);
 
     schedule_marker_kicks(app.clone());
+    schedule_connected_retries(app.clone());
     Ok(())
 }
 
@@ -781,6 +877,7 @@ pub async fn show_server_webview(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn close_server_webview(app: AppHandle) -> Result<(), String> {
+    clear_server_url_memory();
     if let Some(wv) = app.get_webview(SERVER_WEBVIEW_LABEL) {
         wv.close()
             .map_err(|e| format!("close server webview: {e}"))?;

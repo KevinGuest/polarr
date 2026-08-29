@@ -27,6 +27,7 @@ import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { MiniplayerClient } from "@/components/miniplayer-client";
 import { PlayerSlider } from "@/components/player-slider";
+import { ConnectPlaybackBar } from "@/components/connect-playback-bar";
 import { MobileSaveButton } from "@/components/saved-in-drawer";
 import { StreamQualityBadge } from "@/components/stream-quality-badge";
 import { TrackContextMenu } from "@/components/track-context-menu";
@@ -71,6 +72,7 @@ export function NowPlayingBar() {
     volume,
     shuffle,
     isPanelOpen,
+    isRemotePlayback,
     toggle,
     seek,
     next,
@@ -359,8 +361,8 @@ export function NowPlayingBar() {
                 onClick={() => togglePanel("devices")}
                 className={cn(
                   "rounded p-1.5 transition-colors",
-                  isPanelOpen("devices")
-                    ? "text-foreground"
+                  isRemotePlayback || isPanelOpen("devices")
+                    ? "text-[#1ed760]"
                     : "text-muted-foreground hover:text-foreground",
                 )}
                 aria-label="Connect to a device"
@@ -419,6 +421,7 @@ export function NowPlayingBar() {
           </div>
         </div>
         </div>
+        <ConnectPlaybackBar />
       </div>
     </TooltipProvider>
     {pipMount

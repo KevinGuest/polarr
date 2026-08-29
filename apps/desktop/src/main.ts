@@ -159,7 +159,7 @@ app.innerHTML = `
 
     <main class="content" id="content">
       <div class="setup" id="setup-view">
-        <div class="card">
+        <div class="setup-inner">
           <img class="logo" src="/polarr-icon.png" alt="Polarr" width="112" height="112" />
           <h1>Polarr</h1>
           <p class="lede">Connect to your self-hosted music hub.</p>
@@ -487,39 +487,73 @@ async function toggleChromeMenu(
 
 const UPDATER_WINDOW_LABEL = "updater";
 
-async function openUpdaterWindow() {
-  // Dev builds have no updater artifacts; skip the window entirely.
-  if (import.meta.env.DEV) return;
+async function revealMainWindow() {
   try {
-    if (await WebviewWindow.getByLabel(UPDATER_WINDOW_LABEL)) return;
-  } catch {
-    return;
-  }
-
-  const updaterWin = new WebviewWindow(UPDATER_WINDOW_LABEL, {
-    url: "updater.html",
-    title: "Polarr Update",
-    width: 360,
-    height: 132,
-    center: true,
-    resizable: false,
-    decorations: false,
-    transparent: false,
-    shadow: isMac,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    focus: false,
-    visible: false,
-    parent: "main",
-    theme: "dark",
-    backgroundColor: "#09090b",
-  });
-
-  try {
-    await updaterWin.setShadow(isMac);
+    await appWindow.show();
+    await appWindow.setFocus();
   } catch {
     /* ignore */
   }
+}
+
+function setServerOpenClass(open: boolean) {
+  document.documentElement.classList.toggle("server-open", open);
+}
+
+function openUpdaterWindow(): Promise<void> {
+  // Dev builds have no updater artifacts; skip the window entirely.
+  if (import.meta.env.DEV) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+
+    void (async () => {
+      try {
+        const existing = await WebviewWindow.getByLabel(UPDATER_WINDOW_LABEL);
+        if (existing) {
+          void existing.once("tauri://destroyed", finish);
+          return;
+        }
+      } catch {
+        finish();
+        return;
+      }
+
+      const updaterWin = new WebviewWindow(UPDATER_WINDOW_LABEL, {
+        url: "updater.html",
+        title: "Polarr Update",
+        width: 360,
+        height: 132,
+        center: true,
+        resizable: false,
+        decorations: false,
+        transparent: false,
+        shadow: isMac,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        focus: true,
+        visible: false,
+        theme: "dark",
+        backgroundColor: "#09090b",
+      });
+
+      void updaterWin.once("tauri://destroyed", finish);
+      void updaterWin.once("tauri://error", finish);
+
+      try {
+        await updaterWin.setShadow(isMac);
+      } catch {
+        /* ignore */
+      }
+    })();
+  });
 }
 
 async function changeServer() {
@@ -749,6 +783,7 @@ function stopChromeUrlPoll() {
 
 async function showSetup(prefill?: string) {
   serverOpen = false;
+  setServerOpenClass(false);
   stopChromeUrlPoll();
   setupView.hidden = false;
   if (prefill) input.value = prefill;
@@ -780,11 +815,13 @@ async function showServer(url: string) {
   setChromeAuthenticated(false);
   const target = withDesktopParam(url);
   setupView.hidden = true;
+  setServerOpenClass(true);
   try {
     await invoke("open_server_webview", { url: target });
   } catch (err) {
     showError(err instanceof Error ? err.message : String(err));
     setupView.hidden = false;
+    setServerOpenClass(false);
     serverOpen = false;
     button.disabled = false;
     button.textContent = "Connect";
@@ -1025,6 +1062,8 @@ async function bootstrap() {
     // Non-Tauri preview.
   }
 
+  const updaterDone = openUpdaterWindow();
+
   try {
     const saved = await invoke<{
       url: string | null;
@@ -1057,7 +1096,8 @@ async function bootstrap() {
     await showSetup();
   }
 
-  void openUpdaterWindow();
+  await updaterDone;
+  await revealMainWindow();
 }
 
 void bootstrap();

@@ -69,20 +69,14 @@ async function reveal() {
 }
 
 async function run() {
-  const revealTimer = window.setTimeout(() => {
-    void reveal();
-  }, 400);
-
   setChecking();
+  await reveal();
+
   const update = await findAppUpdate();
   if (!update) {
-    window.clearTimeout(revealTimer);
     await win.close();
     return;
   }
-
-  window.clearTimeout(revealTimer);
-  await reveal();
 
   try {
     setDownloading(update.version, 0, null);

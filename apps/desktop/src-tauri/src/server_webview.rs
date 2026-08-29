@@ -559,6 +559,8 @@ pub(crate) fn fill_shell(app: &AppHandle) -> Result<(), String> {
     let _ = shell.set_auto_resize(true);
     set_webview_frame(&shell, LogicalPosition::new(0.0, 0.0), logical)?;
     let _ = shell.show();
+    #[cfg(target_os = "macos")]
+    crate::macos_window::fill_shell(app);
     Ok(())
 }
 
@@ -574,7 +576,10 @@ fn apply_layout(app: &AppHandle) -> Result<(), String> {
     set_webview_frame(&wv, pos, size)?;
     let _ = wv.show();
     #[cfg(target_os = "macos")]
-    crate::macos_window::paint_webview(&wv);
+    {
+        crate::macos_window::layout_connected(app);
+        crate::macos_window::paint_webview(&wv);
+    }
     Ok(())
 }
 
@@ -684,6 +689,8 @@ pub fn install_resize_handler(app: &AppHandle) {
                 event,
                 tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }
             ) {
+                #[cfg(target_os = "macos")]
+                crate::macos_window::align_traffic_lights(&handle);
                 dispatch_layout(&handle);
             }
         });

@@ -194,8 +194,24 @@ pub fn run() {
                 {
                     macos_window::apply(app.handle());
                 }
-                let _ = window.show();
-                let _ = window.set_focus();
+                // Stay hidden until JS finishes the updater window. Parenting
+                // the updater to main (or showing main first) put the full
+                // app behind "Checking for updates…".
+                let fallback = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(20));
+                    let shown = fallback.clone();
+                    let _ = fallback.run_on_main_thread(move || {
+                        if shown.get_webview("updater").is_some() {
+                            return;
+                        }
+                        if let Some(w) = shown.get_window("main") {
+                            if !w.is_visible().unwrap_or(true) {
+                                let _ = w.show();
+                            }
+                        }
+                    });
+                });
             }
             Ok(())
         })

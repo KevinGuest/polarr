@@ -75,7 +75,8 @@ body {
 html.mac .titlebar {
   grid-template-areas: "nav center right menu";
   grid-template-columns: auto 1fr auto auto;
-  padding-left: 78px;
+  /* Native traffic lights occupy the overlay inset; keep HTML chrome clear of them. */
+  padding-left: 86px;
   padding-right: 6px;
 }
 
@@ -93,8 +94,8 @@ html.mac .app-frame {
 }
 
 html.mac .titlebar-drag {
-  /* Native traffic lights (~78px) + back/forward. */
-  left: 148px;
+  /* Native traffic lights + back/forward. */
+  left: 160px;
   right: 48px;
 }
 
@@ -264,21 +265,33 @@ html.mac .win-controls {
 }
 
 .titlebar-center {
+  /* Pin to the window midline. Overlay traffic-light padding and
+     asymmetric left/right chrome would otherwise shift this cluster. */
   grid-area: center;
-  position: relative;
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   min-width: 0;
+  width: auto;
+  pointer-events: none;
+}
+
+.titlebar-center .titlebar-brand-search {
+  pointer-events: auto;
 }
 
 .titlebar-center:has(.titlebar-search:not([hidden])) {
-  width: min(var(--search-max), calc(100vw - 280px));
+  width: min(var(--search-max), calc(100% - 280px));
 }
 
 html.mac .titlebar-center:has(.titlebar-search:not([hidden])) {
-  width: min(var(--search-max), calc(100vw - 320px));
+  width: min(var(--search-max), calc(100% - 340px));
 }
 
 .titlebar-right {
@@ -611,14 +624,20 @@ html.mac .titlebar-center:has(.titlebar-search:not([hidden])) {
   display: none !important;
 }
 
-.card {
+.setup-inner {
   width: min(420px, 100%);
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 36px 28px 28px;
   text-align: center;
-  backdrop-filter: blur(12px);
+}
+
+html.mac.server-open,
+html.mac.server-open body,
+html.mac.server-open .app-frame,
+html.mac.server-open .content {
+  background: transparent;
+}
+
+html.mac.server-open .titlebar {
+  background: var(--titlebar);
 }
 
 .logo {

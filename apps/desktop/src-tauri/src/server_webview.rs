@@ -601,7 +601,7 @@ fn schedule_marker_kicks(app: AppHandle) {
         for ms in [80_u64, 250, 600, 1200, 2500, 5000] {
             std::thread::sleep(Duration::from_millis(ms));
             let handle = app.clone();
-            let _ = handle.run_on_main_thread(move || {
+            let _ = app.run_on_main_thread(move || {
                 if let Some(wv) = handle.get_webview(SERVER_WEBVIEW_LABEL) {
                     reassert_desktop_markers(&wv);
                     let _ = apply_layout(&handle);

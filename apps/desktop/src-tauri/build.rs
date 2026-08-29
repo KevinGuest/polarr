@@ -52,4 +52,5 @@ fn compile_macos_chrome() {
     println!("cargo:rustc-link-lib=static=polarr_macos_chrome");
     println!("cargo:rustc-link-lib=framework=AppKit");
     println!("cargo:rustc-link-lib=framework=WebKit");
+    println!("cargo:rustc-link-lib=framework=QuartzCore");
 }

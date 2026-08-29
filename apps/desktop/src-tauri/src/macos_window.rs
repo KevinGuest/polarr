@@ -12,7 +12,7 @@
 //! in place (never reparent the WKWebView itself) so the shell cannot cover
 //! the server after Connect.
 
-use std::ffi::c_void;
+use std::ffi::{c_char, c_void, CString};
 
 use tauri::{AppHandle, Manager, Webview};
 
@@ -22,7 +22,11 @@ extern "C" {
     fn polarr_macos_paint_window(ns_window: *mut c_void);
     fn polarr_macos_paint_webview(wk_webview: *mut c_void);
     fn polarr_macos_align_traffic_lights(ns_window: *mut c_void);
-    fn polarr_macos_layout_connected(ns_window: *mut c_void, titlebar_h: f64);
+    fn polarr_macos_layout_connected(
+        ns_window: *mut c_void,
+        titlebar_h: f64,
+        server_url: *const c_char,
+    );
     fn polarr_macos_fill_shell(ns_window: *mut c_void);
 }
 
@@ -62,14 +66,15 @@ pub fn align_traffic_lights(app: &AppHandle) {
 }
 
 /// Pin the shell wrapper to the 48px title bar and put the server wrapper under it.
-pub fn layout_connected(app: &AppHandle) {
+pub fn layout_connected(app: &AppHandle, server_url: &str) {
     let Some(window) = app.get_window("main") else {
         return;
     };
+    let c_url = CString::new(server_url).unwrap_or_else(|_| CString::new("").unwrap());
     if let Ok(ptr) = window.ns_window() {
         unsafe {
             polarr_macos_align_traffic_lights(ptr);
-            polarr_macos_layout_connected(ptr, TITLEBAR_HEIGHT);
+            polarr_macos_layout_connected(ptr, TITLEBAR_HEIGHT, c_url.as_ptr());
         }
     }
 }

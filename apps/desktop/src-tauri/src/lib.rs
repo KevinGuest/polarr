@@ -219,6 +219,7 @@ fn clear_server_url(app: AppHandle) -> Result<(), String> {
     if let Some(wv) = app.get_webview(server_webview::SERVER_WEBVIEW_LABEL) {
         let _ = wv.close();
     }
+    server_webview::forget_server_url();
     let _ = server_webview::dispatch_fill_shell(&app);
     let _ = app.emit("server-cleared", ());
     Ok(())

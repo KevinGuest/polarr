@@ -141,13 +141,11 @@ static void polarr_collect_wk(NSView *root, NSMutableArray<WKWebView *> *out) {
 }
 
 static BOOL polarr_is_shell_url(NSString *s) {
-  if (s.length == 0) {
-    return YES;
-  }
-  NSString *lower = s.lowercaseString;
+  NSString *lower = (s ?: @"").lowercaseString;
+  // Do not treat about:blank / empty as the shell — a new server webview
+  // has no URL yet and was being pinned to the 48px strip.
   return [lower containsString:@"tauri.localhost"] || [lower containsString:@"tauri://"] ||
-         [lower containsString:@"localhost:1420"] || [lower containsString:@"asset.localhost"] ||
-         [lower containsString:@"index.html"];
+         [lower containsString:@"localhost:1420"] || [lower containsString:@"asset.localhost"];
 }
 
 static NSView *polarr_content_child(NSView *content, NSView *inner) {
@@ -185,7 +183,32 @@ static void polarr_set_container_frame(NSView *view, NSRect frame, NSAutoresizin
   view.frame = frame;
 }
 
-static void polarr_classify_webviews(NSView *content, WKWebView **shellOut, WKWebView **serverOut) {
+static void polarr_paint_content(NSView *content) {
+  if (!content) {
+    return;
+  }
+  NSColor *color = [NSColor colorWithSRGBRed:(9.0 / 255.0)
+                                       green:(9.0 / 255.0)
+                                        blue:(11.0 / 255.0)
+                                       alpha:1.0];
+  content.wantsLayer = YES;
+  content.layer.backgroundColor = color.CGColor;
+}
+
+static BOOL polarr_host_matches(NSString *href, const char *server_url) {
+  if (!server_url || server_url[0] == '\0' || href.length == 0) {
+    return NO;
+  }
+  NSURL *have = [NSURL URLWithString:href];
+  NSURL *want = [NSURL URLWithString:[NSString stringWithUTF8String:server_url]];
+  if (have.host.length == 0 || want.host.length == 0) {
+    return NO;
+  }
+  return [have.host.lowercaseString isEqualToString:want.host.lowercaseString];
+}
+
+static void polarr_classify_webviews(NSView *content, const char *server_url, WKWebView **shellOut,
+                                     WKWebView **serverOut) {
   NSMutableArray<WKWebView *> *all = [NSMutableArray array];
   polarr_collect_wk(content, all);
   WKWebView *shell = nil;
@@ -196,12 +219,22 @@ static void polarr_classify_webviews(NSView *content, WKWebView **shellOut, WKWe
       if (!shell) {
         shell = wv;
       }
+    } else if (polarr_host_matches(href, server_url)) {
+      server = wv;
     } else if (!server) {
       server = wv;
     }
   }
   if (!shell && all.count > 0) {
-    shell = all.firstObject;
+    for (WKWebView *wv in all) {
+      if (wv != server) {
+        shell = wv;
+        break;
+      }
+    }
+    if (!shell) {
+      shell = all.firstObject;
+    }
   }
   if (!server && all.count > 1) {
     for (WKWebView *wv in all) {
@@ -219,7 +252,28 @@ static void polarr_classify_webviews(NSView *content, WKWebView **shellOut, WKWe
   }
 }
 
-void polarr_macos_layout_connected(void *ns_window, double titlebar_h) {
+static void polarr_fill_inside(NSView *box, NSView *leaf) {
+  if (!box || !leaf || leaf == box) {
+    return;
+  }
+  NSMutableArray<NSView *> *path = [NSMutableArray array];
+  NSView *v = leaf;
+  while (v && v != box) {
+    [path insertObject:v atIndex:0];
+    v = v.superview;
+  }
+  NSView *parent = box;
+  for (NSView *node in path) {
+    polarr_clear_constraints(node);
+    node.translatesAutoresizingMaskIntoConstraints = YES;
+    node.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    node.hidden = NO;
+    node.frame = parent.bounds;
+    parent = node;
+  }
+}
+
+void polarr_macos_layout_connected(void *ns_window, double titlebar_h, const char *server_url) {
   if (ns_window == NULL) {
     return;
   }
@@ -228,10 +282,11 @@ void polarr_macos_layout_connected(void *ns_window, double titlebar_h) {
   if (!content) {
     return;
   }
+  polarr_paint_content(content);
 
   WKWebView *shellWV = nil;
   WKWebView *serverWV = nil;
-  polarr_classify_webviews(content, &shellWV, &serverWV);
+  polarr_classify_webviews(content, server_url, &shellWV, &serverWV);
   if (!shellWV) {
     return;
   }
@@ -250,17 +305,29 @@ void polarr_macos_layout_connected(void *ns_window, double titlebar_h) {
   // server view (black pane after Connect).
   polarr_set_container_frame(shellBox, NSMakeRect(0, height - bar, width, bar),
                              NSViewWidthSizable | NSViewMinYMargin);
+  polarr_fill_inside(shellBox, shellWV);
 
   if (serverBox && serverBox != shellBox) {
     polarr_set_container_frame(serverBox, NSMakeRect(0, 0, width, bodyH),
                                 NSViewWidthSizable | NSViewHeightSizable);
+    polarr_fill_inside(serverBox, serverWV);
     [content addSubview:serverBox positioned:NSWindowAbove relativeTo:shellBox];
     serverWV.hidden = NO;
-    if (@available(macOS 12.0, *)) {
-      serverWV.underPageBackgroundColor = [NSColor colorWithSRGBRed:(9.0 / 255.0)
-                                                               green:(9.0 / 255.0)
-                                                                blue:(11.0 / 255.0)
-                                                               alpha:1.0];
+    polarr_macos_paint_webview((__bridge void *)serverWV);
+    // Overlay + add_child often leaves the child at about:blank. Only kick a
+    // load while it is still blank so resizes do not reload a live session.
+    NSString *current = (serverWV.URL.absoluteString ?: @"").lowercaseString;
+    BOOL blank = current.length == 0 || [current hasPrefix:@"about:"];
+    if (blank && server_url && server_url[0] != '\0') {
+      NSString *href = [NSString stringWithUTF8String:server_url];
+      NSURL *dest = href.length ? [NSURL URLWithString:href] : nil;
+      if (dest) {
+        NSURLRequest *req =
+            [NSURLRequest requestWithURL:dest
+                             cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                         timeoutInterval:30.0];
+        [serverWV loadRequest:req];
+      }
     }
   }
 }
@@ -275,12 +342,13 @@ void polarr_macos_fill_shell(void *ns_window) {
     return;
   }
   WKWebView *shellWV = nil;
-  polarr_classify_webviews(content, &shellWV, NULL);
+  polarr_classify_webviews(content, NULL, &shellWV, NULL);
   if (!shellWV) {
     return;
   }
   NSView *shellBox = polarr_content_child(content, shellWV);
   polarr_set_container_frame(shellBox, content.bounds,
                              NSViewWidthSizable | NSViewHeightSizable);
+  polarr_fill_inside(shellBox, shellWV);
   [content addSubview:shellBox positioned:NSWindowAbove relativeTo:nil];
 }

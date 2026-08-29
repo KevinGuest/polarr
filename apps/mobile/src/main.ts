@@ -1,6 +1,6 @@
 import { Preferences } from "@capacitor/preferences";
 import { StatusBar, Style } from "@capacitor/status-bar";
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
 import "./styles.css";
 
 const SERVER_KEY = "polarr_server_url";
@@ -27,13 +27,14 @@ app.innerHTML = `
           autocapitalize="off"
           autocorrect="off"
         />
-        <p class="hint">Same URL you use in Safari. Umbrel default port is 3647. HTTP on your LAN is OK.</p>
+        <p class="hint">Same URL you use in Safari. Umbrel: http://umbrel.local:3647</p>
         <p id="error" class="error" hidden></p>
         <button type="submit" id="connect">Connect</button>
       </form>
       <button type="button" id="reset" class="ghost" hidden>Change server</button>
     </div>
   </main>
+  <div id="toast" class="toast" hidden role="status"></div>
 `;
 
 const form = document.querySelector<HTMLFormElement>("#server-form")!;
@@ -42,6 +43,19 @@ const errorEl = document.querySelector<HTMLParagraphElement>("#error")!;
 const button = document.querySelector<HTMLButtonElement>("#connect")!;
 const resetBtn = document.querySelector<HTMLButtonElement>("#reset")!;
 const lede = document.querySelector<HTMLParagraphElement>("#lede")!;
+const toastEl = document.querySelector<HTMLDivElement>("#toast")!;
+
+let toastTimer: number | null = null;
+
+function showToast(message: string) {
+  toastEl.textContent = message;
+  toastEl.hidden = false;
+  if (toastTimer) window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    toastEl.hidden = true;
+    toastTimer = null;
+  }, 4200);
+}
 
 function showError(message: string) {
   errorEl.hidden = false;
@@ -51,6 +65,13 @@ function showError(message: string) {
 function clearError() {
   errorEl.hidden = true;
   errorEl.textContent = "";
+}
+
+function looksLikePolarr(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const o = body as Record<string, unknown>;
+  if (o.app === "polarr") return true;
+  return o.status === "ok" && "setupComplete" in o && "hasUsers" in o;
 }
 
 function normalizeUrl(raw: string): string {
@@ -69,8 +90,42 @@ function normalizeUrl(raw: string): string {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("Only http:// and https:// URLs are supported.");
   }
-  if (!parsed.host) throw new Error("URL must include a host.");
-  return withScheme.replace(/\/+$/, "");
+  if (!parsed.hostname) throw new Error("URL must include a host.");
+
+  const host = parsed.hostname;
+  if (!host.includes(".") && host.toLowerCase() !== "localhost") {
+    parsed.hostname = `${host}.local`;
+  }
+
+  return parsed.toString().replace(/\/+$/, "");
+}
+
+async function probePolarr(base: string): Promise<void> {
+  const paths = ["/api/v1/status", "/api/status"];
+  for (const path of paths) {
+    try {
+      let body: unknown;
+      if (Capacitor.isNativePlatform()) {
+        const response = await CapacitorHttp.get({
+          url: `${base}${path}`,
+          connectTimeout: 4000,
+          readTimeout: 4000,
+        });
+        if (response.status < 200 || response.status >= 300) continue;
+        body = response.data;
+      } else {
+        const response = await fetch(`${base}${path}`, {
+          signal: AbortSignal.timeout(4000),
+        });
+        if (!response.ok) continue;
+        body = await response.json();
+      }
+      if (looksLikePolarr(body)) return;
+    } catch {
+      continue;
+    }
+  }
+  throw new Error("URL not valid");
 }
 
 async function saveUrl(url: string) {
@@ -141,20 +196,38 @@ async function bootstrap() {
 
   // Short grace period so users can tap Change server without reinstalling.
   await new Promise((r) => setTimeout(r, 1200));
-  if (!cancelled) goToServer(existing);
+  if (cancelled) return;
+
+  try {
+    const url = normalizeUrl(existing);
+    await probePolarr(url);
+    if (url !== existing) await saveUrl(url);
+    goToServer(url);
+  } catch {
+    form.hidden = false;
+    resetBtn.hidden = false;
+    lede.textContent = "Connect to your self-hosted music hub.";
+    button.disabled = false;
+    button.textContent = "Connect";
+    showToast("URL not valid");
+  }
 }
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearError();
   button.disabled = true;
-  button.textContent = "Connecting…";
+  button.textContent = "Checking…";
   try {
     const url = normalizeUrl(input.value);
+    await probePolarr(url);
     await saveUrl(url);
+    button.textContent = "Connecting…";
     goToServer(url);
   } catch (err) {
-    showError(err instanceof Error ? err.message : String(err));
+    const message = err instanceof Error ? err.message : String(err);
+    showToast("URL not valid");
+    showError(message || "URL not valid");
     button.disabled = false;
     button.textContent = "Connect";
   }

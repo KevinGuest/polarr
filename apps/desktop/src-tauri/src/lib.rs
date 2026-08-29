@@ -6,6 +6,8 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent};
 use url::Url;
 
 mod discord_presence;
+#[cfg(target_os = "macos")]
+mod macos_window;
 mod offline;
 mod server_webview;
 
@@ -55,7 +57,46 @@ fn write_config(app: &AppHandle, url: &str) -> Result<(), String> {
     fs::write(&path, raw).map_err(|e| format!("write config: {e}"))
 }
 
-fn normalize_url(raw: &str) -> Result<String, String> {
+fn inject_mdns_host(with_scheme: &str) -> Option<String> {
+    let (scheme, rest) = if let Some(r) = with_scheme.strip_prefix("http://") {
+        ("http://", r)
+    } else if let Some(r) = with_scheme.strip_prefix("https://") {
+        ("https://", r)
+    } else {
+        return None;
+    };
+    let host_end = rest
+        .find(|c: char| matches!(c, ':' | '/' | '?' | '#'))
+        .unwrap_or(rest.len());
+    let host = &rest[..host_end];
+    if host.is_empty() || host.contains('.') || host.eq_ignore_ascii_case("localhost") {
+        return None;
+    }
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return None;
+    }
+    Some(format!("{scheme}{host}.local{}", &rest[host_end..]))
+}
+
+fn parse_server_url(with_scheme: &str) -> Result<Url, String> {
+    match Url::parse(with_scheme) {
+        Ok(parsed) => Ok(parsed),
+        Err(_) => {
+            let Some(injected) = inject_mdns_host(with_scheme) else {
+                return Err(
+                    "That does not look like a valid URL. Example: http://192.168.1.10:3647"
+                        .into(),
+                );
+            };
+            Url::parse(&injected).map_err(|_| {
+                "That does not look like a valid URL. Example: http://192.168.1.10:3647"
+                    .to_string()
+            })
+        }
+    }
+}
+
+fn candidate_urls(raw: &str) -> Result<Vec<String>, String> {
     let trimmed = raw.trim().trim_end_matches('/');
     if trimmed.is_empty() {
         return Err("Enter your Polarr server URL.".into());
@@ -67,9 +108,7 @@ fn normalize_url(raw: &str) -> Result<String, String> {
         format!("http://{trimmed}")
     };
 
-    let parsed = Url::parse(&with_scheme).map_err(|_| {
-        "That does not look like a valid URL. Example: http://192.168.1.10:3647".to_string()
-    })?;
+    let parsed = parse_server_url(&with_scheme)?;
 
     match parsed.scheme() {
         "http" | "https" => {}
@@ -80,7 +119,11 @@ fn normalize_url(raw: &str) -> Result<String, String> {
         return Err("URL must include a host.".into());
     };
 
-    let with_scheme = if !host.contains('.')
+    let mut out = Vec::new();
+    let primary = parsed.to_string().trim_end_matches('/').to_string();
+    out.push(primary);
+
+    if !host.contains('.')
         && !host.eq_ignore_ascii_case("localhost")
         && host.parse::<std::net::IpAddr>().is_err()
     {
@@ -89,12 +132,18 @@ fn normalize_url(raw: &str) -> Result<String, String> {
         rewritten
             .set_host(Some(&mdns))
             .map_err(|_| format!("Could not use host {mdns}"))?;
-        rewritten.to_string()
-    } else {
-        with_scheme
-    };
+        let local = rewritten.to_string().trim_end_matches('/').to_string();
+        if !out.iter().any(|u| u == &local) {
+            out.push(local);
+        }
+    }
 
-    Ok(with_scheme.trim_end_matches('/').to_string())
+    Ok(out)
+}
+
+fn normalize_url(raw: &str) -> Result<String, String> {
+    let mut urls = candidate_urls(raw)?;
+    Ok(urls.remove(0))
 }
 
 fn looks_like_polarr(body: &serde_json::Value) -> bool {
@@ -108,7 +157,7 @@ fn looks_like_polarr(body: &serde_json::Value) -> bool {
 
 async fn probe_polarr(base: &str) -> Result<(), String> {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(4))
+        .timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::limited(3))
         .build()
         .map_err(|e| e.to_string())?;
@@ -134,9 +183,15 @@ async fn probe_polarr(base: &str) -> Result<(), String> {
 
 #[tauri::command]
 async fn probe_server_url(url: String) -> Result<String, String> {
-    let normalized = normalize_url(&url)?;
-    probe_polarr(&normalized).await?;
-    Ok(normalized)
+    let candidates = candidate_urls(&url)?;
+    let mut last_err = "URL not valid".to_string();
+    for candidate in candidates {
+        match probe_polarr(&candidate).await {
+            Ok(()) => return Ok(candidate),
+            Err(err) => last_err = err,
+        }
+    }
+    Err(last_err)
 }
 
 #[tauri::command]
@@ -164,6 +219,7 @@ fn clear_server_url(app: AppHandle) -> Result<(), String> {
     if let Some(wv) = app.get_webview(server_webview::SERVER_WEBVIEW_LABEL) {
         let _ = wv.close();
     }
+    server_webview::forget_server_url();
     let _ = server_webview::dispatch_fill_shell(&app);
     let _ = app.emit("server-cleared", ());
     Ok(())
@@ -184,6 +240,32 @@ pub fn run() {
             server_webview::install_resize_handler(app.handle());
             if let Some(window) = app.get_window("main") {
                 let _ = window.set_theme(Some(tauri::Theme::Dark));
+                #[cfg(windows)]
+                {
+                    let _ = window.set_decorations(false);
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    macos_window::apply(app.handle());
+                }
+                // Stay hidden until JS finishes the updater window. Parenting
+                // the updater to main (or showing main first) put the full
+                // app behind "Checking for updates…".
+                let fallback = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(20));
+                    let shown = fallback.clone();
+                    let _ = fallback.run_on_main_thread(move || {
+                        if shown.get_webview("updater").is_some() {
+                            return;
+                        }
+                        if let Some(w) = shown.get_window("main") {
+                            if !w.is_visible().unwrap_or(true) {
+                                let _ = w.show();
+                            }
+                        }
+                    });
+                });
             }
             Ok(())
         })
@@ -340,4 +422,46 @@ fn http_response(
             .body(Vec::new())
             .unwrap()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{candidate_urls, inject_mdns_host, normalize_url};
+
+    #[test]
+    fn umbrel_keeps_port_and_adds_local() {
+        let urls = candidate_urls("http://umbrel:3647").unwrap();
+        assert!(
+            urls.iter()
+                .any(|u| u.contains("umbrel.local") && u.contains(":3647")),
+            "{urls:?}"
+        );
+        assert!(
+            urls.iter()
+                .any(|u| u.contains("://umbrel:") && u.contains("3647")),
+            "{urls:?}"
+        );
+    }
+
+    #[test]
+    fn umbrel_local_keeps_port() {
+        let urls = candidate_urls("http://umbrel.local:3647").unwrap();
+        assert_eq!(urls, vec!["http://umbrel.local:3647"]);
+    }
+
+    #[test]
+    fn inject_local_before_port() {
+        assert_eq!(
+            inject_mdns_host("http://umbrel:3647").as_deref(),
+            Some("http://umbrel.local:3647")
+        );
+    }
+
+    #[test]
+    fn normalize_ip_with_port() {
+        assert_eq!(
+            normalize_url("http://192.168.1.10:3647").unwrap(),
+            "http://192.168.1.10:3647"
+        );
+    }
 }

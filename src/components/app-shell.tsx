@@ -241,7 +241,7 @@ function useDesktopShellMode() {
 
 function ShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { setPanel, track } = usePlayer();
+  const { setPanel, track, isRemotePlayback } = usePlayer();
   const desktopShell = useDesktopShellMode();
   const isSearchPage = pathname === "/search";
   const isLibraryPage = pathname === "/library";
@@ -322,10 +322,12 @@ function ShellInner({ children }: { children: React.ReactNode }) {
         isBrowsePage && "max-lg:pt-[max(1rem,calc(var(--safe-top)+0.35rem))]",
         !isAdminPath &&
           (track
-            ? "max-lg:pb-[calc(var(--mobile-dock-stack)+var(--mobile-dock-player-h)+1rem)]"
+            ? isRemotePlayback
+              ? "max-lg:pb-[calc(var(--mobile-dock-stack)+var(--mobile-dock-player-h)+var(--mobile-connect-bar-h)+1rem)]"
+              : "max-lg:pb-[calc(var(--mobile-dock-stack)+var(--mobile-dock-player-h)+1rem)]"
             : "max-lg:pb-[calc(var(--mobile-dock-stack)+1rem)]"),
       ),
-    [isAdminPath, isAlbumPage, isArtistPage, isBrowsePage, isLibraryPage, isPlaylistPage, isProfilePage, isSearchPage, track],
+    [isAdminPath, isAlbumPage, isArtistPage, isBrowsePage, isLibraryPage, isPlaylistPage, isProfilePage, isSearchPage, isRemotePlayback, track],
   );
 
   const adminSidebarInner = (

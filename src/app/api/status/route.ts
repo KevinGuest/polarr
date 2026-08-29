@@ -39,7 +39,7 @@ export async function GET(req: Request) {
 
     return {
       app: "polarr",
-      version: process.env.POLARR_APP_VERSION || "0.6.19",
+      version: process.env.POLARR_APP_VERSION || "0.6.20",
       setupComplete: settings.setupComplete,
       hasUsers: hasUsers(),
       serverName: settings.serverName,

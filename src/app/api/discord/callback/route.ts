@@ -154,7 +154,8 @@ export async function GET(req: Request) {
       result.token,
       await sessionCookieOptions(),
     );
-    const { notifyDiscord, notifyIpField } = await import("@/lib/admin-notify");
+    const { notifyDiscord, notifyIpField, notifyPlatformFields } =
+      await import("@/lib/admin-notify");
     notifyDiscord("userLogin", {
       title: "User signed in",
       description: `${result.user.username} signed in with Discord`,
@@ -162,6 +163,7 @@ export async function GET(req: Request) {
         { name: "User", value: result.user.username, inline: true },
         { name: "Method", value: "discord", inline: true },
         notifyIpField(ip),
+        ...notifyPlatformFields(req.headers.get("user-agent")),
       ],
     });
     return NextResponse.redirect(`${publicBase}/`);
@@ -173,7 +175,7 @@ export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return goSettings("discord=auth");
 
-  let expected = `link:${user.id}:${state}`;
+  const expected = `link:${user.id}:${state}`;
   // Accept pre-0.6.13 cookie format `userId:state`
   const legacyExpected = `${user.id}:${state}`;
   if (!raw || (raw !== expected && raw !== legacyExpected)) {

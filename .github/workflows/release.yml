@@ -6,6 +6,11 @@ on:
     tags:
       - "desktop-v*"
 
+env:
+  # Incremental artifacts bloat GHA cache; rust-cache restores a full release target instead.
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+
 jobs:
   build:
     permissions:
@@ -16,10 +21,12 @@ jobs:
         include:
           - platform: macos-latest
             target: universal-apple-darwin
+            bundles: dmg
             artifact_glob: apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
             artifact_name: macos-universal
           - platform: windows-latest
             target: ""
+            bundles: nsis
             artifact_glob: apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
             artifact_name: windows-x64
 
@@ -39,9 +46,16 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Add extra targets
-        if: matrix.platform == 'macos-latest'
+      - name: Add Apple targets
+        if: runner.os == 'macOS'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          shared-key: ${{ matrix.artifact_name }}
+          cache-on-failure: true
 
       - name: Install dependencies
         working-directory: apps/desktop
@@ -124,7 +138,7 @@ jobs:
             Right-click → Open is unreliable on macOS Sequoia and later.
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+          args: ${{ matrix.target && format('--target {0} --bundles {1}', matrix.target, matrix.bundles) || format('--bundles {0}', matrix.bundles) }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

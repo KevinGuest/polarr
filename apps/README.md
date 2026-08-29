@@ -45,8 +45,8 @@ After a successful release build:
 
 | Artifact | Path |
 | --- | --- |
-| **NSIS installer (ship this)** | `apps/desktop/src-tauri/target/release/bundle/nsis/Polarr_0.2.2_x64-setup.exe` |
-| MSI (optional / enterprise) | `apps/desktop/src-tauri/target/release/bundle/msi/Polarr_0.2.2_x64_en-US.msi` |
+| **NSIS installer (ship this)** | `apps/desktop/src-tauri/target/release/bundle/nsis/Polarr_0.2.7_x64-setup.exe` |
+| MSI (optional / enterprise) | `apps/desktop/src-tauri/target/release/bundle/msi/Polarr_0.2.7_x64_en-US.msi` |
 | Unpackaged binary | `apps/desktop/src-tauri/target/release/polarr-desktop.exe` |
 
 Installer metadata (product name **Polarr**, publisher **Polarr**, version from `tauri.conf.json` / package) and the app icon (`icons/icon.ico`) are wired for Start Menu / desktop shortcuts. NSIS/WiX bitmaps live in `src-tauri/installer-assets/` (regenerate with `npm run installer-assets` after changing `public/polarr-icon.png` or theme colors in `scripts/generate-installer-assets.ps1`). Bitmaps are **24-bit BMP** at stock sizes (NSIS sidebar 164×314, header 150×57; WiX dialog 493×312 with branding only in the left ~164px, banner 493×58). Do not full-bleed dark art under wizard text — MUI/WiX draw dark copy on the light panel.
@@ -77,11 +77,13 @@ npm run tauri:build
 npm run tauri -- build --target universal-apple-darwin
 ```
 
+The macOS window is a native **overlay titlebar**: system rounded corners and traffic lights, with the custom 48px chrome drawn underneath. The Polarr server page loads in a child webview below that bar (not an iframe), so session cookies stick.
+
 After a release build:
 
 | Artifact | Path |
 | --- | --- |
-| **DMG (ship this)** | `src-tauri/target/universal-apple-darwin/release/bundle/dmg/Polarr_0.2.2_universal.dmg` |
+| **DMG (ship this)** | `src-tauri/target/universal-apple-darwin/release/bundle/dmg/Polarr_0.2.7_universal.dmg` |
 | App bundle | `src-tauri/target/universal-apple-darwin/release/bundle/macos/Polarr.app` |
 
 `Info.plist` allows cleartext `http://` to LAN / Umbrel servers (same as iOS). Offline downloads and Discord Rich Presence work the same as Windows.
@@ -98,11 +100,11 @@ That dialog goes away only for **Developer ID–signed and notarized** builds (s
 Push a desktop tag (version comes from `apps/desktop/src-tauri/tauri.conf.json`):
 
 ```bash
-git tag desktop-v0.2.2
-git push origin desktop-v0.2.2
+git tag desktop-v0.2.7
+git push origin desktop-v0.2.7
 ```
 
-Workflow: [`.github/workflows/release.yml`](../.github/workflows/release.yml) — builds **macOS universal DMG** + **Windows NSIS**, publishes **`latest.json`** for auto-update, and opens a draft GitHub Release.
+Workflow: [`.github/workflows/release.yml`](../.github/workflows/release.yml) — builds **macOS universal DMG** (Apple Silicon **and** Intel, so Rust compiles twice) + **Windows NSIS**, publishes **`latest.json`** for auto-update, and opens a draft GitHub Release. Cold GitHub runners compile Tauri from scratch; later tags reuse `swatinem/rust-cache` unless `Cargo.lock` / the toolchain changes.
 
 ### Auto-update (GitHub Releases)
 
@@ -193,6 +195,15 @@ Already configured in the Xcode project:
 - `UIBackgroundModes = audio` + `AVAudioSession` playback category (background/lock-screen audio when the web player uses HTMLAudio)
 - `NSAppTransportSecurity` allows cleartext HTTP for LAN / Umbrel
 - Safe-area aware setup screen (`viewport-fit=cover`; Polarr web already sets this)
+
+The **Simulator home screen shows real app icons** — a blank tile is not normal. Capacitor’s default 1024×1024 icon was a white mark on white, so it looked missing. Icons and the launch splash are generated from `public/polarr-icon.png` (black background, no alpha — Apple rejects transparency on the marketing icon):
+
+```bash
+cd apps/mobile
+npm run icons          # requires ffmpeg (brew install ffmpeg)
+```
+
+Then rebuild in Xcode. `npx cap sync` copies the web shell into `App/public` and does **not** overwrite `Assets.xcassets`.
 
 To change server later: relaunch the app and tap **Change server** during the short “Opening…” pause, or clear the app’s data in iOS Settings.
 

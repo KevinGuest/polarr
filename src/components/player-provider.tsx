@@ -16,6 +16,17 @@ import { formatDuration, titleLooksExplicit } from "@/lib/utils";
 import { emitListenCredited } from "@/lib/ui-events";
 import { LISTEN_HEARTBEAT_SECONDS } from "@/lib/listen";
 import { offlineStreamUrl } from "@/lib/desktop-offline";
+import {
+  detectConnectDevice,
+  selfDeviceLabel,
+  type LocalConnectDevice,
+} from "@/lib/player-device";
+import type {
+  ConnectCommand,
+  ConnectDevice,
+  ConnectPlaybackState,
+  ConnectTrack,
+} from "@/lib/player-sync";
 
 export type KaraokeUiStatus =
   | "idle"
@@ -257,6 +268,14 @@ function withQueuePinned(panels: OpenPanels): OpenPanels {
   return panels.queue ? panels : { ...panels, queue: true };
 }
 
+export type ConnectDeviceInfo = {
+  id: string;
+  name: string;
+  kind: "phone" | "tablet" | "computer";
+  self: boolean;
+  active: boolean;
+};
+
 type PlayerContextValue = {
   track: PlayerTrack | null;
   queue: PlayerTrack[];
@@ -301,6 +320,10 @@ type PlayerContextValue = {
   /** Open the queue rail, optionally on a specific tab. */
   openQueue: (tab?: QueueTab) => void;
   progressLabel: string;
+  connectDevices: ConnectDeviceInfo[];
+  activeConnectDevice: ConnectDeviceInfo | null;
+  isRemotePlayback: boolean;
+  transferPlayback: (deviceId: string) => void;
 };
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -323,6 +346,77 @@ type SyncPayload = {
 type SyncMsg =
   | { kind: "sync"; payload: SyncPayload }
   | { kind: "hello"; tabId: string };
+
+function newCommandId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function trackToConnect(track: PlayerTrack): ConnectTrack {
+  return {
+    id: track.id,
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    coverPath: track.coverPath,
+    streamUrl: track.streamUrl,
+    explicit: track.explicit,
+    quality: track.quality,
+    resolveArtist: track.resolveArtist,
+    duration: track.duration,
+  };
+}
+
+function connectToTrack(track: ConnectTrack): PlayerTrack {
+  return {
+    id: track.id,
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    coverPath: track.coverPath,
+    streamUrl: track.streamUrl,
+    explicit: track.explicit,
+    quality: track.quality,
+    resolveArtist: track.resolveArtist,
+    duration: track.duration,
+  };
+}
+
+type ConnectSyncResponse = {
+  devices?: ConnectDevice[];
+  state?: ConnectPlaybackState | null;
+  commands?: ConnectCommand[];
+};
+
+async function postConnectSync(body: {
+  device: LocalConnectDevice;
+  state?: {
+    track: ConnectTrack | null;
+    queue: ConnectTrack[];
+    playing: boolean;
+    progress: number;
+    duration: number;
+    volume: number;
+    shuffle: boolean;
+  };
+  command?: ConnectCommand | { id: string; type: "transfer"; targetId: string };
+}): Promise<ConnectSyncResponse | null> {
+  try {
+    const res = await fetch("/api/player/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      keepalive: true,
+    });
+    if (res.status === 401) return null;
+    if (!res.ok) return null;
+    return (await res.json()) as ConnectSyncResponse;
+  } catch {
+    return null;
+  }
+}
 
 function audioSrcFor(track: PlayerTrack): string {
   const offline = offlineStreamUrl(track.id);
@@ -685,6 +779,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const listenAnchorRef = useRef<{ trackId: string; at: number } | null>(null);
   const applyingRemoteRef = useRef(false);
   const publishRef = useRef<(partial?: Partial<SyncPayload>) => void>(() => {});
+  const localDeviceRef = useRef<LocalConnectDevice>(
+    typeof window === "undefined"
+      ? { id: "", name: "This web browser", kind: "computer" }
+      : detectConnectDevice(),
+  );
+  const followingRemoteRef = useRef(false);
+  const sendConnectCommandRef = useRef<
+    (
+      command:
+        | ConnectCommand
+        | { id: string; type: "transfer"; targetId: string },
+    ) => void
+  >(() => {});
+  const playRef = useRef<(track: PlayerTrack, queue?: PlayerTrack[]) => void>(
+    () => {},
+  );
+  const lastPushedStateAtRef = useRef(0);
 
   const [track, setTrack] = useState<PlayerTrack | null>(null);
   const [queue, setQueue] = useState<PlayerTrack[]>([]);
@@ -701,6 +812,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     karaokeStatusRef.current = karaokeStatus;
   }, [karaokeStatus]);
   const [shuffle, setShuffle] = useState(false);
+  const [connectDevices, setConnectDevices] = useState<ConnectDeviceInfo[]>([]);
+  const [activeConnectDevice, setActiveConnectDevice] =
+    useState<ConnectDeviceInfo | null>(null);
+  const [isRemotePlayback, setIsRemotePlayback] = useState(false);
   const [openPanels, setOpenPanelsState] = useState<OpenPanels>(DEFAULT_PANELS);
   const setOpenPanels = useCallback(
     (update: OpenPanels | ((prev: OpenPanels) => OpenPanels)) => {
@@ -859,6 +974,25 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     payload.ownerId = ownerIdRef.current;
     writeStored(payload);
     channelRef.current?.postMessage({ kind: "sync", payload } satisfies SyncMsg);
+    if (
+      payload.ownerId === tabIdRef.current &&
+      !followingRemoteRef.current &&
+      localDeviceRef.current.id
+    ) {
+      lastPushedStateAtRef.current = payload.updatedAt;
+      void postConnectSync({
+        device: localDeviceRef.current,
+        state: {
+          track: payload.track ? trackToConnect(payload.track) : null,
+          queue: payload.queue.map(trackToConnect),
+          playing: payload.playing,
+          progress: payload.progress,
+          duration: payload.duration,
+          volume: payload.volume,
+          shuffle: Boolean(payload.shuffle),
+        },
+      }).catch(() => null);
+    }
   }, []);
 
   publishRef.current = publish;
@@ -1477,6 +1611,277 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
   }, [applyRemote, isOwner]);
 
+  const applyConnectDevices = useCallback(
+    (devices: ConnectDevice[], ownerId: string | null) => {
+      const self = localDeviceRef.current;
+      const infos: ConnectDeviceInfo[] = devices.map((d) => ({
+        id: d.id,
+        name: d.id === self.id ? selfDeviceLabel(self) : d.name,
+        kind: d.kind,
+        self: d.id === self.id,
+        active: Boolean(ownerId) ? d.id === ownerId : d.id === self.id,
+      }));
+      if (!infos.some((d) => d.self) && self.id) {
+        infos.unshift({
+          id: self.id,
+          name: selfDeviceLabel(self),
+          kind: self.kind,
+          self: true,
+          active: !ownerId || ownerId === self.id,
+        });
+      }
+      setConnectDevices(infos);
+      const active =
+        infos.find((d) => d.active) ?? infos.find((d) => d.self) ?? null;
+      setActiveConnectDevice(active);
+      const remote = Boolean(ownerId) && ownerId !== self.id;
+      followingRemoteRef.current = remote;
+      setIsRemotePlayback(remote);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localDeviceRef.current = detectConnectDevice();
+    let cancelled = false;
+
+    const runCommands = (commands: ConnectCommand[]) => {
+      for (const command of commands) {
+        if (command.type === "release") {
+          followingRemoteRef.current = true;
+          setIsRemotePlayback(true);
+          applyRemote({
+            track: trackRef.current,
+            queue: queueRef.current,
+            playing: playingRef.current,
+            progress: progressRef.current,
+            duration: durationRef.current,
+            volume: volumeRef.current,
+            shuffle: shuffleRef.current,
+            ownerId: `remote-${Date.now()}`,
+            updatedAt: Date.now(),
+          });
+          continue;
+        }
+        if (command.type === "become-owner") {
+          followingRemoteRef.current = false;
+          setIsRemotePlayback(false);
+          ownerIdRef.current = tabIdRef.current;
+          const current = trackRef.current;
+          const audio = audioRef.current;
+          if (current && audio) {
+            setAudioSrc(audio, audioSrcFor(current));
+            const resumeAt = progressRef.current;
+            const seekTo = () => {
+              try {
+                if (Number.isFinite(resumeAt) && resumeAt > 0) {
+                  audio.currentTime = resumeAt;
+                }
+              } catch {
+                /* ignore */
+              }
+            };
+            seekTo();
+            audio.addEventListener("loadedmetadata", seekTo, { once: true });
+            if (playingRef.current) {
+              void playBoth();
+            }
+            publishRef.current({
+              ownerId: tabIdRef.current,
+              playing: playingRef.current,
+              progress: resumeAt,
+            });
+          }
+          continue;
+        }
+        if (command.type === "play-track") {
+          followingRemoteRef.current = false;
+          playRef.current(
+            connectToTrack(command.track),
+            command.queue?.map(connectToTrack),
+          );
+          continue;
+        }
+        if (command.type === "play") {
+          if (!playingRef.current) {
+            const audio = audioRef.current;
+            const current = trackRef.current;
+            if (audio && current) {
+              ownerIdRef.current = tabIdRef.current;
+              setAudioSrc(audio, audioSrcFor(current));
+              void playBoth().then((ok) => {
+                if (!ok) return;
+                playingRef.current = true;
+                setPlaying(true);
+                publishRef.current({
+                  playing: true,
+                  ownerId: tabIdRef.current,
+                });
+              });
+            }
+          }
+          continue;
+        }
+        if (command.type === "pause") {
+          pauseBoth();
+          playingRef.current = false;
+          setPlaying(false);
+          publishRef.current({
+            playing: false,
+            ownerId: tabIdRef.current,
+          });
+          continue;
+        }
+        if (command.type === "toggle") {
+          const audio = audioRef.current;
+          if (!audio || !trackRef.current) continue;
+          if (playingRef.current) {
+            pauseBoth();
+            playingRef.current = false;
+            setPlaying(false);
+            publishRef.current({
+              playing: false,
+              ownerId: tabIdRef.current,
+            });
+          } else {
+            ownerIdRef.current = tabIdRef.current;
+            void playBoth().then((ok) => {
+              if (!ok) return;
+              playingRef.current = true;
+              setPlaying(true);
+              publishRef.current({
+                playing: true,
+                ownerId: tabIdRef.current,
+              });
+            });
+          }
+          continue;
+        }
+        if (command.type === "seek") {
+          const audio = audioRef.current;
+          if (!audio) continue;
+          ownerIdRef.current = tabIdRef.current;
+          audio.currentTime = command.progress;
+          setProgress(command.progress);
+          progressRef.current = command.progress;
+          publishRef.current({
+            progress: command.progress,
+            ownerId: tabIdRef.current,
+          });
+          continue;
+        }
+        if (command.type === "next") {
+          const current = trackRef.current;
+          if (!current) continue;
+          void advanceTargetRef.current(current).then((n) => {
+            if (n) playRef.current(n);
+          });
+          continue;
+        }
+        if (command.type === "prev") {
+          const current = trackRef.current;
+          const audio = audioRef.current;
+          if (!current) continue;
+          if (audio && audio.currentTime > 3) {
+            audio.currentTime = 0;
+            setProgress(0);
+            publishRef.current({ progress: 0, ownerId: tabIdRef.current });
+            continue;
+          }
+          const idx = queueRef.current.findIndex((t) => t.id === current.id);
+          const prevTrack = queueRef.current[idx - 1];
+          if (prevTrack) playRef.current(prevTrack);
+          continue;
+        }
+        if (command.type === "volume") {
+          volumeRef.current = command.volume;
+          setVolumeState(command.volume);
+          applyMixVolumes();
+          continue;
+        }
+        if (command.type === "shuffle") {
+          const next = !shuffleRef.current;
+          shuffleRef.current = next;
+          setShuffle(next);
+          publishRef.current({ shuffle: next, ownerId: tabIdRef.current });
+        }
+      }
+    };
+
+    const tick = async () => {
+      if (cancelled) return;
+      const device = localDeviceRef.current;
+      if (!device.id) return;
+      const data = await postConnectSync({ device });
+      if (cancelled || !data) return;
+
+      const ownerId = data.state?.ownerId ?? null;
+      applyConnectDevices(data.devices ?? [], ownerId);
+
+      if (
+        data.state &&
+        data.state.ownerId &&
+        data.state.ownerId !== device.id &&
+        data.state.updatedAt >= lastPushedStateAtRef.current
+      ) {
+        applyRemote({
+          track: data.state.track ? connectToTrack(data.state.track) : null,
+          queue: (data.state.queue ?? []).map(connectToTrack),
+          playing: data.state.playing,
+          progress: data.state.progress,
+          duration: data.state.duration,
+          volume: data.state.volume,
+          shuffle: data.state.shuffle,
+          ownerId: data.state.ownerId,
+          updatedAt: data.state.updatedAt,
+        });
+      } else if (!data.state?.ownerId || data.state.ownerId === device.id) {
+        followingRemoteRef.current = false;
+        setIsRemotePlayback(false);
+      }
+
+      if (data.commands?.length) {
+        runCommands(data.commands);
+      }
+    };
+
+    sendConnectCommandRef.current = (command) => {
+      const device = localDeviceRef.current;
+      void postConnectSync({ device, command }).then((data) => {
+        if (!data || cancelled) return;
+        applyConnectDevices(data.devices ?? [], data.state?.ownerId ?? null);
+        if (
+          data.state &&
+          data.state.ownerId &&
+          data.state.ownerId !== device.id
+        ) {
+          applyRemote({
+            track: data.state.track ? connectToTrack(data.state.track) : null,
+            queue: (data.state.queue ?? []).map(connectToTrack),
+            playing: data.state.playing,
+            progress: data.state.progress,
+            duration: data.state.duration,
+            volume: data.state.volume,
+            shuffle: data.state.shuffle,
+            ownerId: data.state.ownerId,
+            updatedAt: data.state.updatedAt,
+          });
+        }
+        if (data.commands?.length) runCommands(data.commands);
+      });
+    };
+
+    void tick();
+    const id = window.setInterval(() => {
+      void tick();
+    }, 1600);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [applyConnectDevices, applyMixVolumes, applyRemote, pauseBoth, playBoth]);
+
   const flushListenCredit = useCallback(() => {
     if (!isOwner()) return;
     const audio = audioRef.current;
@@ -1656,6 +2061,29 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const play = useCallback(
     (next: PlayerTrack, nextQueue?: PlayerTrack[]) => {
+      if (followingRemoteRef.current) {
+        sendConnectCommandRef.current({
+          id: newCommandId(),
+          type: "play-track",
+          track: trackToConnect(next),
+          queue: nextQueue?.map(trackToConnect),
+        });
+        applyingRemoteRef.current = true;
+        trackRef.current = next;
+        setTrack(next);
+        if (nextQueue) {
+          queueRef.current = nextQueue;
+          setQueue(nextQueue);
+        }
+        playingRef.current = true;
+        setPlaying(true);
+        setProgress(0);
+        progressRef.current = 0;
+        queueMicrotask(() => {
+          applyingRemoteRef.current = false;
+        });
+        return;
+      }
       const gen = ++playGenRef.current;
       pushRecentPlayedTrack({
         id: next.id,
@@ -1701,8 +2129,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     },
     [claimAndPlay],
   );
+  playRef.current = play;
 
   const toggle = useCallback(() => {
+    if (followingRemoteRef.current) {
+      const shouldPause = playingRef.current;
+      sendConnectCommandRef.current({
+        id: newCommandId(),
+        type: shouldPause ? "pause" : "play",
+      });
+      playingRef.current = !shouldPause;
+      setPlaying(!shouldPause);
+      return;
+    }
     const audio = audioRef.current;
     if (!audio || !track) return;
 
@@ -1807,11 +2246,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const seek = useCallback(
     (ratio: number) => {
+      if (!duration) return;
+      const next = Math.max(0, Math.min(1, ratio)) * duration;
+      if (followingRemoteRef.current) {
+        sendConnectCommandRef.current({
+          id: newCommandId(),
+          type: "seek",
+          progress: next,
+        });
+        setProgress(next);
+        progressRef.current = next;
+        return;
+      }
       const audio = audioRef.current;
-      if (!audio || !duration) return;
+      if (!audio) return;
       const wasPlaying = playingRef.current;
       ownerIdRef.current = tabIdRef.current;
-      const next = Math.max(0, Math.min(1, ratio)) * duration;
       if (track && (!audio.src || audio.src !== new URL(audioSrcFor(track), window.location.origin).href)) {
         setAudioSrc(audio, audioSrcFor(track));
       }
@@ -1854,6 +2304,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setVolumeState(next);
       volumeRef.current = next;
       applyMixVolumes();
+      if (followingRemoteRef.current) {
+        sendConnectCommandRef.current({
+          id: newCommandId(),
+          type: "volume",
+          volume: next,
+        });
+        return;
+      }
       if (isOwner()) publish({ volume: next });
     },
     [applyMixVolumes, isOwner, publish],
@@ -2126,6 +2584,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [track?.id, track?.quality, track?.streamUrl, applyMixVolumes]);
 
   const toggleShuffle = useCallback(() => {
+    if (followingRemoteRef.current) {
+      sendConnectCommandRef.current({ id: newCommandId(), type: "shuffle" });
+      setShuffle((prev) => {
+        const next = !prev;
+        shuffleRef.current = next;
+        return next;
+      });
+      return;
+    }
     setShuffle((prev) => {
       const next = !prev;
       shuffleRef.current = next;
@@ -2137,6 +2604,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const next = useCallback(() => {
     if (!track) return;
+    if (followingRemoteRef.current) {
+      sendConnectCommandRef.current({ id: newCommandId(), type: "next" });
+      return;
+    }
     void (async () => {
       const current = track;
       const n = await advanceTargetRef.current(current);
@@ -2146,6 +2617,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const prev = useCallback(() => {
     if (!track) return;
+    if (followingRemoteRef.current) {
+      sendConnectCommandRef.current({ id: newCommandId(), type: "prev" });
+      return;
+    }
     const audio = audioRef.current;
     ownerIdRef.current = tabIdRef.current;
     if (audio && audio.currentTime > 3) {
@@ -2297,6 +2772,75 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (tab) setQueueTab(tab);
   }, []);
 
+  const transferPlayback = useCallback((deviceId: string) => {
+    const self = localDeviceRef.current;
+    if (!deviceId) return;
+    sendConnectCommandRef.current({
+      id: newCommandId(),
+      type: "transfer",
+      targetId: deviceId,
+    });
+    if (deviceId === self.id) {
+      followingRemoteRef.current = false;
+      setIsRemotePlayback(false);
+      ownerIdRef.current = tabIdRef.current;
+      const current = trackRef.current;
+      const audio = audioRef.current;
+      if (current && audio) {
+        setAudioSrc(audio, audioSrcFor(current));
+        const resumeAt = progressRef.current;
+        const seekTo = () => {
+          try {
+            if (Number.isFinite(resumeAt) && resumeAt > 0) {
+              audio.currentTime = resumeAt;
+            }
+          } catch {
+            /* ignore */
+          }
+        };
+        seekTo();
+        audio.addEventListener("loadedmetadata", seekTo, { once: true });
+        if (playingRef.current) {
+          void playBoth();
+        }
+        publish({
+          ownerId: tabIdRef.current,
+          playing: playingRef.current,
+          progress: resumeAt,
+        });
+      }
+      applyConnectDevices(connectDevices.map((d) => ({
+        id: d.id,
+        name: d.name,
+        kind: d.kind,
+        lastSeen: Date.now(),
+      })), self.id);
+    } else {
+      followingRemoteRef.current = true;
+      setIsRemotePlayback(true);
+      applyRemote({
+        track: trackRef.current,
+        queue: queueRef.current,
+        playing: playingRef.current,
+        progress: progressRef.current,
+        duration: durationRef.current,
+        volume: volumeRef.current,
+        shuffle: shuffleRef.current,
+        ownerId: deviceId,
+        updatedAt: Date.now(),
+      });
+      applyConnectDevices(
+        connectDevices.map((d) => ({
+          id: d.id,
+          name: d.name,
+          kind: d.kind,
+          lastSeen: Date.now(),
+        })),
+        deviceId,
+      );
+    }
+  }, [applyConnectDevices, applyRemote, connectDevices, playBoth, publish]);
+
   const panel: PlayerPanel = openPanels.nowPlaying
     ? "nowPlaying"
     : openPanels.lyrics
@@ -2344,6 +2888,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setQueueTab,
       openQueue,
       progressLabel: `${formatDuration(progress)} / ${formatDuration(duration)}`,
+      connectDevices,
+      activeConnectDevice,
+      isRemotePlayback,
+      transferPlayback,
     }),
     [
       track,
@@ -2377,6 +2925,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       togglePanel,
       queueTab,
       openQueue,
+      connectDevices,
+      activeConnectDevice,
+      isRemotePlayback,
+      transferPlayback,
     ],
   );
 

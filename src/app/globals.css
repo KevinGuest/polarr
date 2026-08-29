@@ -154,7 +154,9 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --mobile-dock-nav-h: 4.15rem;
   --mobile-dock-player-h: 4.15rem;
+  --mobile-connect-bar-h: 1.75rem;
   --mobile-dock-stack: calc(var(--mobile-dock-nav-h) + var(--safe-bottom));
+  --connect: 141 73% 48%;
   /* legacy aliases */
   --mobile-tab-h: var(--mobile-dock-nav-h);
   --mobile-mini-h: var(--mobile-dock-player-h);

@@ -20,16 +20,20 @@ import {
   Shuffle,
   SkipBack,
   SkipForward,
+  Smartphone,
   Sparkles,
+  Tablet,
   Volume1,
   Volume2,
   Wifi,
+  Users,
   X,
 } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { StreamQualityBadge } from "@/components/stream-quality-badge";
 import { TrackContextMenu } from "@/components/track-context-menu";
+import { ConnectPlaybackBar } from "@/components/connect-playback-bar";
 import { usePlayer, type PlayerTrack } from "@/components/player-provider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -503,39 +507,117 @@ function LyricsPanel() {
   );
 }
 
+function ConnectKindIcon({
+  kind,
+  className,
+}: {
+  kind: "phone" | "tablet" | "computer";
+  className?: string;
+}) {
+  const cls = cn("size-5 shrink-0", className);
+  if (kind === "phone") return <Smartphone className={cls} />;
+  if (kind === "tablet") return <Tablet className={cls} />;
+  return <Laptop className={cls} />;
+}
+
 function ConnectBody() {
+  const {
+    connectDevices,
+    activeConnectDevice,
+    transferPlayback,
+    closePanel,
+  } = usePlayer();
+  const self = connectDevices.find((d) => d.self);
+  const active = activeConnectDevice ?? self;
+  const others = connectDevices.filter((d) => d.id !== active?.id);
+
   return (
     <div className="px-4 pb-6">
-      <div className="flex items-center gap-3 rounded-xl bg-muted/50 px-4 py-3.5">
-        <Laptop className="size-5 shrink-0 text-foreground" />
-        <div className="min-w-0 text-sm font-semibold text-foreground">
-          This web browser
+      {active ? (
+        <div className="rounded-xl bg-muted/50 px-4 py-3.5">
+          <button
+            type="button"
+            onClick={() => transferPlayback(active.id)}
+            className="flex w-full items-center gap-3 text-left"
+          >
+            <ConnectKindIcon
+              kind={active.kind}
+              className="text-[#1ed760]"
+            />
+            <div className="min-w-0 flex-1 text-sm font-semibold text-[#1ed760]">
+              {active.name}
+            </div>
+          </button>
+          <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
+            <p className="text-xs text-muted-foreground">
+              Listen with friends anywhere
+            </p>
+            <Link
+              href="/jam"
+              onClick={() => closePanel("devices")}
+              className="inline-flex items-center gap-1.5 rounded-full bg-foreground px-3 py-1.5 text-xs font-semibold text-background"
+            >
+              <Users className="size-3.5" />
+              Start a Jam
+            </Link>
+          </div>
         </div>
-      </div>
+      ) : null}
 
-      <h3 className="mt-6 text-sm font-semibold">No other devices found</h3>
-
-      <ul className="mt-4 space-y-4">
-        <li className="flex gap-3">
-          <Wifi className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 space-y-0.5">
-            <p className="text-sm font-medium">Check your WiFi</p>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Connect the devices you’re using to the same WiFi.
-            </p>
-          </div>
-        </li>
-        <li className="flex gap-3">
-          <MonitorSpeaker className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 space-y-0.5">
-            <p className="text-sm font-medium">Play from another device</p>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              Open Polarr in another browser on this network — it’ll show up
-              here.
-            </p>
-          </div>
-        </li>
-      </ul>
+      {others.length > 0 ? (
+        <ul className="mt-4 space-y-1">
+          {others.map((device) => (
+            <li key={device.id}>
+              <button
+                type="button"
+                onClick={() => transferPlayback(device.id)}
+                className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition-colors hover:bg-muted/40"
+              >
+                <ConnectKindIcon kind={device.kind} />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                  {device.name}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <>
+          <h3 className="mt-6 text-sm font-semibold">Select a device</h3>
+          {self && active?.id !== self.id ? (
+            <button
+              type="button"
+              onClick={() => transferPlayback(self.id)}
+              className="mt-2 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left hover:bg-muted/40"
+            >
+              <ConnectKindIcon kind={self.kind} />
+              <span className="text-sm font-medium">{self.name}</span>
+            </button>
+          ) : null}
+          <ul className="mt-4 space-y-4">
+            <li className="flex gap-3">
+              <Wifi className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 space-y-0.5">
+                <p className="text-sm font-medium">Play on another device</p>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Open Polarr on your phone, desktop app, or another browser
+                  while signed in — it shows up here.
+                </p>
+              </div>
+            </li>
+            <li className="flex gap-3">
+              <MonitorSpeaker className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 space-y-0.5">
+                <p className="text-sm font-medium">Control from anywhere</p>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Pause, skip, and queue from any instance. Audio stays on the
+                  selected device.
+                </p>
+              </div>
+            </li>
+          </ul>
+        </>
+      )}
     </div>
   );
 }
@@ -1256,6 +1338,7 @@ function MobileTrio({
   onDevices: () => void;
   onQueue: () => void;
 }) {
+  const { isRemotePlayback } = usePlayer();
   const items = [
     {
       id: "lyrics" as const,
@@ -1290,9 +1373,11 @@ function MobileTrio({
             aria-pressed={active}
             className={cn(
               "flex size-11 items-center justify-center rounded-full transition-colors",
-              active
-                ? "bg-white/15 text-white"
-                : "text-white/50 hover:text-white",
+              item.id === "devices" && isRemotePlayback
+                ? "text-[#1ed760]"
+                : active
+                  ? "bg-white/15 text-white"
+                  : "text-white/50 hover:text-white",
             )}
           >
             <Icon className="size-5" strokeWidth={1.75} />
@@ -1556,6 +1641,7 @@ function MobilePlayerSheet() {
               onNext={next}
               onVolume={setVolume}
             />
+            <ConnectPlaybackBar compact className="lg:hidden" />
             <MobileTrio
               view={view}
               onLyrics={showLyrics}

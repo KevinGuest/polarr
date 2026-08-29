@@ -858,11 +858,6 @@ fn create_or_reveal_server(
     }
 
     let (pos, size) = content_bounds(&window)?;
-    let (ready_tx, ready_rx) = mpsc::channel();
-    let ready_once = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let callback_once = ready_once.clone();
-    let callback_app = app.clone();
-    let callback_target = parsed.clone();
     let builder = WebviewBuilder::new(SERVER_WEBVIEW_LABEL, WebviewUrl::External(parsed.clone()))
         .initialization_script(INIT_SCRIPT)
         .focused(true)
@@ -876,26 +871,6 @@ fn create_or_reveal_server(
                 return;
             }
 
-            let result = (|| {
-                pin_shell_to_titlebar(&callback_app)?;
-                apply_layout(&callback_app)?;
-                let Some(webview) = callback_app.get_webview(SERVER_WEBVIEW_LABEL) else {
-                    return Err("server webview disappeared while loading".to_string());
-                };
-                webview
-                    .show()
-                    .map_err(|e| format!("show server webview: {e}"))?;
-                let _ = webview.set_focus();
-                reassert_desktop_markers(&webview);
-                Ok(())
-            })();
-            if result.is_ok() {
-                schedule_marker_kicks(callback_app.clone());
-                schedule_connected_retries(callback_app.clone());
-            }
-            let _ = ready_tx.send(result);
-        });
-
     // Keep the setup shell full-size until the child exists. In particular,
     // WebView2/WKWebView creation can fail for machine-specific reasons; if we
     // shrink the only working webview first, the resulting error is hidden in
@@ -903,14 +878,21 @@ fn create_or_reveal_server(
     let wv = window
         .add_child(builder, pos, size)
         .map_err(|e| format!("create server webview: {e}"))?;
-    wv.hide()
-        .map_err(|e| format!("hide loading server webview: {e}"))?;
+    if let Err(err) = pin_shell_to_titlebar(app) {
+        let _ = wv.close();
+        return Err(err);
+    }
+    let _ = wv.navigate(parsed);
+    kick_server_load(&wv, &url);
+    apply_layout(app)?;
+    let _ = wv.show();
+    let _ = wv.set_focus();
+    #[cfg(target_os = "macos")]
+    crate::macos_window::layout_connected(app, &url);
 
-    // Do not immediately navigate a WebView2 that was just constructed with
-    // WebviewUrl::External. A second navigation during controller startup can
-    // cancel the initial request while still leaving the control's dark
-    // background visible. The page-load callback owns reveal and layout.
-    Ok(Some(ready_rx))
+    schedule_marker_kicks(app.clone());
+    schedule_connected_retries(app.clone());
+    Ok(())
 }
 
 #[tauri::command]

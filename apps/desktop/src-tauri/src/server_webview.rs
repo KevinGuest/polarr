@@ -767,15 +767,14 @@ pub async fn open_server_webview(app: AppHandle, url: String) -> Result<(), Stri
 fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> {
     let parsed = parse_external(&url)?;
 
-    #[cfg(target_os = "macos")]
-    {
-        let handle = app.clone();
-        return run_on_main_sync(&app, move || create_or_reveal_server(&handle, parsed, url));
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        create_or_reveal_server(&app, parsed, url)
-    }
+    // WebView2 (Windows) and WKWebView (macOS) must be created and driven on the
+    // UI thread. Tauri runs async commands on a worker thread, so hop to main on
+    // every platform. Creating the child webview off the UI thread on Windows
+    // leaves WebView2 painting only its background color — a black content area
+    // below the title bar — until a later main-thread layout or resize forces it
+    // to composite.
+    let handle = app.clone();
+    run_on_main_sync(&app, move || create_or_reveal_server(&handle, parsed, url))
 }
 
 fn schedule_connected_retries(app: AppHandle) {

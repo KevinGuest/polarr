@@ -7,7 +7,7 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -761,6 +761,20 @@ pub async fn open_server_webview(app: AppHandle, url: String) -> Result<(), Stri
     mark_opening(&app);
     let result = open_server_webview_inner(app.clone(), url);
     clear_opening(&app);
+    if result.is_err() {
+        // Opening is a transaction: never leave the shell pinned to the title
+        // bar when child-webview creation or navigation fails. That state makes
+        // the entire setup UI look like a black screen and prevents the user
+        // from correcting the URL without restarting the app.
+        let rollback = app.clone();
+        let _ = run_on_main_sync(&app, move || {
+            if let Some(wv) = rollback.get_webview(SERVER_WEBVIEW_LABEL) {
+                let _ = wv.close();
+            }
+            clear_server_url_memory();
+            fill_shell(&rollback)
+        });
+    }
     result
 }
 
@@ -774,7 +788,19 @@ fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> 
     // below the title bar — until a later main-thread layout or resize forces it
     // to composite.
     let handle = app.clone();
-    run_on_main_sync(&app, move || create_or_reveal_server(&handle, parsed, url))
+    let ready = run_on_main_sync(&app, move || create_or_reveal_server(&handle, parsed, url))?;
+
+    // add_child only confirms that the native WebView2/WKWebView control was
+    // created. It does not mean its first document loaded. Keep the working
+    // setup shell in front until the child reports a finished page load; this
+    // also turns a stalled navigation into a recoverable error instead of a
+    // permanently black content area.
+    if let Some(ready) = ready {
+        ready.recv_timeout(Duration::from_secs(20)).map_err(|_| {
+            "The server page did not finish loading. Check the URL and try again.".to_string()
+        })??;
+    }
+    Ok(())
 }
 
 fn schedule_connected_retries(app: AppHandle) {
@@ -801,7 +827,7 @@ fn create_or_reveal_server(
     app: &AppHandle,
     parsed: Url,
     url: String,
-) -> Result<(), String> {
+) -> Result<Option<mpsc::Receiver<Result<(), String>>>, String> {
     remember_server_url(&url);
     let window = app
         .get_window("main")
@@ -828,30 +854,63 @@ fn create_or_reveal_server(
         let _ = existing.set_focus();
         schedule_marker_kicks(app.clone());
         schedule_connected_retries(app.clone());
-        return Ok(());
+        return Ok(None);
     }
 
     let (pos, size) = content_bounds(&window)?;
-    pin_shell_to_titlebar(app)?;
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let ready_once = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let callback_once = ready_once.clone();
+    let callback_app = app.clone();
+    let callback_target = parsed.clone();
     let builder = WebviewBuilder::new(SERVER_WEBVIEW_LABEL, WebviewUrl::External(parsed.clone()))
         .initialization_script(INIT_SCRIPT)
         .focused(true)
-        .background_color(tauri::webview::Color(9, 9, 11, 255));
+        .background_color(tauri::webview::Color(9, 9, 11, 255))
+        .on_page_load(move |_webview, payload| {
+            if !matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+                || href_is_blank(payload.url().as_str())
+                || !same_origin(payload.url(), &callback_target)
+                || callback_once.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                return;
+            }
 
+            let result = (|| {
+                pin_shell_to_titlebar(&callback_app)?;
+                apply_layout(&callback_app)?;
+                let Some(webview) = callback_app.get_webview(SERVER_WEBVIEW_LABEL) else {
+                    return Err("server webview disappeared while loading".to_string());
+                };
+                webview
+                    .show()
+                    .map_err(|e| format!("show server webview: {e}"))?;
+                let _ = webview.set_focus();
+                reassert_desktop_markers(&webview);
+                Ok(())
+            })();
+            if result.is_ok() {
+                schedule_marker_kicks(callback_app.clone());
+                schedule_connected_retries(callback_app.clone());
+            }
+            let _ = ready_tx.send(result);
+        }); // end on_page_load
+
+    // Keep the setup shell full-size until the child exists. In particular,
+    // WebView2/WKWebView creation can fail for machine-specific reasons; if we
+    // shrink the only working webview first, the resulting error is hidden in
+    // the 48px title bar and the rest of the window appears black.
     let wv = window
         .add_child(builder, pos, size)
         .map_err(|e| format!("create server webview: {e}"))?;
-    let _ = wv.navigate(parsed);
-    kick_server_load(&wv, &url);
-    apply_layout(app)?;
-    let _ = wv.show();
-    let _ = wv.set_focus();
-    #[cfg(target_os = "macos")]
-    crate::macos_window::layout_connected(app, &url);
+    wv.hide()
+        .map_err(|e| format!("hide loading server webview: {e}"))?;
 
-    schedule_marker_kicks(app.clone());
-    schedule_connected_retries(app.clone());
-    Ok(())
+    // Do not immediately navigate a WebView2 that was just constructed with
+    // WebviewUrl::External. A second navigation during controller startup can
+    // cancel the initial request while still leaving the control's dark
+    // background visible. The page-load callback owns reveal and layout.
+    Ok(Some(ready_rx))
 }
 
 #[tauri::command]

@@ -684,7 +684,9 @@ pub fn install_resize_handler(app: &AppHandle) {
         let _ = window.on_window_event(move |event| {
             if matches!(
                 event,
-                tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }
+                tauri::WindowEvent::Resized(_)
+                    | tauri::WindowEvent::ScaleFactorChanged { .. }
+                    | tauri::WindowEvent::Focused(_)
             ) {
                 #[cfg(target_os = "macos")]
                 crate::macos_window::align_traffic_lights(&handle);

@@ -1,9 +1,11 @@
 #import <AppKit/AppKit.h>
 #import <WebKit/WebKit.h>
+#import <objc/runtime.h>
 
 static const CGFloat kTrafficLightX = 16.0;
-static const CGFloat kTrafficLightY = 18.0;
 static const CGFloat kTitlebarH = 48.0;
+
+static void polarr_install_traffic_observers(NSWindow *window);
 
 void polarr_macos_paint_window(void *ns_window) {
   if (ns_window == NULL) {
@@ -18,6 +20,7 @@ void polarr_macos_paint_window(void *ns_window) {
   window.backgroundColor = color;
   window.titlebarAppearsTransparent = YES;
   window.titleVisibility = NSWindowTitleHidden;
+  polarr_install_traffic_observers(window);
 }
 
 void polarr_macos_paint_webview(void *wk_webview) {
@@ -41,6 +44,7 @@ void polarr_macos_align_traffic_lights(void *ns_window) {
   NSWindow *window = (__bridge NSWindow *)ns_window;
   window.titleVisibility = NSWindowTitleHidden;
   window.titlebarAppearsTransparent = YES;
+  polarr_install_traffic_observers(window);
 
   NSButton *closeBtn = [window standardWindowButton:NSWindowCloseButton];
   NSButton *minBtn = [window standardWindowButton:NSWindowMiniaturizeButton];
@@ -55,25 +59,76 @@ void polarr_macos_align_traffic_lights(void *ns_window) {
     return;
   }
 
-  CGFloat buttonHeight = NSHeight(closeBtn.frame);
-  CGFloat titleBarHeight = buttonHeight + kTrafficLightY;
+  // Match the 48px HTML title bar and center the 12pt lights on that line.
+  // Only growing the container (tao's trafficLightPosition trick) leaves
+  // NSTitlebarView at ~22pt, so the buttons stay glued to the top edge.
   NSRect windowFrame = window.frame;
   NSRect containerFrame = titleBarContainer.frame;
-  containerFrame.size.height = titleBarHeight;
-  containerFrame.origin.y = NSHeight(windowFrame) - titleBarHeight;
+  containerFrame.size.height = kTitlebarH;
+  containerFrame.origin.y = NSHeight(windowFrame) - kTitlebarH;
   titleBarContainer.frame = containerFrame;
+
+  NSRect titleBarFrame = titleBar.frame;
+  titleBarFrame.origin = NSZeroPoint;
+  titleBarFrame.size = containerFrame.size;
+  titleBar.frame = titleBarFrame;
 
   CGFloat spaceBetween = NSMinX(minBtn.frame) - NSMinX(closeBtn.frame);
   if (spaceBetween < 8.0) {
     spaceBetween = 20.0;
   }
 
+  CGFloat buttonHeight = NSHeight(closeBtn.frame);
+  CGFloat btnY = floor((kTitlebarH - buttonHeight) / 2.0);
+
   NSButton *buttons[3] = {closeBtn, minBtn, zoomBtn};
   for (NSInteger i = 0; i < 3; i++) {
     NSRect rect = buttons[i].frame;
     rect.origin.x = kTrafficLightX + (CGFloat)i * spaceBetween;
-    [buttons[i] setFrameOrigin:rect.origin];
+    rect.origin.y = btnY;
+    buttons[i].frame = rect;
   }
+}
+
+static void polarr_install_traffic_observers(NSWindow *window) {
+  static const void *kPolarrTrafficObs = &kPolarrTrafficObs;
+  if (objc_getAssociatedObject(window, kPolarrTrafficObs)) {
+    return;
+  }
+  objc_setAssociatedObject(window, kPolarrTrafficObs, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+  NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+  void (^realign)(NSNotification *) = ^(NSNotification *note) {
+    NSWindow *w = note.object;
+    if (w) {
+      polarr_macos_align_traffic_lights((__bridge void *)w);
+    }
+  };
+  // Become-key/main fire when the hidden launch window is finally shown.
+  // Skip DidResize here — changing the titlebar frame can emit it.
+  for (NSNotificationName name in @[
+         NSWindowDidBecomeKeyNotification,
+         NSWindowDidBecomeMainNotification,
+         NSWindowDidDeminiaturizeNotification,
+         NSWindowDidChangeBackingPropertiesNotification
+       ]) {
+    [nc addObserverForName:name
+                      object:window
+                       queue:[NSOperationQueue mainQueue]
+                  usingBlock:realign];
+  }
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    polarr_macos_align_traffic_lights((__bridge void *)window);
+  });
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(80 * NSEC_PER_MSEC)),
+                 dispatch_get_main_queue(), ^{
+                   polarr_macos_align_traffic_lights((__bridge void *)window);
+                 });
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(250 * NSEC_PER_MSEC)),
+                 dispatch_get_main_queue(), ^{
+                   polarr_macos_align_traffic_lights((__bridge void *)window);
+                 });
 }
 
 static void polarr_collect_wk(NSView *root, NSMutableArray<WKWebView *> *out) {

@@ -11,8 +11,10 @@ const config: CapacitorConfig = {
     allowNavigation: ["*"],
   },
   ios: {
-    contentInset: "automatic",
-    backgroundColor: "#0c0b12",
+    // never = webview fills the screen; the web UI pads with safe-area insets.
+    // automatic inset the WKWebView and left black bars above/below the app.
+    contentInset: "never",
+    backgroundColor: "#09090b",
     preferredContentMode: "mobile",
     scrollEnabled: true,
     allowsLinkPreview: false,

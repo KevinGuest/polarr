@@ -524,7 +524,7 @@ where
     })
     .map_err(|e| format!("dispatch main thread: {e}"))?;
     rx.recv_timeout(Duration::from_secs(8))
-        .map_err(|_| "timed out waiting for the UI thread".into())?
+        .map_err(|_| "timed out waiting for the UI thread".to_string())?
 }
 
 /// The shell webview fills the whole window by default. On macOS that opaque
@@ -593,7 +593,7 @@ pub(crate) fn dispatch_fill_shell(app: &AppHandle) {
 
 fn apply_layout_on_main(app: &AppHandle) {
     let handle = app.clone();
-    let _ = run_on_main_sync(&handle, move || apply_layout(&handle));
+    let _ = run_on_main_sync(&handle.clone(), move || apply_layout(&handle));
 }
 
 fn parse_external(url: &str) -> Result<Url, String> {

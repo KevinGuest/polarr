@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { LibraryCreateMenu } from "@/components/library-create-menu";
+import { ConnectPlaybackBar } from "@/components/connect-playback-bar";
 import { usePlayer } from "@/components/player-provider";
 import { cn, formatTrackArtistLine } from "@/lib/utils";
 
@@ -156,6 +157,8 @@ export function MobileBottomDock() {
             </div>
           </div>
         ) : null}
+
+        <ConnectPlaybackBar compact />
 
         <nav
           aria-label="Primary"

@@ -1,5 +1,7 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { LogicalPosition } from "@tauri-apps/api/dpi";
+import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./styles.css";
@@ -11,6 +13,13 @@ const app = document.querySelector<HTMLDivElement>("#app")!;
 const CHROME_CHANNEL = "polarr-desktop-chrome";
 const CHROME_UP_EVENT = "polarr-desktop-chrome-up";
 const CHROME_DOWN_EVENT = "polarr-desktop-chrome-down";
+
+function isMacPlatform(): boolean {
+  return (
+    /Macintosh|Mac OS X/i.test(navigator.userAgent) &&
+    !/iPhone|iPad|iPod/i.test(navigator.userAgent)
+  );
+}
 
 type AuthState = {
   authenticated: boolean;
@@ -34,20 +43,41 @@ let authState: AuthState = {
 
 let serverOpen = false;
 
+if (isMacPlatform()) {
+  document.documentElement.classList.add("mac");
+}
+
 app.innerHTML = `
   <div class="app-frame">
     <header class="titlebar" id="titlebar">
       <div class="titlebar-drag" data-tauri-drag-region aria-hidden="true"></div>
-      <div class="titlebar-left">
-        <div class="menu-wrap">
-          <button type="button" class="tb-btn" id="menu-btn" title="Menu" aria-label="Menu" aria-haspopup="menu" aria-expanded="false">
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-              <circle cx="3" cy="8" r="1.35" fill="currentColor"/>
-              <circle cx="8" cy="8" r="1.35" fill="currentColor"/>
-              <circle cx="13" cy="8" r="1.35" fill="currentColor"/>
-            </svg>
-          </button>
-        </div>
+      <div class="mac-traffic" id="mac-traffic" aria-label="Window">
+        <button type="button" class="traffic-btn traffic-close" id="mac-close" title="Close" aria-label="Close">
+          <svg class="traffic-glyph" viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M3 3l6 6M9 3 3 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button type="button" class="traffic-btn traffic-min" id="mac-min" title="Minimize" aria-label="Minimize">
+          <svg class="traffic-glyph" viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M2.5 6h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button type="button" class="traffic-btn traffic-zoom" id="mac-zoom" title="Maximize" aria-label="Maximize">
+          <svg class="traffic-glyph" viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M2.8 6h6.4M6 2.8v6.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <div class="menu-wrap">
+        <button type="button" class="tb-btn" id="menu-btn" title="Menu" aria-label="Menu" aria-haspopup="menu" aria-expanded="false">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <circle cx="3" cy="8" r="1.35" fill="currentColor"/>
+            <circle cx="8" cy="8" r="1.35" fill="currentColor"/>
+            <circle cx="13" cy="8" r="1.35" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
+      <div class="titlebar-nav">
         <button type="button" class="tb-btn" id="nav-back" title="Back" aria-label="Back">
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
             <path d="M10.2 2.6 4.8 8l5.4 5.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -103,6 +133,8 @@ app.innerHTML = `
             <span id="profile-initial">?</span>
           </button>
         </div>
+      </div>
+      <div class="win-controls">
         <button type="button" class="win-btn" id="win-min" title="Minimize" aria-label="Minimize">
           <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
             <path d="M2.5 6h7" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
@@ -186,7 +218,7 @@ function isInteractiveTitlebarTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   return Boolean(
     target.closest(
-      "button, input, a, label, .menu-wrap, .profile-wrap, .titlebar-search, .titlebar-brand-btn",
+      "button, input, a, label, .menu-wrap, .profile-wrap, .titlebar-search, .titlebar-brand-btn, .mac-traffic, .win-controls, .titlebar-nav",
     ),
   );
 }
@@ -270,9 +302,7 @@ const MENU_WINDOW_LABEL = "chrome-menu";
 /** Transparent inset so CSS shadow isn't clipped; OS shadow stays off (Win draws a 1px frame). */
 const MENU_SHADOW_PAD = 14;
 const MENU_WIDTH = 192;
-const isMac =
-  /Macintosh|Mac OS X/i.test(navigator.userAgent) &&
-  !/iPhone|iPad|iPod/i.test(navigator.userAgent);
+const isMac = isMacPlatform();
 /** Which titlebar control owns the open (or just-closed) menu — used for click-to-toggle. */
 let menuAnchorEl: HTMLElement | null = null;
 let menuClosedAt = 0;
@@ -299,11 +329,51 @@ async function closeChromeMenu() {
   menuClosedAt = Date.now();
 }
 
+async function openNativeChromeMenu(
+  anchor: HTMLElement,
+  items: ChromeMenuItem[],
+) {
+  const built = [];
+  for (const item of items) {
+    if (item.kind === "separator") {
+      built.push(await PredefinedMenuItem.new({ item: "Separator" }));
+      continue;
+    }
+    if (item.kind === "label") {
+      built.push(await MenuItem.new({ text: item.text, enabled: false }));
+      continue;
+    }
+    const id = item.id;
+    built.push(
+      await MenuItem.new({
+        id,
+        text: item.text,
+        action: () => {
+          void emit("polarr-chrome-menu-action", { id });
+        },
+      }),
+    );
+  }
+  const menu = await Menu.new({ items: built });
+  const rect = anchor.getBoundingClientRect();
+  await menu.popup(new LogicalPosition(rect.left, rect.bottom + 4));
+}
+
 async function openChromeMenu(
   anchor: HTMLElement,
   items: ChromeMenuItem[],
   align: "start" | "end",
 ) {
+  if (isMac) {
+    menuAnchorEl = anchor;
+    try {
+      await openNativeChromeMenu(anchor, items);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Menu failed to open");
+    }
+    return;
+  }
+
   await closeChromeMenu();
   menuAnchorEl = anchor;
 
@@ -348,7 +418,6 @@ async function openChromeMenu(
     skipTaskbar: true,
     focus: true,
     visible: true,
-    parent: "main",
     theme: "dark",
     backgroundColor: isMac ? "#09090b" : "#00000000",
   });
@@ -397,6 +466,11 @@ async function toggleChromeMenu(
   items: ChromeMenuItem[],
   align: "start" | "end",
 ) {
+  if (isMac) {
+    await openChromeMenu(anchor, items, align);
+    return;
+  }
+
   const existing = await WebviewWindow.getByLabel(MENU_WINDOW_LABEL);
   const justClosedSame =
     !existing &&
@@ -472,7 +546,7 @@ async function openAppMenu(anchor: HTMLElement) {
     { kind: "separator" },
     { kind: "action", id: "quit", text: "Quit Polarr", danger: true },
   ];
-  await toggleChromeMenu(anchor, items, "start");
+  await toggleChromeMenu(anchor, items, isMac ? "end" : "start");
 }
 
 async function openAccountMenu(anchor: HTMLElement) {
@@ -706,6 +780,7 @@ async function showSetup(prefill?: string) {
 async function showServer(url: string) {
   setChromeAuthenticated(false);
   const target = withDesktopParam(url);
+  setupView.hidden = true;
   try {
     await invoke("open_server_webview", { url: target });
   } catch (err) {
@@ -716,7 +791,6 @@ async function showServer(url: string) {
     button.textContent = "Connect";
     return;
   }
-  setupView.hidden = true;
   serverOpen = true;
   startChromeUrlPoll();
   // Announce until the content bridge answers with auth.
@@ -766,17 +840,30 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
-document.querySelector("#win-min")!.addEventListener("click", () => {
+function bindWindowButton(
+  selector: string,
+  handler: (event: Event) => void,
+) {
+  document.querySelectorAll(selector).forEach((el) => {
+    el.addEventListener("click", handler);
+  });
+}
+
+bindWindowButton("#win-min, #mac-min", () => {
   void appWindow.minimize();
 });
 
-maxBtn.addEventListener("click", () => {
+bindWindowButton("#win-max, #mac-zoom", () => {
   void appWindow.toggleMaximize().then(syncMaximizedUi);
 });
 
-document.querySelector("#win-close")!.addEventListener("click", () => {
+bindWindowButton("#win-close, #mac-close", () => {
   void invoke("discord_clear_presence").catch(() => null);
   void appWindow.close();
+});
+
+void appWindow.onFocusChanged(({ payload: focused }) => {
+  document.documentElement.classList.toggle("is-blurred", !focused);
 });
 
 void listen(CHROME_UP_EVENT, (event) => {

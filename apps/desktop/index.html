@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <title>Polarr</title>
+    <script>
+      if (
+        /Macintosh|Mac OS X/i.test(navigator.userAgent) &&
+        !/iPhone|iPad|iPod/i.test(navigator.userAgent)
+      ) {
+        document.documentElement.classList.add("mac");
+      }
+    </script>
     <link rel="icon" type="image/png" href="/polarr-icon.png" />
   </head>
   <body>

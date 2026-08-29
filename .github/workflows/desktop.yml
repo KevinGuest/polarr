@@ -47,6 +47,43 @@ jobs:
         working-directory: apps/desktop
         run: npm ci
 
+      # Empty APPLE_* env vars make Tauri try (and fail) to import a blank cert.
+      # Only export them when a real Developer ID .p12 is present.
+      - name: Enable Apple signing and notarization
+        if: runner.os == 'macOS'
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          NOTARY_APPLE_ID: ${{ secrets.APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$CERT" ]; then
+            echo "APPLE_CERTIFICATE is not set; shipping an unsigned macOS build."
+            echo "Gatekeeper will block downloaded copies until a Developer ID cert + notarization secrets are added."
+            exit 0
+          fi
+          {
+            echo "APPLE_CERTIFICATE<<CERT_EOF"
+            printf '%s\n' "$CERT"
+            echo "CERT_EOF"
+            echo "APPLE_CERTIFICATE_PASSWORD<<PW_EOF"
+            printf '%s\n' "$CERT_PASSWORD"
+            echo "PW_EOF"
+            echo "APPLE_SIGNING_IDENTITY=$SIGNING_IDENTITY"
+          } >> "$GITHUB_ENV"
+          if [ -z "$NOTARY_APPLE_ID" ] || [ -z "$NOTARY_PASSWORD" ] || [ -z "$NOTARY_TEAM_ID" ]; then
+            echo "::warning::Certificate present but APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID are incomplete. App will be signed but not notarized, so Gatekeeper will still block downloads."
+            exit 0
+          fi
+          {
+            echo "APPLE_ID=$NOTARY_APPLE_ID"
+            echo "APPLE_PASSWORD=$NOTARY_PASSWORD"
+            echo "APPLE_TEAM_ID=$NOTARY_TEAM_ID"
+          } >> "$GITHUB_ENV"
+          echo "Apple Developer ID signing + notarization enabled."
+
       - name: Build and upload release assets
         uses: tauri-apps/tauri-action@v0
         env:
@@ -69,11 +106,19 @@ jobs:
 
             Connect on first launch with your self-hosted Polarr server URL.
 
-            ### macOS unsigned builds
+            ### macOS: “Apple could not verify Polarr”
 
-            If Gatekeeper blocks the app, right-click **Polarr.app** → **Open**, or run:
+            Unsigned builds are quarantined by Gatekeeper. After copying **Polarr.app** to Applications:
 
-            `xattr -cr /Applications/Polarr.app`
+            1. **System Settings → Privacy & Security**
+            2. Scroll to **Polarr was blocked** → **Open Anyway**
+            3. Confirm **Open**
+
+            Or in Terminal:
+
+            `xattr -cr /Applications/Polarr.app && open /Applications/Polarr.app`
+
+            Right-click → Open is unreliable on macOS Sequoia and later.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}

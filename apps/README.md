@@ -45,8 +45,8 @@ After a successful release build:
 
 | Artifact | Path |
 | --- | --- |
-| **NSIS installer (ship this)** | `apps/desktop/src-tauri/target/release/bundle/nsis/Polarr_0.2.0_x64-setup.exe` |
-| MSI (optional / enterprise) | `apps/desktop/src-tauri/target/release/bundle/msi/Polarr_0.2.0_x64_en-US.msi` |
+| **NSIS installer (ship this)** | `apps/desktop/src-tauri/target/release/bundle/nsis/Polarr_0.2.1_x64-setup.exe` |
+| MSI (optional / enterprise) | `apps/desktop/src-tauri/target/release/bundle/msi/Polarr_0.2.1_x64_en-US.msi` |
 | Unpackaged binary | `apps/desktop/src-tauri/target/release/polarr-desktop.exe` |
 
 Installer metadata (product name **Polarr**, publisher **Polarr**, version from `tauri.conf.json` / package) and the app icon (`icons/icon.ico`) are wired for Start Menu / desktop shortcuts. NSIS/WiX bitmaps live in `src-tauri/installer-assets/` (regenerate with `npm run installer-assets` after changing `public/polarr-icon.png` or theme colors in `scripts/generate-installer-assets.ps1`). Bitmaps are **24-bit BMP** at stock sizes (NSIS sidebar 164×314, header 150×57; WiX dialog 493×312 with branding only in the left ~164px, banner 493×58). Do not full-bleed dark art under wizard text — MUI/WiX draw dark copy on the light panel.
@@ -81,24 +81,25 @@ After a release build:
 
 | Artifact | Path |
 | --- | --- |
-| **DMG (ship this)** | `src-tauri/target/universal-apple-darwin/release/bundle/dmg/Polarr_0.2.0_universal.dmg` |
+| **DMG (ship this)** | `src-tauri/target/universal-apple-darwin/release/bundle/dmg/Polarr_0.2.1_universal.dmg` |
 | App bundle | `src-tauri/target/universal-apple-darwin/release/bundle/macos/Polarr.app` |
 
 `Info.plist` allows cleartext `http://` to LAN / Umbrel servers (same as iOS). Offline downloads and Discord Rich Presence work the same as Windows.
 
-**Gatekeeper:** CI builds are unsigned unless you add Apple signing secrets (see below). Users may need **Right-click → Open** the first time, or:
+**Gatekeeper:** Downloaded unsigned builds show *Apple could not verify “Polarr” is free of malware…* Right-click → Open is unreliable on macOS Sequoia+. After copying the app to `/Applications`:
 
-```bash
-xattr -cr /Applications/Polarr.app
-```
+1. **System Settings → Privacy & Security** → **Open Anyway** next to the Polarr blocked message
+2. Or: `xattr -cr /Applications/Polarr.app && open /Applications/Polarr.app`
+
+That dialog goes away only for **Developer ID–signed and notarized** builds (see Apple secrets below).
 
 ### Ship via GitHub Actions
 
 Push a desktop tag (version comes from `apps/desktop/src-tauri/tauri.conf.json`):
 
 ```bash
-git tag desktop-v0.2.0
-git push origin desktop-v0.2.0
+git tag desktop-v0.2.1
+git push origin desktop-v0.2.1
 ```
 
 Workflow: [`.github/workflows/desktop.yml`](../.github/workflows/desktop.yml) — builds **macOS universal DMG** + **Windows NSIS**, publishes **`latest.json`** for auto-update, and opens a draft GitHub Release.
@@ -122,14 +123,18 @@ The **public** key lives in `apps/desktop/src-tauri/tauri.conf.json` (`plugins.u
 
 **Important:** Auto-update only works when the GitHub **Latest** release is a desktop release that includes `latest.json`. Web-only tags (`v0.6.x`) should not be published as the Latest GitHub Release unless they also ship desktop updater assets.
 
-Optional repo secrets for signed/notarized macOS builds:
+**macOS notarization** (required to skip Gatekeeper for GitHub downloads). Enroll in the [Apple Developer Program](https://developer.apple.com/programs/), then create a **Developer ID Application** certificate (not “Apple Development”). CI only enables signing when `APPLE_CERTIFICATE` is non-empty, so missing secrets still produce an unsigned DMG instead of failing the job.
 
 | Secret | Purpose |
 | --- | --- |
-| `APPLE_CERTIFICATE` | Base64 `.p12` distribution cert |
-| `APPLE_CERTIFICATE_PASSWORD` | Export password |
-| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: …` |
-| `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` | Notarization |
+| `APPLE_CERTIFICATE` | Base64 of the exported `.p12` (`openssl base64 -A -in cert.p12`) |
+| `APPLE_CERTIFICATE_PASSWORD` | Password used when exporting the `.p12` |
+| `APPLE_SIGNING_IDENTITY` | Exact Keychain name, e.g. `Developer ID Application: Your Name (TEAMID)` |
+| `APPLE_ID` | Apple ID email |
+| `APPLE_PASSWORD` | [App-specific password](https://appleid.apple.com) (not your Apple ID password) |
+| `APPLE_TEAM_ID` | 10-character Team ID from [Membership](https://developer.apple.com/account) |
+
+After the secrets are set, retag / rerun **Desktop release**. Tauri signs with Hardened Runtime, submits to notarytool, and staples the ticket onto the DMG.
 
 ### iOS (Capacitor)
 

@@ -17,6 +17,10 @@
   font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
 }
 
+html.mac {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -56,7 +60,8 @@ body {
   flex: 0 0 var(--titlebar-h);
   height: var(--titlebar-h);
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: auto auto 1fr auto auto;
+  grid-template-areas: "menu nav center right win";
   align-items: stretch;
   background: var(--titlebar);
   border-bottom: 1px solid var(--border);
@@ -67,6 +72,12 @@ body {
   overflow: visible;
 }
 
+html.mac .titlebar {
+  grid-template-areas: "traffic nav center right menu";
+  padding-left: 12px;
+  padding-right: 6px;
+}
+
 .titlebar-drag {
   position: absolute;
   inset: 0;
@@ -75,26 +86,122 @@ body {
   height: 100%;
 }
 
-.titlebar-left,
+html.mac .titlebar-drag {
+  /* Keep the OS drag region off traffic lights, nav, and the trailing menu. */
+  left: 148px;
+  right: 48px;
+}
+
+.titlebar-nav,
 .titlebar-right,
-.titlebar-center {
+.titlebar-center,
+.menu-wrap,
+.mac-traffic,
+.win-controls {
   position: relative;
   z-index: 1;
 }
 
-.titlebar-left,
-.titlebar-right {
+.titlebar-nav,
+.titlebar-right,
+.win-controls,
+.mac-traffic {
   display: flex;
   align-items: center;
   flex: 0 0 auto;
 }
 
-.titlebar-left {
-  grid-column: 1;
+.titlebar-nav {
+  grid-area: nav;
   justify-self: start;
   gap: 2px;
-  padding-left: 8px;
   min-width: 0;
+}
+
+html:not(.mac) .titlebar-nav {
+  padding-left: 2px;
+}
+
+html:not(.mac) .menu-wrap {
+  padding-left: 8px;
+}
+
+.menu-wrap {
+  grid-area: menu;
+  display: flex;
+  align-items: center;
+}
+
+.mac-traffic {
+  grid-area: traffic;
+  display: none;
+  gap: 8px;
+  height: 100%;
+  padding: 0 10px 0 4px;
+}
+
+html.mac .mac-traffic {
+  display: flex;
+}
+
+.traffic-btn {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: 50%;
+  border: 0.5px solid rgba(0, 0, 0, 0.18);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  flex: 0 0 auto;
+  background: #4a4a4e;
+}
+
+.traffic-close {
+  background: #ff5f57;
+  color: #4d0000;
+}
+
+.traffic-min {
+  background: #febc2e;
+  color: #995700;
+}
+
+.traffic-zoom {
+  background: #28c840;
+  color: #006500;
+}
+
+html.is-blurred .traffic-btn {
+  background: #4a4a4e;
+  border-color: transparent;
+  color: transparent;
+}
+
+.traffic-glyph {
+  width: 7px;
+  height: 7px;
+  opacity: 0;
+  display: block;
+  pointer-events: none;
+}
+
+.mac-traffic:hover .traffic-glyph {
+  opacity: 1;
+}
+
+html.is-blurred .mac-traffic:hover .traffic-glyph {
+  opacity: 0;
+}
+
+.win-controls {
+  grid-area: win;
+}
+
+html.mac .win-controls {
+  display: none;
 }
 
 .titlebar-brand-search {
@@ -151,7 +258,7 @@ body {
 }
 
 .titlebar-center {
-  grid-column: 2;
+  grid-area: center;
   position: relative;
   display: flex;
   align-items: center;
@@ -164,9 +271,14 @@ body {
   width: min(var(--search-max), calc(100vw - 280px));
 }
 
+html.mac .titlebar-center:has(.titlebar-search:not([hidden])) {
+  width: min(var(--search-max), calc(100vw - 320px));
+}
+
 .titlebar-right {
-  grid-column: 3;
+  grid-area: right;
   justify-self: end;
+  gap: 2px;
 }
 
 .tb-btn,

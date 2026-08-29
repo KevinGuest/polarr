@@ -500,6 +500,33 @@ fn content_bounds(window: &tauri::Window) -> Result<(LogicalPosition<f64>, Logic
     ))
 }
 
+fn set_webview_frame(
+    wv: &tauri::Webview,
+    pos: LogicalPosition<f64>,
+    size: LogicalSize<f64>,
+) -> Result<(), String> {
+    let _ = wv.set_auto_resize(false);
+    wv.set_position(pos)
+        .map_err(|e| format!("webview position: {e}"))?;
+    wv.set_size(size)
+        .map_err(|e| format!("webview size: {e}"))?;
+    Ok(())
+}
+
+fn run_on_main_sync<T, F>(app: &AppHandle, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(f());
+    })
+    .map_err(|e| format!("dispatch main thread: {e}"))?;
+    rx.recv_timeout(Duration::from_secs(8))
+        .map_err(|_| "timed out waiting for the UI thread".into())?
+}
+
 /// The shell webview fills the whole window by default. On macOS that opaque
 /// WKWebView covers `add_child` content, so pin it to the 48px title bar while
 /// the server view is open.
@@ -508,16 +535,15 @@ fn pin_shell_to_titlebar(app: &AppHandle) -> Result<(), String> {
         .get_window("main")
         .ok_or_else(|| "main window missing".to_string())?;
     let Some(shell) = app.get_webview("main") else {
-        return Ok(());
+        return Err("shell webview missing".into());
     };
     let logical = window_logical_size(&window)?;
-    let _ = shell.set_auto_resize(false);
-    shell
-        .set_position(LogicalPosition::new(0.0, 0.0))
-        .map_err(|e| format!("pin shell position: {e}"))?;
-    shell
-        .set_size(LogicalSize::new(logical.width.max(1.0), TITLEBAR_HEIGHT))
-        .map_err(|e| format!("pin shell size: {e}"))?;
+    set_webview_frame(
+        &shell,
+        LogicalPosition::new(0.0, 0.0),
+        LogicalSize::new(logical.width.max(1.0), TITLEBAR_HEIGHT),
+    )?;
+    let _ = shell.show();
     Ok(())
 }
 
@@ -530,12 +556,8 @@ pub(crate) fn fill_shell(app: &AppHandle) -> Result<(), String> {
     };
     let logical = window_logical_size(&window)?;
     let _ = shell.set_auto_resize(true);
-    shell
-        .set_position(LogicalPosition::new(0.0, 0.0))
-        .map_err(|e| format!("restore shell position: {e}"))?;
-    shell
-        .set_size(logical)
-        .map_err(|e| format!("restore shell size: {e}"))?;
+    set_webview_frame(&shell, LogicalPosition::new(0.0, 0.0), logical)?;
+    let _ = shell.show();
     Ok(())
 }
 
@@ -546,19 +568,19 @@ fn apply_layout(app: &AppHandle) -> Result<(), String> {
     let Some(wv) = app.get_webview(SERVER_WEBVIEW_LABEL) else {
         return Ok(());
     };
-    pin_shell_to_titlebar(app).ok();
+    pin_shell_to_titlebar(app)?;
     let (pos, size) = content_bounds(&window)?;
-    wv.set_position(pos)
-        .map_err(|e| format!("position server webview: {e}"))?;
-    wv.set_size(size)
-        .map_err(|e| format!("size server webview: {e}"))?;
+    set_webview_frame(&wv, pos, size)?;
+    let _ = wv.show();
     Ok(())
 }
 
 fn dispatch_layout(app: &AppHandle) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
-        let _ = apply_layout(&handle);
+        if let Err(err) = apply_layout(&handle) {
+            eprintln!("polarr layout: {err}");
+        }
     });
 }
 
@@ -571,15 +593,7 @@ pub(crate) fn dispatch_fill_shell(app: &AppHandle) {
 
 fn apply_layout_on_main(app: &AppHandle) {
     let handle = app.clone();
-    let (tx, rx) = std::sync::mpsc::channel();
-    if app
-        .run_on_main_thread(move || {
-            let _ = tx.send(apply_layout(&handle));
-        })
-        .is_ok()
-    {
-        let _ = rx.recv_timeout(Duration::from_millis(1500));
-    }
+    let _ = run_on_main_sync(&handle, move || apply_layout(&handle));
 }
 
 fn parse_external(url: &str) -> Result<Url, String> {
@@ -677,13 +691,29 @@ pub fn install_resize_handler(app: &AppHandle) {
 #[tauri::command]
 pub async fn open_server_webview(app: AppHandle, url: String) -> Result<(), String> {
     mark_opening(&app);
-    let result = open_server_webview_inner(app.clone(), url).await;
+    let result = open_server_webview_inner(app.clone(), url);
     clear_opening(&app);
     result
 }
 
-async fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> {
+fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> {
     let parsed = parse_external(&url)?;
+
+    #[cfg(target_os = "macos")]
+    {
+        return run_on_main_sync(&app, move || create_or_reveal_server(&app, parsed, url));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        create_or_reveal_server(&app, parsed, url)
+    }
+}
+
+fn create_or_reveal_server(
+    app: &AppHandle,
+    parsed: Url,
+    url: String,
+) -> Result<(), String> {
     let window = app
         .get_window("main")
         .ok_or_else(|| "main window missing".to_string())?;
@@ -701,7 +731,7 @@ async fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), St
         } else {
             reassert_desktop_markers(&existing);
         }
-        apply_layout_on_main(&app);
+        apply_layout(app)?;
         existing
             .show()
             .map_err(|e| format!("show server webview: {e}"))?;
@@ -711,6 +741,7 @@ async fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), St
     }
 
     let (pos, size) = content_bounds(&window)?;
+    pin_shell_to_titlebar(app)?;
     let builder = WebviewBuilder::new(SERVER_WEBVIEW_LABEL, WebviewUrl::External(parsed))
         .initialization_script(INIT_SCRIPT)
         .focused(true)
@@ -719,11 +750,11 @@ async fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), St
     let wv = window
         .add_child(builder, pos, size)
         .map_err(|e| format!("create server webview: {e}"))?;
-    apply_layout_on_main(&app);
+    apply_layout(app)?;
     let _ = wv.show();
     let _ = wv.set_focus();
 
-    schedule_marker_kicks(app);
+    schedule_marker_kicks(app.clone());
     Ok(())
 }
 

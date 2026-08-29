@@ -194,6 +194,15 @@ Already configured in the Xcode project:
 - `NSAppTransportSecurity` allows cleartext HTTP for LAN / Umbrel
 - Safe-area aware setup screen (`viewport-fit=cover`; Polarr web already sets this)
 
+The **Simulator home screen shows real app icons** — a blank tile is not normal. Capacitor’s default 1024×1024 icon was a white mark on white, so it looked missing. Icons and the launch splash are generated from `public/polarr-icon.png` (black background, no alpha — Apple rejects transparency on the marketing icon):
+
+```bash
+cd apps/mobile
+npm run icons          # requires ffmpeg (brew install ffmpeg)
+```
+
+Then rebuild in Xcode. `npx cap sync` copies the web shell into `App/public` and does **not** overwrite `Assets.xcassets`.
+
 To change server later: relaunch the app and tap **Change server** during the short “Opening…” pause, or clear the app’s data in iOS Settings.
 
 ## Layout

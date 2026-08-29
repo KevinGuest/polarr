@@ -80,7 +80,8 @@ pub const INIT_SCRIPT: &str = r#"
     "html[data-polarr-desktop] [data-slot=scroll-area-viewport]::-webkit-scrollbar," +
     "html[data-polarr-desktop] [data-radix-scroll-area-viewport]::-webkit-scrollbar{" +
     "display:none!important;width:0!important;height:0!important;" +
-    "}";
+    "}" +
+    "html,body{background:#09090b!important;color-scheme:dark;}";
 
   function ensureGlobal() {
     try {
@@ -572,6 +573,8 @@ fn apply_layout(app: &AppHandle) -> Result<(), String> {
     let (pos, size) = content_bounds(&window)?;
     set_webview_frame(&wv, pos, size)?;
     let _ = wv.show();
+    #[cfg(target_os = "macos")]
+    crate::macos_window::paint_webview(&wv);
     Ok(())
 }
 
@@ -737,6 +740,8 @@ fn create_or_reveal_server(
             .show()
             .map_err(|e| format!("show server webview: {e}"))?;
         let _ = existing.set_focus();
+        #[cfg(target_os = "macos")]
+        crate::macos_window::paint_webview(&existing);
         schedule_marker_kicks(app.clone());
         return Ok(());
     }
@@ -754,6 +759,8 @@ fn create_or_reveal_server(
     apply_layout(app)?;
     let _ = wv.show();
     let _ = wv.set_focus();
+    #[cfg(target_os = "macos")]
+    crate::macos_window::paint_webview(&wv);
 
     schedule_marker_kicks(app.clone());
     Ok(())

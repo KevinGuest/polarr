@@ -73,9 +73,15 @@ body {
 }
 
 html.mac .titlebar {
-  grid-template-areas: "traffic nav center right menu";
-  padding-left: 12px;
+  grid-template-areas: "nav center right menu";
+  grid-template-columns: auto 1fr auto auto;
+  padding-left: 78px;
   padding-right: 6px;
+}
+
+html.mac .app-frame {
+  /* Native overlay titlebar already clips to macOS continuous corners. */
+  border-radius: 0;
 }
 
 .titlebar-drag {
@@ -87,7 +93,7 @@ html.mac .titlebar {
 }
 
 html.mac .titlebar-drag {
-  /* Keep the OS drag region off traffic lights, nav, and the trailing menu. */
+  /* Native traffic lights (~78px) + back/forward. */
   left: 148px;
   right: 48px;
 }
@@ -141,7 +147,7 @@ html:not(.mac) .menu-wrap {
 }
 
 html.mac .mac-traffic {
-  display: flex;
+  display: none;
 }
 
 .traffic-btn {

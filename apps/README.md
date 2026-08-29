@@ -45,8 +45,8 @@ After a successful release build:
 
 | Artifact | Path |
 | --- | --- |
-| **NSIS installer (ship this)** | `apps/desktop/src-tauri/target/release/bundle/nsis/Polarr_0.2.5_x64-setup.exe` |
-| MSI (optional / enterprise) | `apps/desktop/src-tauri/target/release/bundle/msi/Polarr_0.2.5_x64_en-US.msi` |
+| **NSIS installer (ship this)** | `apps/desktop/src-tauri/target/release/bundle/nsis/Polarr_0.2.6_x64-setup.exe` |
+| MSI (optional / enterprise) | `apps/desktop/src-tauri/target/release/bundle/msi/Polarr_0.2.6_x64_en-US.msi` |
 | Unpackaged binary | `apps/desktop/src-tauri/target/release/polarr-desktop.exe` |
 
 Installer metadata (product name **Polarr**, publisher **Polarr**, version from `tauri.conf.json` / package) and the app icon (`icons/icon.ico`) are wired for Start Menu / desktop shortcuts. NSIS/WiX bitmaps live in `src-tauri/installer-assets/` (regenerate with `npm run installer-assets` after changing `public/polarr-icon.png` or theme colors in `scripts/generate-installer-assets.ps1`). Bitmaps are **24-bit BMP** at stock sizes (NSIS sidebar 164×314, header 150×57; WiX dialog 493×312 with branding only in the left ~164px, banner 493×58). Do not full-bleed dark art under wizard text — MUI/WiX draw dark copy on the light panel.
@@ -77,11 +77,13 @@ npm run tauri:build
 npm run tauri -- build --target universal-apple-darwin
 ```
 
+The macOS window is a native **overlay titlebar**: system rounded corners and traffic lights, with the custom 48px chrome drawn underneath. The Polarr server page loads in a child webview below that bar (not an iframe), so session cookies stick.
+
 After a release build:
 
 | Artifact | Path |
 | --- | --- |
-| **DMG (ship this)** | `src-tauri/target/universal-apple-darwin/release/bundle/dmg/Polarr_0.2.5_universal.dmg` |
+| **DMG (ship this)** | `src-tauri/target/universal-apple-darwin/release/bundle/dmg/Polarr_0.2.6_universal.dmg` |
 | App bundle | `src-tauri/target/universal-apple-darwin/release/bundle/macos/Polarr.app` |
 
 `Info.plist` allows cleartext `http://` to LAN / Umbrel servers (same as iOS). Offline downloads and Discord Rich Presence work the same as Windows.
@@ -98,8 +100,8 @@ That dialog goes away only for **Developer ID–signed and notarized** builds (s
 Push a desktop tag (version comes from `apps/desktop/src-tauri/tauri.conf.json`):
 
 ```bash
-git tag desktop-v0.2.5
-git push origin desktop-v0.2.5
+git tag desktop-v0.2.6
+git push origin desktop-v0.2.6
 ```
 
 Workflow: [`.github/workflows/release.yml`](../.github/workflows/release.yml) — builds **macOS universal DMG** + **Windows NSIS**, publishes **`latest.json`** for auto-update, and opens a draft GitHub Release.

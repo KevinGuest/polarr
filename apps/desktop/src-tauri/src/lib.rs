@@ -6,6 +6,8 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent};
 use url::Url;
 
 mod discord_presence;
+#[cfg(target_os = "macos")]
+mod macos_window;
 mod offline;
 mod server_webview;
 
@@ -184,6 +186,16 @@ pub fn run() {
             server_webview::install_resize_handler(app.handle());
             if let Some(window) = app.get_window("main") {
                 let _ = window.set_theme(Some(tauri::Theme::Dark));
+                #[cfg(windows)]
+                {
+                    let _ = window.set_decorations(false);
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    macos_window::apply(app.handle());
+                }
+                let _ = window.show();
+                let _ = window.set_focus();
             }
             Ok(())
         })

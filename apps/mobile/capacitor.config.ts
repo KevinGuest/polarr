@@ -11,16 +11,24 @@ const config: CapacitorConfig = {
     allowNavigation: ["*"],
   },
   ios: {
-    contentInset: "automatic",
-    backgroundColor: "#0c0b12",
+    // Edge-to-edge WebView. CSS env(safe-area-inset-*) pads the notch / home indicator.
+    // "automatic" inset the document and made the whole app pan.
+    contentInset: "never",
+    backgroundColor: "#09090b",
     preferredContentMode: "mobile",
-    scrollEnabled: true,
+    scrollEnabled: false,
     allowsLinkPreview: false,
   },
   plugins: {
     SplashScreen: {
-      backgroundColor: "#0c0b12",
+      backgroundColor: "#09090b",
       launchAutoHide: true,
+      showSpinner: false,
+    },
+    StatusBar: {
+      style: "DARK",
+      backgroundColor: "#09090b",
+      overlaysWebView: true,
     },
   },
 };

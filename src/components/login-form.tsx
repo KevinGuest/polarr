@@ -3,12 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CircleHelp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
-import { Card, CardContent } from "@/components/ui/card";
+import { AUTH_CONTROL, AUTH_SUBMIT, AuthFieldGroup, AuthScreen } from "@/components/auth-screen";
 import {
   isPasswordLongEnough,
   MIN_PASSWORD_LENGTH,
@@ -131,107 +129,65 @@ export function LoginForm({
   }
 
   return (
-    <div className="mx-auto w-full max-w-md">
-      <div className="mb-8 text-center">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/polarr-icon.png"
-          alt=""
-          aria-hidden
-          className="mx-auto mb-4 size-14 rounded-xl object-cover"
-        />
-        <h1 className="text-3xl font-semibold tracking-tight">Polarr</h1>
-        <p className="mt-2 text-muted-foreground">
-          Sign in to your homeserver music hub.
-        </p>
-      </div>
-
-      <Card>
-        <CardContent className="space-y-4 pt-6">
-          {mounted ? (
-            <form className="space-y-4" onSubmit={(e) => void onSubmit(e)}>
-              <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
-                <Input
-                  id="username"
-                  name="username"
-                  autoComplete="username"
-                  autoFocus
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <PasswordInput
-                  id="password"
-                  name="password"
-                  autoComplete="current-password"
-                  minLength={MIN_PASSWORD_LENGTH}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-              <div
-                className={
-                  discordLoginAvailable
-                    ? "grid grid-cols-2 gap-2"
-                    : undefined
-                }
-              >
-                <Button
-                  type="submit"
-                  className="w-full"
-                  disabled={submitting || discordBusy}
-                >
-                  {submitting ? "Signing in…" : "Sign in"}
-                </Button>
-                {discordLoginAvailable ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full gap-2"
-                    disabled={discordBusy || submitting}
-                    onClick={() => void signInWithDiscord()}
-                  >
-                    <DiscordGlyph className="size-4 shrink-0" />
-                    {discordBusy ? "…" : "Discord"}
-                  </Button>
-                ) : null}
-              </div>
-            </form>
-          ) : (
-            <div className="space-y-4" aria-hidden>
-              <div className="space-y-2">
-                <div className="h-4 w-16 rounded bg-muted/50" />
-                <div className="h-10 rounded-md border border-border bg-background" />
-              </div>
-              <div className="space-y-2">
-                <div className="h-4 w-16 rounded bg-muted/50" />
-                <div className="h-10 rounded-md border border-border bg-background" />
-              </div>
-              <div className="h-10 w-full rounded-md bg-muted/40" />
-            </div>
-          )}
-
-          <p className="text-center text-xs text-muted-foreground">
-            Have an invite?{" "}
-            <a href="/join" className="underline underline-offset-2">
-              Join with a code
-            </a>
-          </p>
-        </CardContent>
-      </Card>
-
-      <Link
-        href="/forgot-password"
-        aria-label="Forgot password"
-        title="Forgot password"
-        className="fixed bottom-5 right-5 z-20 flex size-11 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-md transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <CircleHelp className="size-5" strokeWidth={2} />
-      </Link>
-    </div>
+    <AuthScreen title="Polarr">
+      {mounted ? (
+        <form className="flex flex-col" onSubmit={(e) => void onSubmit(e)}>
+          <AuthFieldGroup>
+            <Input
+              id="username"
+              name="username"
+              autoComplete="username"
+              autoFocus
+              aria-label="Username"
+              placeholder="Username"
+              className={AUTH_CONTROL}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+            <PasswordInput
+              id="password"
+              name="password"
+              autoComplete="current-password"
+              minLength={MIN_PASSWORD_LENGTH}
+              aria-label="Password"
+              placeholder="Password"
+              className={AUTH_CONTROL}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </AuthFieldGroup>
+          <Button
+            type="submit"
+            className={AUTH_SUBMIT}
+            disabled={submitting || discordBusy}
+          >
+            {submitting ? "Signing in…" : "Sign in"}
+          </Button>
+          {discordLoginAvailable ? (
+            <Button
+              type="button"
+              variant="ghost"
+              className="mt-2 h-12 w-full gap-2 text-[15px] text-muted-foreground"
+              disabled={discordBusy || submitting}
+              onClick={() => void signInWithDiscord()}
+            >
+              <DiscordGlyph className="size-4 shrink-0" />
+              {discordBusy ? "…" : "Continue with Discord"}
+            </Button>
+          ) : null}
+          <div className="mt-8 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 text-[15px] text-muted-foreground">
+            <a href="/join">Join with a code</a>
+            <Link href="/forgot-password">Forgot password?</Link>
+          </div>
+        </form>
+      ) : (
+        <div className="overflow-hidden rounded-2xl bg-white/[0.06]" aria-hidden>
+          <div className="h-14" />
+          <div className="mx-4 h-px bg-border" />
+          <div className="h-14" />
+        </div>
+      )}
+    </AuthScreen>
   );
 }
 

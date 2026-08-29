@@ -5,6 +5,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Check, GripVertical, Minus, Play, X } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { Dialog, DialogOverlay, DialogPortal } from "@/components/ui/dialog";
+import { SHEET_PANEL, SheetHandle } from "@/components/sheet-chrome";
 import { emitLibraryChanged } from "@/lib/ui-events";
 import { toastError, toastSuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -228,19 +229,10 @@ export function PlaylistEditDrawer({
           <DialogOverlay className="z-[75] bg-black/70" />
           <DialogPrimitive.Content
             aria-describedby={undefined}
-            className={cn(
-              "fixed inset-x-0 bottom-0 z-[75] flex h-[min(96vh,920px)] flex-col rounded-t-2xl border-t border-border bg-background text-foreground shadow-2xl outline-none",
-              "data-[state=open]:animate-in data-[state=closed]:animate-out",
-              "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-              "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
-              "duration-300",
-            )}
+            className={cn(SHEET_PANEL, "z-[75] h-[min(96vh,920px)]")}
             onOpenAutoFocus={(e) => e.preventDefault()}
           >
-            <div
-              className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/35"
-              aria-hidden
-            />
+            <SheetHandle />
 
             <header className="grid shrink-0 grid-cols-[4.5rem_1fr_4.5rem] items-center px-3 py-3">
               {selectMode ? (
@@ -458,18 +450,15 @@ export function PlaylistEditDrawer({
           <DialogPrimitive.Content
             aria-describedby={undefined}
             className={cn(
-              "fixed inset-x-0 bottom-0 z-[80] max-h-[min(70vh,28rem)] overflow-y-auto rounded-t-2xl border-t border-border bg-background p-4 pb-[max(1rem,var(--safe-bottom))] shadow-2xl outline-none",
-              "data-[state=open]:animate-in data-[state=closed]:animate-out",
-              "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
-              "duration-250",
+              SHEET_PANEL,
+              "z-[80] max-h-[min(70vh,28rem)] overflow-y-auto p-4 pb-[max(1rem,var(--safe-bottom))]",
             )}
             onOpenAutoFocus={(e) => e.preventDefault()}
           >
-            <div
-              className="mx-auto mb-3 h-1 w-10 rounded-full bg-muted-foreground/35"
-              aria-hidden
-            />
-            <h3 className="mb-3 text-base font-semibold">Move to playlist</h3>
+            <SheetHandle />
+            <h3 className="mb-3 text-[1.375rem] font-semibold tracking-tight">
+              Move to playlist
+            </h3>
             {targetsLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : targets.length === 0 ? (

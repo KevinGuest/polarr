@@ -96,7 +96,7 @@ function ShelfSkeleton({
         {Array.from({ length: Math.min(count, size === "compact" ? 5 : 4) }).map(
           (_, i) => (
             <div key={i} className={tileClass}>
-              <Skeleton className="aspect-square w-full rounded-md" />
+              <Skeleton className="aspect-square w-full rounded-2xl" />
               <Skeleton className="h-3.5 w-4/5" />
               <Skeleton className="h-3 w-3/5" />
             </div>
@@ -110,7 +110,7 @@ function ShelfSkeleton({
       >
         {Array.from({ length: count }).map((_, i) => (
           <div key={i} className="min-w-0 space-y-2.5">
-            <Skeleton className="aspect-square w-full rounded-md" />
+            <Skeleton className="aspect-square w-full rounded-2xl" />
             <Skeleton className="h-3.5 w-4/5" />
             <Skeleton className="h-3 w-3/5" />
           </div>
@@ -279,7 +279,10 @@ export function HomeClient({
   }
 
   return (
-    <div className="space-y-8 lg:space-y-10">
+    <div className="space-y-10 lg:space-y-10">
+      <h1 className="text-[2rem] font-semibold tracking-tight">
+        Home
+      </h1>
       {lidarrError && (
         <p className="text-sm text-destructive">Lidarr: {lidarrError}</p>
       )}

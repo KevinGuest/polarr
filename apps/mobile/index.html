@@ -4,16 +4,37 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover"
+      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
     />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="theme-color" content="#0c0b12" />
+    <meta name="theme-color" content="#09090b" />
     <title>Polarr</title>
     <link rel="icon" type="image/png" href="/polarr-icon.png" />
+    <style>
+      html, body, #app, .boot {
+        margin: 0;
+        height: 100%;
+        background: #09090b;
+      }
+      .boot {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .boot img {
+        width: 88px;
+        height: 88px;
+        border-radius: 22px;
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <main class="boot" id="boot">
+        <img src="/polarr-icon.png" alt="Polarr" width="88" height="88" />
+      </main>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

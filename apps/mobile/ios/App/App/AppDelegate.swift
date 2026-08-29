@@ -17,6 +17,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         } catch {
             print("Polarr: AVAudioSession setup failed: \(error)")
         }
+        window?.overrideUserInterfaceStyle = .dark
+        window?.backgroundColor = UIColor(red: 9 / 255, green: 9 / 255, blue: 11 / 255, alpha: 1)
         return true
     }
 

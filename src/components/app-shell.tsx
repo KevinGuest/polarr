@@ -252,6 +252,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
     pathname === "/profile" || pathname.startsWith("/u/");
   const isNotificationsPage = pathname === "/notifications";
   const isHomePage = pathname === "/";
+  const isBrowsePage = pathname.startsWith("/browse/");
   const mobileTitle =
     isSearchPage || isLibraryPage ? null : mobilePageTitle(pathname);
   const { unread: notificationUnread } = useNotifications();
@@ -318,12 +319,13 @@ function ShellInner({ children }: { children: React.ReactNode }) {
         isAlbumPage && "max-lg:px-0 max-lg:py-0",
         isPlaylistPage && "max-lg:px-0 max-lg:py-0",
         isProfilePage && "max-lg:px-4 max-lg:py-0",
+        isBrowsePage && "max-lg:pt-[max(1rem,calc(var(--safe-top)+0.35rem))]",
         !isAdminPath &&
           (track
             ? "max-lg:pb-[calc(var(--mobile-dock-stack)+var(--mobile-dock-player-h)+1rem)]"
             : "max-lg:pb-[calc(var(--mobile-dock-stack)+1rem)]"),
       ),
-    [isAdminPath, isAlbumPage, isArtistPage, isLibraryPage, isPlaylistPage, isProfilePage, isSearchPage, track],
+    [isAdminPath, isAlbumPage, isArtistPage, isBrowsePage, isLibraryPage, isPlaylistPage, isProfilePage, isSearchPage, track],
   );
 
   const adminSidebarInner = (
@@ -425,6 +427,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
               isArtistPage && "hidden",
               isAlbumPage && "hidden",
               isPlaylistPage && "hidden",
+              isBrowsePage && "hidden",
               isProfilePage &&
                 "absolute inset-x-0 top-0 z-20 bg-transparent",
             )}
@@ -602,7 +605,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <Suspense fallback={null}>
           <DesktopChromeBridge />
         </Suspense>
-        <div className="flex min-h-dvh items-center justify-center bg-background px-4 py-12 text-foreground">
+        <div
+          data-polarr-auth
+          className={cn(
+            "flex bg-background text-foreground",
+            "h-dvh min-h-0 overflow-y-auto overscroll-y-contain",
+            "px-6 pt-[max(1.5rem,calc(var(--safe-top)+0.5rem))] pb-[max(1.25rem,calc(var(--safe-bottom)+0.75rem))]",
+            "max-lg:flex-col",
+            "lg:h-auto lg:min-h-dvh lg:items-center lg:justify-center lg:px-4 lg:py-12",
+          )}
+        >
           {children}
         </div>
       </AuthProvider>

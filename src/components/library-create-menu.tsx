@@ -10,6 +10,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogOverlay, DialogPortal } from "@/components/ui/dialog";
+import { InsetGroup } from "@/components/media-shelf";
+import { SHEET_PANEL, SheetHandle } from "@/components/sheet-chrome";
 import {
   Tooltip,
   TooltipContent,
@@ -21,7 +23,7 @@ import { cn } from "@/lib/utils";
 
 function CreateIcon({ children }: { children: ReactNode }) {
   return (
-    <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-white/10 text-white">
+    <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-foreground">
       {children}
     </div>
   );
@@ -42,24 +44,25 @@ function CreateItem({
     <button
       type="button"
       onClick={onSelect}
-      className="flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left outline-none transition-colors hover:bg-white/10 focus-visible:bg-white/10"
+      className="flex min-h-14 w-full items-center gap-3 px-3 text-left"
     >
       {children}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[15px] font-bold text-white">{title}</div>
-        <div className="truncate text-[13px] text-[#b3b3b3]">{description}</div>
+        <div className="truncate text-[17px] text-foreground">{title}</div>
+        <div className="truncate text-[13px] text-muted-foreground">
+          {description}
+        </div>
       </div>
     </button>
   );
 }
 
 function CreateOptions({
-  busy,
   onCreatePlaylist,
   onCreateFolder,
   onJam,
 }: {
-  busy: boolean;
+  busy?: boolean;
   onCreatePlaylist: () => void;
   onCreateFolder: () => void;
   onJam: () => void;
@@ -99,9 +102,6 @@ function CreateOptions({
           <Users className="size-5" strokeWidth={1.75} />
         </CreateIcon>
       </CreateItem>
-      {busy ? (
-        <p className="px-2 py-1 text-xs text-[#b3b3b3]">Creating…</p>
-      ) : null}
     </>
   );
 }
@@ -128,24 +128,28 @@ function MobileCreateDrawer({
         <DialogPrimitive.Content
           aria-describedby={undefined}
           className={cn(
-            "fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl border-t border-white/10 bg-[#282828] px-3 pb-[max(1rem,var(--safe-bottom))] pt-2 text-white shadow-2xl outline-none",
-            "data-[state=open]:animate-in data-[state=closed]:animate-out",
-            "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-            "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
-            "duration-300",
+            SHEET_PANEL,
+            "z-[60] px-4 pb-[max(1rem,var(--safe-bottom))] pt-1",
           )}
           onOpenAutoFocus={(event) => event.preventDefault()}
         >
-          <div
-            className="mx-auto mb-3 mt-1 h-1 w-10 shrink-0 rounded-full bg-white/25"
-            aria-hidden
-          />
-          <CreateOptions
-            busy={busy}
-            onCreatePlaylist={onCreatePlaylist}
-            onCreateFolder={onCreateFolder}
-            onJam={onJam}
-          />
+          <SheetHandle />
+          <h2 className="mb-4 px-1 text-[1.375rem] font-semibold tracking-tight">
+            Create
+          </h2>
+          <InsetGroup>
+            <CreateOptions
+              busy={busy}
+              onCreatePlaylist={onCreatePlaylist}
+              onCreateFolder={onCreateFolder}
+              onJam={onJam}
+            />
+          </InsetGroup>
+          {busy ? (
+            <p className="px-1 pt-3 text-[13px] text-muted-foreground">
+              Creating…
+            </p>
+          ) : null}
         </DialogPrimitive.Content>
       </DialogPortal>
     </Dialog>
@@ -252,7 +256,7 @@ export function LibraryCreateMenu({
             aria-expanded={open}
             onClick={() => setMenuOpen(true)}
             className={cn(
-              "flex min-h-[44px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 py-1 text-[10px] font-medium transition-colors",
+              "flex min-h-[44px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 py-1 text-[11px] font-medium transition-colors",
               open
                 ? "text-foreground"
                 : "text-muted-foreground hover:text-foreground",
@@ -308,23 +312,27 @@ export function LibraryCreateMenu({
         side="bottom"
         sideOffset={8}
         className={cn(
-          "w-[22rem] rounded-xl border-0 bg-[#282828] p-2 text-white shadow-2xl",
+          "w-[22rem] rounded-2xl border-border bg-background p-3 text-foreground shadow-2xl",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
         )}
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
-        <div className="mb-1 flex items-center gap-1 px-1 pb-1 pt-0.5">
+        <div className="mb-3 flex items-center gap-1 px-0.5">
           <button
             type="button"
             aria-label="Close"
             onClick={() => setMenuOpen(false)}
-            className="rounded-full p-1.5 text-[#b3b3b3] transition-colors hover:bg-white/10 hover:text-white"
+            className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
           >
             <X className="size-4" strokeWidth={2} />
           </button>
-          <div className="px-1 text-[15px] font-bold text-white">Create</div>
+          <div className="px-1 text-[1.375rem] font-semibold tracking-tight">
+            Create
+          </div>
         </div>
-        <CreateOptions {...optionHandlers} />
+        <InsetGroup>
+          <CreateOptions {...optionHandlers} />
+        </InsetGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

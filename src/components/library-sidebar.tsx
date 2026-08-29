@@ -13,6 +13,7 @@ import {
 } from "@/components/library-item-context-menu";
 import { encodeAlbumId } from "@/lib/album-ref";
 import { cn } from "@/lib/utils";
+import { InsetGroup } from "@/components/media-shelf";
 import {
   Tooltip,
   TooltipContent,
@@ -51,7 +52,7 @@ function FolderCover({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex items-center justify-center bg-[#282828] text-[#b3b3b3]",
+        "flex items-center justify-center bg-white/10 text-muted-foreground",
         className,
       )}
       aria-hidden
@@ -65,7 +66,7 @@ function ArtistPlaceholder({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex items-center justify-center bg-[#282828] text-[#7f7f7f]",
+        "flex items-center justify-center bg-white/10 text-muted-foreground",
         className,
       )}
       aria-hidden
@@ -79,7 +80,7 @@ function PlaylistPlaceholder({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex items-center justify-center bg-[#282828] text-[#7f7f7f]",
+        "flex items-center justify-center bg-white/10 text-muted-foreground",
         className,
       )}
       aria-hidden
@@ -198,7 +199,7 @@ export function LibrarySidebar({
     const coverClass = cn(
       "shrink-0",
       coverSize,
-      item.type === "artist" ? "rounded-full" : "rounded-sm",
+      item.type === "artist" ? "rounded-full" : "rounded-xl",
     );
 
     const row = (
@@ -209,9 +210,15 @@ export function LibrarySidebar({
         title={isRail ? item.title : undefined}
         onClick={dismissOverlays}
         className={cn(
-          "flex w-full items-center gap-3 rounded-md transition-colors",
+          "flex w-full items-center gap-3 transition-colors",
           rowPad,
-          active ? "bg-muted/60" : "hover:bg-muted/40",
+          isPage
+            ? active
+              ? "bg-white/[0.06]"
+              : ""
+            : active
+              ? "rounded-xl bg-muted/60"
+              : "rounded-xl hover:bg-muted/40",
         )}
       >
         {item.type === "folder" ? (
@@ -244,7 +251,12 @@ export function LibrarySidebar({
         {!isRail ? (
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <div className="truncate text-sm font-medium text-foreground">
+              <div
+                className={cn(
+                  "truncate text-foreground",
+                  isPage ? "text-[17px]" : "text-sm font-medium",
+                )}
+              >
                 {item.title}
               </div>
               {item.pinned ? (
@@ -254,7 +266,10 @@ export function LibrarySidebar({
                 />
               ) : null}
             </div>
-            <div className="truncate text-xs text-muted-foreground">{subtitle}</div>
+            <div className={cn(
+              "truncate text-muted-foreground",
+              isPage ? "text-[13px]" : "text-xs",
+            )}>{subtitle}</div>
           </div>
         ) : null}
       </Link>
@@ -311,16 +326,33 @@ export function LibrarySidebar({
         title={isRail ? "Liked Songs" : undefined}
         onClick={dismissOverlays}
         className={cn(
-          "flex w-full items-center gap-3 rounded-md transition-colors",
+          "flex w-full items-center gap-3 transition-colors",
           rowPad,
-          likedActive ? "bg-muted/60" : "hover:bg-muted/40",
+          isPage
+            ? likedActive
+              ? "bg-white/[0.06]"
+              : ""
+            : likedActive
+              ? "rounded-xl bg-muted/60"
+              : "rounded-xl hover:bg-muted/40",
         )}
       >
-        <LikedSongsCover className={cn("shrink-0 rounded-sm", coverSize)} />
+        <LikedSongsCover
+          className={cn(
+            "shrink-0",
+            coverSize,
+            "rounded-xl",
+          )}
+        />
         {!isRail ? (
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <div className="truncate text-sm font-medium text-foreground">
+              <div
+                className={cn(
+                  "truncate text-foreground",
+                  isPage ? "text-[17px]" : "text-sm font-medium",
+                )}
+              >
                 Liked Songs
               </div>
               {likedPinned ? (
@@ -330,7 +362,12 @@ export function LibrarySidebar({
                 />
               ) : null}
             </div>
-            <div className="truncate text-xs text-muted-foreground">
+            <div
+              className={cn(
+                "truncate text-muted-foreground",
+                isPage ? "text-[13px]" : "text-xs",
+              )}
+            >
               Playlist · {likedTracks} song{likedTracks === 1 ? "" : "s"}
             </div>
           </div>
@@ -347,7 +384,7 @@ export function LibrarySidebar({
   );
 
   const mobileChrome = isPage ? (
-    <div className="shrink-0 border-b border-border/60 bg-background px-1 pb-4 pt-[max(0.75rem,var(--safe-top))]">
+    <div className="shrink-0 bg-background px-1 pb-3 pt-[max(0.75rem,var(--safe-top))]">
       <div className="flex flex-col gap-3">
         <MobileLibraryHeader />
         <div className="-mx-1 px-1">
@@ -420,7 +457,7 @@ export function LibrarySidebar({
               >
                 <Library className="size-4" strokeWidth={2} />
               </HeaderButton>
-              <p className="min-w-0 flex-1 truncate px-1 text-sm font-bold text-foreground">
+              <p className="min-w-0 flex-1 truncate px-1 text-[15px] font-semibold tracking-tight text-foreground">
                 Your Library
               </p>
               <LibraryCreateMenu variant="pill" />
@@ -441,8 +478,8 @@ export function LibrarySidebar({
       {!isRail ? <LibraryOfflineDownloadProgress /> : null}
 
       {isPage ? (
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain">
-          <div className="space-y-0.5 pt-1">{list}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-3 pb-4">
+          <InsetGroup>{list}</InsetGroup>
         </div>
       ) : (
         <ScrollArea className="min-h-0 flex-1">

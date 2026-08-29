@@ -1,15 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { albumHref } from "@/lib/album-ref";
 import {
+  BrowsePageHeader,
   MediaShelfGrid,
   MediaTileShell,
-  ShelfHeader,
 } from "@/components/media-shelf";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchDiscoverFeed } from "@/lib/discover-client";
@@ -46,18 +44,7 @@ export function BrowseExploreClient() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center gap-3">
-        <Link
-          href="/"
-          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-          aria-label="Back to home"
-        >
-          <ArrowLeft className="size-4" />
-        </Link>
-        <div className="min-w-0 flex-1">
-          <ShelfHeader title="Explore" titleAs="h1" />
-        </div>
-      </div>
+      <BrowsePageHeader title="Explore" />
 
       {error ? (
         <p className="text-sm text-destructive">Lidarr: {error}</p>
@@ -70,7 +57,7 @@ export function BrowseExploreClient() {
         >
           {Array.from({ length: 14 }).map((_, i) => (
             <div key={i} className="space-y-2.5">
-              <Skeleton className="aspect-square w-full rounded-md" />
+              <Skeleton className="aspect-square w-full rounded-2xl" />
               <Skeleton className="h-3.5 w-4/5" />
               <Skeleton className="h-3 w-3/5" />
             </div>

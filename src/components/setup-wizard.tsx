@@ -8,12 +8,11 @@ import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Switch } from "@/components/ui/switch";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  AUTH_CONTROL,
+  AUTH_GHOST,
+  AUTH_SUBMIT,
+  AuthFieldGroup,
+} from "@/components/auth-screen";
 import { cn } from "@/lib/utils";
 import {
   isPasswordLongEnough,
@@ -223,17 +222,17 @@ export function SetupWizard() {
   const stepIndex = STEPS.indexOf(step);
 
   return (
-    <div className="mx-auto w-full max-w-md">
-      <div className="mb-8 text-center">
+    <div className="mx-auto flex w-full max-w-[22.5rem] flex-1 flex-col justify-center max-lg:max-w-none">
+      <header className="mb-10 text-center">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/polarr-icon.png"
           alt=""
           aria-hidden
-          className="mx-auto mb-4 size-14 rounded-xl object-cover"
+          className="mx-auto mb-6 size-[4.5rem] rounded-[1.35rem] object-cover"
         />
-        <h1 className="text-3xl font-semibold tracking-tight">Polarr</h1>
-        <p className="mt-2 text-muted-foreground">
+        <h1 className="text-[1.75rem] font-semibold tracking-tight">Polarr</h1>
+        <p className="mx-auto mt-2 max-w-[18rem] text-[15px] leading-snug text-muted-foreground">
           {step === "account"
             ? "Create the admin account to get started."
             : step === "lidarr"
@@ -252,220 +251,196 @@ export function SetupWizard() {
             />
           ))}
         </div>
-      </div>
+      </header>
 
-      <Card>
-        {step === "account" ? (
-          <CardContent className="space-y-4 pt-6">
-            <form className="space-y-4" onSubmit={(e) => void onCreateAccount(e)}>
-              <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
-                <Input
-                  id="username"
-                  autoComplete="username"
-                  autoFocus
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="admin"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <PasswordInput
-                  id="password"
-                  autoComplete="new-password"
-                  minLength={MIN_PASSWORD_LENGTH}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  At least {MIN_PASSWORD_LENGTH} characters
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirmPassword">Confirm password</Label>
-                <PasswordInput
-                  id="confirmPassword"
-                  autoComplete="new-password"
-                  minLength={MIN_PASSWORD_LENGTH}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                />
-              </div>
+      {step === "account" ? (
+        <form className="flex flex-col" onSubmit={(e) => void onCreateAccount(e)}>
+          <AuthFieldGroup>
+            <Input
+              id="username"
+              autoComplete="username"
+              autoFocus
+              aria-label="Username"
+              placeholder="Username"
+              className={AUTH_CONTROL}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+            <Input
+              id="email"
+              type="email"
+              required
+              autoComplete="email"
+              aria-label="Email"
+              placeholder="Email"
+              className={AUTH_CONTROL}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <PasswordInput
+              id="password"
+              autoComplete="new-password"
+              minLength={MIN_PASSWORD_LENGTH}
+              aria-label="Password"
+              placeholder="Password"
+              className={AUTH_CONTROL}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <PasswordInput
+              id="confirmPassword"
+              autoComplete="new-password"
+              minLength={MIN_PASSWORD_LENGTH}
+              aria-label="Confirm password"
+              placeholder="Confirm password"
+              className={AUTH_CONTROL}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+            />
+          </AuthFieldGroup>
+          <p className="mt-2 px-1 text-[13px] text-muted-foreground">
+            At least {MIN_PASSWORD_LENGTH} characters
+          </p>
+          <Button type="submit" className={AUTH_SUBMIT} disabled={!canCreateAccount}>
+            {loading ? "Creating…" : "Continue"}
+          </Button>
+        </form>
+      ) : null}
 
-              <Button type="submit" className="w-full" disabled={!canCreateAccount}>
-                {loading ? "Creating…" : "Continue"}
-              </Button>
-            </form>
-          </CardContent>
-        ) : null}
+      {step === "lidarr" ? (
+        <div className="flex flex-col">
+          <AuthFieldGroup>
+            <Input
+              id="lidarr-url"
+              aria-label="Lidarr URL"
+              placeholder="Lidarr URL"
+              className={AUTH_CONTROL}
+              value={lidarrUrl}
+              onChange={(e) => setLidarrUrl(e.target.value)}
+            />
+            <Input
+              id="lidarr-key"
+              aria-label="API key"
+              placeholder="API key"
+              className={AUTH_CONTROL}
+              value={lidarrApiKey}
+              onChange={(e) => setLidarrApiKey(e.target.value)}
+              autoComplete="off"
+            />
+            <Input
+              id="music-root"
+              aria-label="Music root path"
+              placeholder="Music root path"
+              className={AUTH_CONTROL}
+              value={musicRoot}
+              onChange={(e) => setMusicRoot(e.target.value)}
+            />
+          </AuthFieldGroup>
+          <Button
+            type="button"
+            className={AUTH_SUBMIT}
+            disabled={loading}
+            onClick={() => void saveLidarr(true)}
+          >
+            {loading ? "Saving…" : "Save & continue"}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className={AUTH_GHOST}
+            disabled={loading || !lidarrUrl.trim()}
+            onClick={() => void testLidarr()}
+          >
+            Test connection
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className={AUTH_GHOST}
+            disabled={loading}
+            onClick={() => setStep("email")}
+          >
+            Skip for now
+          </Button>
+        </div>
+      ) : null}
 
-        {step === "lidarr" ? (
-          <>
-            <CardHeader>
-              <CardTitle>Lidarr</CardTitle>
-              <CardDescription>
-                Point Polarr at Lidarr for your library. You can skip and set
-                this up later under Admin.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="lidarr-url">Lidarr URL</Label>
-                <Input
-                  id="lidarr-url"
-                  value={lidarrUrl}
-                  onChange={(e) => setLidarrUrl(e.target.value)}
-                  placeholder="http://localhost:8686"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="lidarr-key">API key</Label>
-                <Input
-                  id="lidarr-key"
-                  value={lidarrApiKey}
-                  onChange={(e) => setLidarrApiKey(e.target.value)}
-                  placeholder="••••••••"
-                  autoComplete="off"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="music-root">Music root path</Label>
-                <Input
-                  id="music-root"
-                  value={musicRoot}
-                  onChange={(e) => setMusicRoot(e.target.value)}
-                  placeholder="./music"
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Button
-                  type="button"
-                  disabled={loading}
-                  onClick={() => void saveLidarr(true)}
-                >
-                  {loading ? "Saving…" : "Save & continue"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={loading || !lidarrUrl.trim()}
-                  onClick={() => void testLidarr()}
-                >
-                  Test connection
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={loading}
-                  onClick={() => setStep("email")}
-                >
-                  Skip for now
-                </Button>
-              </div>
-            </CardContent>
-          </>
-        ) : null}
-
-        {step === "email" ? (
-          <>
-            <CardHeader>
-              <CardTitle>SMTP</CardTitle>
-              <CardDescription>
-                SMTP for invites and notifications. Skip if you’ll configure it
-                later.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="smtp-host">SMTP host</Label>
-                <Input
-                  id="smtp-host"
-                  value={smtpHost}
-                  onChange={(e) => setSmtpHost(e.target.value)}
-                  placeholder="smtp.example.com"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="smtp-port">Port</Label>
-                  <Input
-                    id="smtp-port"
-                    value={smtpPort}
-                    onChange={(e) => setSmtpPort(e.target.value)}
-                    placeholder="587"
-                  />
-                </div>
-                <div className="flex items-end gap-2 pb-1">
-                  <Switch
-                    id="smtp-secure"
-                    checked={smtpSecure}
-                    onCheckedChange={setSmtpSecure}
-                  />
-                  <Label htmlFor="smtp-secure">TLS / SSL</Label>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="smtp-user">Username</Label>
-                <Input
-                  id="smtp-user"
-                  value={smtpUser}
-                  onChange={(e) => setSmtpUser(e.target.value)}
-                  autoComplete="off"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="smtp-password">Password</Label>
-                <PasswordInput
-                  id="smtp-password"
-                  value={smtpPassword}
-                  onChange={(e) => setSmtpPassword(e.target.value)}
-                  autoComplete="new-password"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="smtp-from">From address</Label>
-                <Input
-                  id="smtp-from"
-                  type="email"
-                  value={smtpFrom}
-                  onChange={(e) => setSmtpFrom(e.target.value)}
-                  placeholder="polarr@example.com"
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Button
-                  type="button"
-                  disabled={loading}
-                  onClick={() => void saveEmail(true)}
-                >
-                  {loading ? "Saving…" : "Save & finish"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={loading}
-                  onClick={() => finish()}
-                >
-                  Skip for now
-                </Button>
-              </div>
-            </CardContent>
-          </>
-        ) : null}
-      </Card>
+      {step === "email" ? (
+        <div className="flex flex-col">
+          <AuthFieldGroup>
+            <Input
+              id="smtp-host"
+              aria-label="SMTP host"
+              placeholder="SMTP host"
+              className={AUTH_CONTROL}
+              value={smtpHost}
+              onChange={(e) => setSmtpHost(e.target.value)}
+            />
+            <Input
+              id="smtp-port"
+              aria-label="Port"
+              placeholder="Port"
+              className={AUTH_CONTROL}
+              value={smtpPort}
+              onChange={(e) => setSmtpPort(e.target.value)}
+            />
+            <div className="flex h-14 items-center justify-between px-4">
+              <Label htmlFor="smtp-secure" className="text-[17px] font-normal">
+                TLS / SSL
+              </Label>
+              <Switch
+                id="smtp-secure"
+                checked={smtpSecure}
+                onCheckedChange={setSmtpSecure}
+              />
+            </div>
+            <Input
+              id="smtp-user"
+              aria-label="Username"
+              placeholder="Username"
+              className={AUTH_CONTROL}
+              value={smtpUser}
+              onChange={(e) => setSmtpUser(e.target.value)}
+              autoComplete="off"
+            />
+            <PasswordInput
+              id="smtp-password"
+              aria-label="Password"
+              placeholder="Password"
+              className={AUTH_CONTROL}
+              value={smtpPassword}
+              onChange={(e) => setSmtpPassword(e.target.value)}
+              autoComplete="new-password"
+            />
+            <Input
+              id="smtp-from"
+              type="email"
+              aria-label="From address"
+              placeholder="From address"
+              className={AUTH_CONTROL}
+              value={smtpFrom}
+              onChange={(e) => setSmtpFrom(e.target.value)}
+            />
+          </AuthFieldGroup>
+          <Button
+            type="button"
+            className={AUTH_SUBMIT}
+            disabled={loading}
+            onClick={() => void saveEmail(true)}
+          >
+            {loading ? "Saving…" : "Save & finish"}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className={AUTH_GHOST}
+            disabled={loading}
+            onClick={() => finish()}
+          >
+            Skip for now
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

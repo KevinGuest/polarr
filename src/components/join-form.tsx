@@ -5,9 +5,13 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PasswordInput } from "@/components/ui/password-input";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  AUTH_CONTROL,
+  AUTH_SUBMIT,
+  AuthFieldGroup,
+  AuthScreen,
+} from "@/components/auth-screen";
 import {
   isPasswordLongEnough,
   MIN_PASSWORD_LENGTH,
@@ -79,95 +83,75 @@ export function JoinForm({ initialCode = "" }: { initialCode?: string }) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-md">
-      <div className="mb-8 text-center">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/polarr-icon.png"
-          alt=""
-          aria-hidden
-          className="mx-auto mb-4 size-14 rounded-xl object-cover"
-        />
-        <h1 className="text-3xl font-semibold tracking-tight">Join Polarr</h1>
-        <p className="mt-2 text-muted-foreground">
-          Create an account with an invite code.
-        </p>
-      </div>
-
-      <Card>
-        <CardContent className="space-y-4 pt-6">
-          {mounted ? (
-            <form className="space-y-4" onSubmit={(e) => void onSubmit(e)}>
-              <div className="space-y-2">
-                <Label htmlFor="code">Invite code</Label>
-                <Input
-                  id="code"
-                  autoComplete="off"
-                  autoFocus={!initialCode}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.toUpperCase())}
-                  placeholder="POLARR-XXXX-XXXX"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
-                <Input
-                  id="username"
-                  name="username"
-                  autoComplete="username"
-                  autoFocus={Boolean(initialCode)}
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <PasswordInput
-                  id="password"
-                  name="password"
-                  autoComplete="new-password"
-                  minLength={MIN_PASSWORD_LENGTH}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  At least {MIN_PASSWORD_LENGTH} characters
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirm">Confirm password</Label>
-                <PasswordInput
-                  id="confirm"
-                  name="confirm"
-                  autoComplete="new-password"
-                  minLength={MIN_PASSWORD_LENGTH}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                />
-              </div>
-              <Button type="submit" className="w-full" disabled={submitting}>
-                {submitting ? "Creating…" : "Create account"}
-              </Button>
-            </form>
-          ) : (
-            <div className="space-y-4" aria-hidden>
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="space-y-2">
-                  <div className="h-4 w-20 rounded bg-muted/50" />
-                  <div className="h-10 rounded-md border border-border bg-background" />
-                </div>
-              ))}
-              <div className="h-10 w-full rounded-md bg-muted/40" />
-            </div>
-          )}
-          <p className="text-center text-xs text-muted-foreground">
-            Already have an account?{" "}
-            <Link href="/login" className="underline underline-offset-2">
-              Sign in
-            </Link>
+    <AuthScreen title="Join" description="Create an account with an invite code.">
+      {mounted ? (
+        <form className="flex flex-col" onSubmit={(e) => void onSubmit(e)}>
+          <AuthFieldGroup>
+            <Input
+              id="code"
+              autoComplete="off"
+              autoFocus={!initialCode}
+              aria-label="Invite code"
+              placeholder="Invite code"
+              className={AUTH_CONTROL}
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+            />
+            <Input
+              id="username"
+              name="username"
+              autoComplete="username"
+              autoFocus={Boolean(initialCode)}
+              aria-label="Username"
+              placeholder="Username"
+              className={AUTH_CONTROL}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+            <PasswordInput
+              id="password"
+              name="password"
+              autoComplete="new-password"
+              minLength={MIN_PASSWORD_LENGTH}
+              aria-label="Password"
+              placeholder="Password"
+              className={AUTH_CONTROL}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <PasswordInput
+              id="confirm"
+              name="confirm"
+              autoComplete="new-password"
+              minLength={MIN_PASSWORD_LENGTH}
+              aria-label="Confirm password"
+              placeholder="Confirm password"
+              className={AUTH_CONTROL}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+            />
+          </AuthFieldGroup>
+          <p className="mt-2 px-1 text-[13px] text-muted-foreground">
+            At least {MIN_PASSWORD_LENGTH} characters
           </p>
-        </CardContent>
-      </Card>
-    </div>
+          <Button type="submit" className={AUTH_SUBMIT} disabled={submitting}>
+            {submitting ? "Creating…" : "Create account"}
+          </Button>
+          <p className="mt-8 text-center text-[15px] text-muted-foreground">
+            Already have an account?{" "}
+            <Link href="/login">Sign in</Link>
+          </p>
+        </form>
+      ) : (
+        <div className="overflow-hidden rounded-2xl bg-white/[0.06]" aria-hidden>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i}>
+              {i > 0 ? <div className="mx-4 h-px bg-border" /> : null}
+              <div className="h-14" />
+            </div>
+          ))}
+        </div>
+      )}
+    </AuthScreen>
   );
 }

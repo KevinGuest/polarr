@@ -102,7 +102,7 @@ git tag desktop-v0.2.1
 git push origin desktop-v0.2.1
 ```
 
-Workflow: [`.github/workflows/desktop.yml`](../.github/workflows/desktop.yml) — builds **macOS universal DMG** + **Windows NSIS**, publishes **`latest.json`** for auto-update, and opens a draft GitHub Release.
+Workflow: [`.github/workflows/release.yml`](../.github/workflows/release.yml) — builds **macOS universal DMG** + **Windows NSIS**, publishes **`latest.json`** for auto-update, and opens a draft GitHub Release.
 
 ### Auto-update (GitHub Releases)
 
@@ -134,7 +134,7 @@ The **public** key lives in `apps/desktop/src-tauri/tauri.conf.json` (`plugins.u
 | `APPLE_PASSWORD` | [App-specific password](https://appleid.apple.com) (not your Apple ID password) |
 | `APPLE_TEAM_ID` | 10-character Team ID from [Membership](https://developer.apple.com/account) |
 
-After the secrets are set, retag / rerun **Desktop release**. Tauri signs with Hardened Runtime, submits to notarytool, and staples the ticket onto the DMG.
+After the secrets are set, retag / rerun the **release** workflow. Tauri signs with Hardened Runtime, submits to notarytool, and staples the ticket onto the DMG.
 
 ### iOS (Capacitor)
 

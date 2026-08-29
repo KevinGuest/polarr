@@ -5,7 +5,11 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { Camera } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
-import { InsetGroup } from "@/components/media-shelf";
+import {
+  InsetGroup,
+  ShelfHeader,
+  useFitCount,
+} from "@/components/media-shelf";
 import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -54,6 +58,102 @@ type Payload = {
   albums: PublicAlbum[];
   albumsKind?: "pinned" | "recent";
 };
+
+function ProfileAlbumTile({ album }: { album: PublicAlbum }) {
+  return (
+    <Link
+      href={album.href}
+      className="min-w-0 space-y-2 rounded-lg p-2 transition-colors hover:bg-muted/40"
+    >
+      <CoverArt
+        seed={`${album.artist}-${album.title}`}
+        image={album.coverPath}
+        className="aspect-square w-full rounded-2xl shadow-md shadow-black/30"
+      />
+      <div className="min-w-0 px-0.5">
+        <p className="truncate text-sm font-semibold">{album.title}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {album.artist || "Unknown artist"}
+        </p>
+      </div>
+    </Link>
+  );
+}
+
+function ProfileAlbums({
+  albums,
+  albumsKind,
+  isSelf,
+}: {
+  albums: PublicAlbum[];
+  albumsKind: "pinned" | "recent";
+  isSelf: boolean;
+}) {
+  const { ref, count } = useFitCount(152, 16);
+  const [expanded, setExpanded] = useState(false);
+  const title =
+    albumsKind === "pinned" ? "Saved albums" : "Recently played albums";
+  const canExpand = albums.length > count;
+  const visibleAlbums = expanded ? albums : albums.slice(0, count);
+
+  return (
+    <section className="space-y-4">
+      <div className="lg:hidden">
+        <h2 className="text-[1.375rem] font-semibold tracking-tight">{title}</h2>
+      </div>
+      <div className="hidden lg:block">
+        <ShelfHeader
+          title={title}
+          showSeeAll={canExpand || expanded}
+          onSeeAll={() => setExpanded((value) => !value)}
+          actionLabel={expanded ? "Show less" : "Show all"}
+        />
+      </div>
+      {albums.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {isSelf
+            ? "No saved or recently played albums yet."
+            : "No albums to show."}
+        </p>
+      ) : (
+        <>
+          <InsetGroup className="lg:hidden">
+            {albums.map((album) => (
+              <Link
+                key={album.key}
+                href={album.href}
+                className="flex min-h-14 items-center gap-3 px-3"
+              >
+                <CoverArt
+                  seed={`${album.artist}-${album.title}`}
+                  image={album.coverPath}
+                  className="size-10 shrink-0 rounded-xl"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[17px]">
+                    {album.title}
+                  </span>
+                  <span className="block truncate text-[13px] text-muted-foreground">
+                    {album.artist || "Unknown artist"}
+                  </span>
+                </span>
+              </Link>
+            ))}
+          </InsetGroup>
+          <div
+            ref={ref}
+            className="hidden w-full gap-4 lg:grid"
+            style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}
+          >
+            {visibleAlbums.map((album) => (
+              <ProfileAlbumTile key={album.key} album={album} />
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
 
 function bannerStyle(colors: string[] | null | undefined): CSSProperties {
   if (colors && colors.length >= 2) {
@@ -386,67 +486,11 @@ export function ProfileClient({
           )}
         </section>
 
-        <section className="space-y-4">
-          <h2 className="text-[1.375rem] font-semibold tracking-tight">
-            {albumsKind === "pinned" ? "Saved albums" : "Recently played albums"}
-          </h2>
-          {albums.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {isSelf
-                ? "No saved or recently played albums yet."
-                : "No albums to show."}
-            </p>
-          ) : (
-            <>
-              <InsetGroup className="lg:hidden">
-                {albums.map((a) => (
-                  <Link
-                    key={a.key}
-                    href={a.href}
-                    className="flex min-h-14 items-center gap-3 px-3"
-                  >
-                    <CoverArt
-                      seed={`${a.artist}-${a.title}`}
-                      image={a.coverPath}
-                      className="size-10 shrink-0 rounded-xl"
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[17px]">
-                        {a.title}
-                      </span>
-                      <span className="block truncate text-[13px] text-muted-foreground">
-                        {a.artist || "Unknown artist"}
-                      </span>
-                    </span>
-                  </Link>
-                ))}
-              </InsetGroup>
-              <div className="-mx-1 hidden gap-4 overflow-x-auto px-1 pb-2 lg:flex">
-              {albums.map((a) => (
-                <Link
-                  key={a.key}
-                  href={a.href}
-                  className="w-[9.5rem] shrink-0 space-y-2 rounded-lg p-2 transition-colors hover:bg-muted/40 sm:w-40"
-                >
-                  <CoverArt
-                    seed={`${a.artist}-${a.title}`}
-                    image={a.coverPath}
-                    className="aspect-square w-full rounded-2xl shadow-md shadow-black/30"
-                  />
-                  <div className="min-w-0 px-0.5">
-                    <p className="truncate text-sm font-semibold">
-                      {a.title}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {a.artist || "Unknown artist"}
-                    </p>
-                  </div>
-                </Link>
-              ))}
-              </div>
-            </>
-          )}
-        </section>
+        <ProfileAlbums
+          albums={albums}
+          albumsKind={albumsKind}
+          isSelf={isSelf}
+        />
       </div>
     </div>
   );

@@ -761,6 +761,20 @@ pub async fn open_server_webview(app: AppHandle, url: String) -> Result<(), Stri
     mark_opening(&app);
     let result = open_server_webview_inner(app.clone(), url);
     clear_opening(&app);
+    if result.is_err() {
+        // Opening is a transaction: never leave the shell pinned to the title
+        // bar when child-webview creation or navigation fails. That state makes
+        // the entire setup UI look like a black screen and prevents the user
+        // from correcting the URL without restarting the app.
+        let rollback = app.clone();
+        let _ = run_on_main_sync(&app, move || {
+            if let Some(wv) = rollback.get_webview(SERVER_WEBVIEW_LABEL) {
+                let _ = wv.close();
+            }
+            clear_server_url_memory();
+            fill_shell(&rollback)
+        });
+    }
     result
 }
 
@@ -832,15 +846,22 @@ fn create_or_reveal_server(
     }
 
     let (pos, size) = content_bounds(&window)?;
-    pin_shell_to_titlebar(app)?;
     let builder = WebviewBuilder::new(SERVER_WEBVIEW_LABEL, WebviewUrl::External(parsed.clone()))
         .initialization_script(INIT_SCRIPT)
         .focused(true)
         .background_color(tauri::webview::Color(9, 9, 11, 255));
 
+    // Keep the setup shell full-size until the child exists. In particular,
+    // WebView2/WKWebView creation can fail for machine-specific reasons; if we
+    // shrink the only working webview first, the resulting error is hidden in
+    // the 48px title bar and the rest of the window appears black.
     let wv = window
         .add_child(builder, pos, size)
         .map_err(|e| format!("create server webview: {e}"))?;
+    if let Err(err) = pin_shell_to_titlebar(app) {
+        let _ = wv.close();
+        return Err(err);
+    }
     let _ = wv.navigate(parsed);
     kick_server_load(&wv, &url);
     apply_layout(app)?;

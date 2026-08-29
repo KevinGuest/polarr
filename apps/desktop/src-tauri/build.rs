@@ -14,19 +14,28 @@ fn compile_macos_chrome() {
     let src = manifest.join("src/macos_chrome.m");
     println!("cargo:rerun-if-changed={}", src.display());
 
+    // Universal builds compile this crate twice (arm64 + x86_64). Host clang
+    // defaults to the runner arch, so we must pass -arch for TARGET.
+    let clang_arch = match env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
+        Ok("aarch64") => "arm64",
+        Ok("x86_64") => "x86_64",
+        other => panic!("unsupported macOS target arch: {other:?}"),
+    };
+
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let obj = out.join("macos_chrome.o");
     let lib = out.join("libpolarr_macos_chrome.a");
 
-    let status = Command::new("clang")
-        .args(["-c", "-fobjc-arc"])
-        .arg(&src)
-        .arg("-o")
-        .arg(&obj)
-        .status()
-        .expect("clang (Objective-C)");
+    let mut clang = Command::new("clang");
+    clang.args(["-c", "-fobjc-arc", "-arch", clang_arch]);
+    if let Ok(min) = env::var("MACOSX_DEPLOYMENT_TARGET") {
+        clang.arg(format!("-mmacosx-version-min={min}"));
+    }
+    clang.arg(&src).arg("-o").arg(&obj);
+
+    let status = clang.status().expect("clang (Objective-C)");
     if !status.success() {
-        panic!("clang failed to compile src/macos_chrome.m");
+        panic!("clang failed to compile src/macos_chrome.m for {clang_arch}");
     }
 
     let status = Command::new("ar")

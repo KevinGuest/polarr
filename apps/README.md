@@ -104,7 +104,7 @@ git tag desktop-v0.2.6
 git push origin desktop-v0.2.6
 ```
 
-Workflow: [`.github/workflows/release.yml`](../.github/workflows/release.yml) — builds **macOS universal DMG** + **Windows NSIS**, publishes **`latest.json`** for auto-update, and opens a draft GitHub Release.
+Workflow: [`.github/workflows/release.yml`](../.github/workflows/release.yml) — builds **macOS universal DMG** (Apple Silicon **and** Intel, so Rust compiles twice) + **Windows NSIS**, publishes **`latest.json`** for auto-update, and opens a draft GitHub Release. Cold GitHub runners compile Tauri from scratch; later tags reuse `swatinem/rust-cache` unless `Cargo.lock` / the toolchain changes.
 
 ### Auto-update (GitHub Releases)
 

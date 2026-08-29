@@ -55,9 +55,6 @@ void polarr_macos_align_traffic_lights(void *ns_window) {
     return;
   }
 
-  // Same formula tao uses for trafficLightPosition: grow the title-bar
-  // container so AppKit sits the buttons `y` pt from the window top.
-  // Re-applied after theme/title/resize because AppKit resets the frames.
   CGFloat buttonHeight = NSHeight(closeBtn.frame);
   CGFloat titleBarHeight = buttonHeight + kTrafficLightY;
   NSRect windowFrame = window.frame;
@@ -71,31 +68,116 @@ void polarr_macos_align_traffic_lights(void *ns_window) {
     spaceBetween = 20.0;
   }
 
-    NSButton *buttons[3] = {closeBtn, minBtn, zoomBtn};
-    for (NSInteger i = 0; i < 3; i++) {
-      NSRect rect = buttons[i].frame;
-      rect.origin.x = kTrafficLightX + (CGFloat)i * spaceBetween;
-      [buttons[i] setFrameOrigin:rect.origin];
-    }
+  NSButton *buttons[3] = {closeBtn, minBtn, zoomBtn};
+  for (NSInteger i = 0; i < 3; i++) {
+    NSRect rect = buttons[i].frame;
+    rect.origin.x = kTrafficLightX + (CGFloat)i * spaceBetween;
+    [buttons[i] setFrameOrigin:rect.origin];
+  }
 }
 
-static void polarr_set_webview_frame(WKWebView *view, NSRect frame, NSAutoresizingMaskOptions mask) {
+static void polarr_collect_wk(NSView *root, NSMutableArray<WKWebView *> *out) {
+  if ([root isKindOfClass:[WKWebView class]]) {
+    [out addObject:(WKWebView *)root];
+  }
+  for (NSView *child in root.subviews) {
+    polarr_collect_wk(child, out);
+  }
+}
+
+static BOOL polarr_is_shell_url(NSString *s) {
+  if (s.length == 0) {
+    return YES;
+  }
+  NSString *lower = s.lowercaseString;
+  return [lower containsString:@"tauri.localhost"] || [lower containsString:@"tauri://"] ||
+         [lower containsString:@"localhost:1420"] || [lower containsString:@"asset.localhost"] ||
+         [lower containsString:@"index.html"];
+}
+
+static NSView *polarr_content_child(NSView *content, NSView *inner) {
+  NSView *v = inner;
+  while (v && v.superview && v.superview != content) {
+    v = v.superview;
+  }
+  return v ?: inner;
+}
+
+static void polarr_clear_constraints(NSView *view) {
+  NSView *parent = view.superview;
+  if (!parent) {
+    return;
+  }
+  NSMutableArray<NSLayoutConstraint *> *drop = [NSMutableArray array];
+  for (NSLayoutConstraint *c in parent.constraints) {
+    if (c.firstItem == view || c.secondItem == view) {
+      [drop addObject:c];
+    }
+  }
+  if (drop.count > 0) {
+    [NSLayoutConstraint deactivateConstraints:drop];
+  }
+  view.translatesAutoresizingMaskIntoConstraints = YES;
+}
+
+static void polarr_set_container_frame(NSView *view, NSRect frame, NSAutoresizingMaskOptions mask) {
   if (!view) {
     return;
   }
-  view.translatesAutoresizingMaskIntoConstraints = YES;
+  polarr_clear_constraints(view);
+  view.hidden = NO;
   view.autoresizingMask = mask;
   view.frame = frame;
 }
 
-void polarr_macos_layout_webviews(void *ns_window, void *shell_wv, void *server_wv,
-                                  double titlebar_h) {
-  if (ns_window == NULL || shell_wv == NULL) {
+static void polarr_classify_webviews(NSView *content, WKWebView **shellOut, WKWebView **serverOut) {
+  NSMutableArray<WKWebView *> *all = [NSMutableArray array];
+  polarr_collect_wk(content, all);
+  WKWebView *shell = nil;
+  WKWebView *server = nil;
+  for (WKWebView *wv in all) {
+    NSString *href = wv.URL.absoluteString ?: @"";
+    if (polarr_is_shell_url(href)) {
+      if (!shell) {
+        shell = wv;
+      }
+    } else if (!server) {
+      server = wv;
+    }
+  }
+  if (!shell && all.count > 0) {
+    shell = all.firstObject;
+  }
+  if (!server && all.count > 1) {
+    for (WKWebView *wv in all) {
+      if (wv != shell) {
+        server = wv;
+        break;
+      }
+    }
+  }
+  if (shellOut) {
+    *shellOut = shell;
+  }
+  if (serverOut) {
+    *serverOut = server;
+  }
+}
+
+void polarr_macos_layout_connected(void *ns_window, double titlebar_h) {
+  if (ns_window == NULL) {
     return;
   }
   NSWindow *window = (__bridge NSWindow *)ns_window;
   NSView *content = window.contentView;
   if (!content) {
+    return;
+  }
+
+  WKWebView *shellWV = nil;
+  WKWebView *serverWV = nil;
+  polarr_classify_webviews(content, &shellWV, &serverWV);
+  if (!shellWV) {
     return;
   }
 
@@ -105,23 +187,31 @@ void polarr_macos_layout_webviews(void *ns_window, void *shell_wv, void *server_
   CGFloat height = NSHeight(bounds);
   CGFloat bodyH = MAX(1.0, height - bar);
 
-  WKWebView *shell = (__bridge WKWebView *)shell_wv;
-  // NSView origin is bottom-left. Keep the shell strip at the top.
-  polarr_set_webview_frame(shell,
-                           NSMakeRect(0, height - bar, width, bar),
-                           NSViewWidthSizable | NSViewMinYMargin);
-  [content addSubview:shell positioned:NSWindowAbove relativeTo:nil];
+  NSView *shellBox = polarr_content_child(content, shellWV);
+  NSView *serverBox = serverWV ? polarr_content_child(content, serverWV) : nil;
 
-  if (server_wv != NULL) {
-    WKWebView *server = (__bridge WKWebView *)server_wv;
-    polarr_set_webview_frame(server, NSMakeRect(0, 0, width, bodyH),
-                             NSViewWidthSizable | NSViewHeightSizable);
-    [content addSubview:server positioned:NSWindowAbove relativeTo:shell];
+  // Resize wry's contentView children in place. Do not reparent WKWebViews —
+  // pulling them out of their wrappers leaves a full-size hole that covers the
+  // server view (black pane after Connect).
+  polarr_set_container_frame(shellBox, NSMakeRect(0, height - bar, width, bar),
+                             NSViewWidthSizable | NSViewMinYMargin);
+
+  if (serverBox && serverBox != shellBox) {
+    polarr_set_container_frame(serverBox, NSMakeRect(0, 0, width, bodyH),
+                                NSViewWidthSizable | NSViewHeightSizable);
+    [content addSubview:serverBox positioned:NSWindowAbove relativeTo:shellBox];
+    serverWV.hidden = NO;
+    if (@available(macOS 12.0, *)) {
+      serverWV.underPageBackgroundColor = [NSColor colorWithSRGBRed:(9.0 / 255.0)
+                                                               green:(9.0 / 255.0)
+                                                                blue:(11.0 / 255.0)
+                                                               alpha:1.0];
+    }
   }
 }
 
-void polarr_macos_fill_shell(void *ns_window, void *shell_wv) {
-  if (ns_window == NULL || shell_wv == NULL) {
+void polarr_macos_fill_shell(void *ns_window) {
+  if (ns_window == NULL) {
     return;
   }
   NSWindow *window = (__bridge NSWindow *)ns_window;
@@ -129,8 +219,13 @@ void polarr_macos_fill_shell(void *ns_window, void *shell_wv) {
   if (!content) {
     return;
   }
-  WKWebView *shell = (__bridge WKWebView *)shell_wv;
-  polarr_set_webview_frame(shell, content.bounds,
-                            NSViewWidthSizable | NSViewHeightSizable);
-  [content addSubview:shell positioned:NSWindowAbove relativeTo:nil];
+  WKWebView *shellWV = nil;
+  polarr_classify_webviews(content, &shellWV, NULL);
+  if (!shellWV) {
+    return;
+  }
+  NSView *shellBox = polarr_content_child(content, shellWV);
+  polarr_set_container_frame(shellBox, content.bounds,
+                             NSViewWidthSizable | NSViewHeightSizable);
+  [content addSubview:shellBox positioned:NSWindowAbove relativeTo:nil];
 }

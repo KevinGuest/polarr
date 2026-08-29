@@ -576,10 +576,7 @@ fn apply_layout(app: &AppHandle) -> Result<(), String> {
     set_webview_frame(&wv, pos, size)?;
     let _ = wv.show();
     #[cfg(target_os = "macos")]
-    {
-        crate::macos_window::layout_connected(app);
-        crate::macos_window::paint_webview(&wv);
-    }
+    crate::macos_window::layout_connected(app);
     Ok(())
 }
 
@@ -747,8 +744,6 @@ fn create_or_reveal_server(
             .show()
             .map_err(|e| format!("show server webview: {e}"))?;
         let _ = existing.set_focus();
-        #[cfg(target_os = "macos")]
-        crate::macos_window::paint_webview(&existing);
         schedule_marker_kicks(app.clone());
         return Ok(());
     }
@@ -767,7 +762,7 @@ fn create_or_reveal_server(
     let _ = wv.show();
     let _ = wv.set_focus();
     #[cfg(target_os = "macos")]
-    crate::macos_window::paint_webview(&wv);
+    crate::macos_window::layout_connected(app);
 
     schedule_marker_kicks(app.clone());
     Ok(())

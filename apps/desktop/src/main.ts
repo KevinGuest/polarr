@@ -163,24 +163,30 @@ app.innerHTML = `
           <img class="logo" src="/polarr-icon.png" alt="Polarr" width="112" height="112" />
           <h1>Polarr</h1>
           <p class="lede">Connect to your self-hosted music hub.</p>
-          <form id="server-form" autocomplete="on">
+          <form id="server-form" autocomplete="on" novalidate>
             <label for="server-url">Server URL</label>
             <input
               id="server-url"
               name="serverUrl"
-              type="url"
+              type="text"
               inputmode="url"
               placeholder="http://192.168.1.10:3647"
               required
               spellcheck="false"
             />
-            <p id="error" class="error" hidden></p>
             <button type="submit" id="connect">Connect</button>
           </form>
         </div>
       </div>
     </main>
-    <div id="toast" class="toast" hidden role="status"></div>
+    <div id="toast" class="toast" hidden role="status">
+      <svg class="toast-icon" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+        <circle cx="10" cy="10" r="8.25" fill="none" stroke="currentColor" stroke-width="1.6"/>
+        <path d="M10 9.2v4.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        <circle cx="10" cy="6.6" r="0.9" fill="currentColor"/>
+      </svg>
+      <span id="toast-text"></span>
+    </div>
   </div>
 `;
 
@@ -194,8 +200,8 @@ app.innerHTML = `
 const setupView = document.querySelector<HTMLDivElement>("#setup-view")!;
 const form = document.querySelector<HTMLFormElement>("#server-form")!;
 const input = document.querySelector<HTMLInputElement>("#server-url")!;
-const errorEl = document.querySelector<HTMLParagraphElement>("#error")!;
 const toastEl = document.querySelector<HTMLDivElement>("#toast")!;
+const toastText = document.querySelector<HTMLSpanElement>("#toast-text")!;
 const button = document.querySelector<HTMLButtonElement>("#connect")!;
 const titlebar = document.querySelector<HTMLElement>("#titlebar")!;
 const menuBtn = document.querySelector<HTMLButtonElement>("#menu-btn")!;
@@ -271,25 +277,15 @@ function applyProfileAvatar(name: string) {
   }
 }
 
-function showError(message: string) {
-  errorEl.hidden = false;
-  errorEl.textContent = message;
-}
-
 let toastTimer: number | null = null;
 function showToast(message: string) {
-  toastEl.textContent = message;
+  toastText.textContent = message;
   toastEl.hidden = false;
   if (toastTimer) window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => {
     toastEl.hidden = true;
     toastTimer = null;
   }, 4200);
-}
-
-function clearError() {
-  errorEl.hidden = true;
-  errorEl.textContent = "";
 }
 
 type ChromeMenuItem =
@@ -819,7 +815,7 @@ async function showServer(url: string) {
   try {
     await invoke("open_server_webview", { url: target });
   } catch (err) {
-    showError(err instanceof Error ? err.message : String(err));
+    showToast(err instanceof Error ? err.message : String(err));
     setupView.hidden = false;
     setServerOpenClass(false);
     serverOpen = false;
@@ -852,10 +848,8 @@ async function syncMaximizedUi() {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  clearError();
   const raw = input.value.trim();
   if (!raw) {
-    showError("Enter your Polarr server URL.");
     showToast("URL not valid");
     return;
   }
@@ -867,10 +861,8 @@ form.addEventListener("submit", async (event) => {
     await invoke<string>("set_server_url", { url });
     button.textContent = "Connecting…";
     await showServer(url);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+  } catch {
     showToast("URL not valid");
-    showError(message || "URL not valid");
     button.disabled = false;
     button.textContent = "Connect";
   }

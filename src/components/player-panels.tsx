@@ -542,9 +542,9 @@ function ConnectBody() {
           >
             <ConnectKindIcon
               kind={active.kind}
-              className="text-[#1ed760]"
+              className="text-foreground"
             />
-            <div className="min-w-0 flex-1 text-sm font-semibold text-[#1ed760]">
+            <div className="min-w-0 flex-1 text-sm font-semibold text-foreground">
               {active.name}
             </div>
           </button>
@@ -1374,7 +1374,7 @@ function MobileTrio({
             className={cn(
               "flex size-11 items-center justify-center rounded-full transition-colors",
               item.id === "devices" && isRemotePlayback
-                ? "text-[#1ed760]"
+                ? "text-white"
                 : active
                   ? "bg-white/15 text-white"
                   : "text-white/50 hover:text-white",

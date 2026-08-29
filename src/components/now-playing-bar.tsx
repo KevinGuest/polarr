@@ -362,7 +362,7 @@ export function NowPlayingBar() {
                 className={cn(
                   "rounded p-1.5 transition-colors",
                   isRemotePlayback || isPanelOpen("devices")
-                    ? "text-[#1ed760]"
+                    ? "text-foreground"
                     : "text-muted-foreground hover:text-foreground",
                 )}
                 aria-label="Connect to a device"

@@ -801,7 +801,9 @@ fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> 
     // also turns a stalled navigation into a recoverable error instead of a
     // permanently black content area.
     if let Some(ready) = ready {
-        wait_for_server_ready(&app, ready)?;
+        ready.recv_timeout(Duration::from_secs(20)).map_err(|_| {
+            "The server page did not finish loading. Check the URL and try again.".to_string()
+        })?;
 
         // The new child has loaded successfully while hidden. Reveal it and
         // shrink the setup shell as one UI-thread operation so there is always
@@ -904,6 +906,7 @@ fn create_or_reveal_server(
 
     let (pos, size) = content_bounds(&window)?;
     let (ready_tx, ready_rx) = mpsc::channel();
+    let callback_target = parsed.clone();
     let callback_once = Arc::new(AtomicBool::new(false));
     let builder = WebviewBuilder::new(SERVER_WEBVIEW_LABEL, WebviewUrl::External(parsed.clone()))
         .initialization_script(INIT_SCRIPT)
@@ -912,7 +915,7 @@ fn create_or_reveal_server(
         .on_page_load(move |_webview, payload| {
             if !matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
                 || href_is_blank(payload.url().as_str())
-                || !is_loaded_http_url(payload.url())
+                || !same_origin(payload.url(), &callback_target)
                 || callback_once.swap(true, Ordering::SeqCst)
             {
                 return;
@@ -928,10 +931,10 @@ fn create_or_reveal_server(
         .add_child(builder, pos, size)
         .map_err(|e| format!("create server webview: {e}"))?;
     // A newly-created native child is above the shell in the compositor even
-    // before it has painted a document. WebView2 can safely load while hidden.
-    // WKWebView cannot: hiding it may suspend navigation and prevent Finished
-    // from ever firing, so macOS keeps it active underneath the setup shell.
-    #[cfg(not(target_os = "macos"))]
+    // before it has painted a document. Hide it immediately and leave the
+    // setup shell full-sized until its Finished callback proves that content
+    // loaded. This prevents WebView2's black background from becoming the only
+    // visible/recoverable UI while navigation is pending or stalled.
     if let Err(err) = wv.hide() {
         let _ = wv.close();
         return Err(format!("hide loading server webview: {err}"));

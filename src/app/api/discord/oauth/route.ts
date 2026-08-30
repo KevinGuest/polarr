@@ -13,7 +13,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-/** Start Discord OAuth for account identity and desktop Rich Presence. */
+/** Start Discord OAuth for account identity. Rich Presence uses desktop IPC. */
 export async function GET() {
   const user = await getAuthUser();
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
@@ -43,7 +43,10 @@ export async function GET() {
     client_id: settings.discordClientId.trim(),
     redirect_uri: getDiscordRedirectUri(),
     response_type: "code",
-    scope: "identify rpc.activities.write",
+    // rpc.activities.write is restricted to Discord's local RPC authorization
+    // flow and requires Discord approval. Requesting it through this normal web
+    // callback breaks account linking for unapproved applications.
+    scope: "identify",
     state,
     prompt: "consent",
   });

@@ -7,20 +7,19 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{mpsc, Mutex};
+use std::sync::Mutex;
 use std::time::Duration;
 
 #[cfg(not(target_os = "macos"))]
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    mpsc, Arc,
 };
 
 use serde_json::Value;
-use tauri::{
-    webview::WebviewBuilder, AppHandle, Emitter, Listener, LogicalPosition, LogicalSize, Manager,
-    WebviewUrl,
-};
+#[cfg(not(target_os = "macos"))]
+use tauri::{webview::WebviewBuilder, WebviewUrl};
+use tauri::{AppHandle, Emitter, Listener, LogicalPosition, LogicalSize, Manager};
 use url::Url;
 
 static LAST_SERVER_URL: Mutex<Option<String>> = Mutex::new(None);
@@ -45,6 +44,7 @@ pub(crate) fn forget_server_url() {
     clear_server_url_memory();
 }
 
+#[cfg(not(target_os = "macos"))]
 fn href_is_blank(s: &str) -> bool {
     let t = s.trim();
     t.is_empty() || t.eq_ignore_ascii_case("about:blank") || t.starts_with("about:")
@@ -682,6 +682,7 @@ fn parse_external(url: &str) -> Result<Url, String> {
     Url::parse(url).map_err(|e| format!("invalid server URL: {e}"))
 }
 
+#[cfg(not(target_os = "macos"))]
 fn same_origin(a: &Url, b: &Url) -> bool {
     a.scheme() == b.scheme()
         && a.host() == b.host()
@@ -692,6 +693,7 @@ fn reassert_desktop_markers(wv: &tauri::Webview) {
     let _ = wv.eval(INIT_SCRIPT);
 }
 
+#[cfg(not(target_os = "macos"))]
 fn schedule_marker_kicks(app: AppHandle) {
     std::thread::spawn(move || {
         for ms in [80_u64, 250, 600, 1200, 2500, 5000] {
@@ -796,12 +798,31 @@ pub async fn open_server_webview(app: AppHandle, url: String) -> Result<(), Stri
     result
 }
 
+#[cfg(target_os = "macos")]
+fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> {
+    let parsed = parse_external(&url)?;
+    remember_server_url(&url);
+    let main = app
+        .get_webview("main")
+        .ok_or_else(|| "main webview missing".to_string())?;
+
+    // Nested WKWebViews intermittently paint only their background even after
+    // WebKit has accepted and started the remote request. The primary WKWebView
+    // already rendered the updater and connection UI reliably, so reuse it as
+    // the top-level browsing context on macOS. `?desktop=1` lets the shared web
+    // UI enable native integrations and desktop layout without a second view.
+    main.navigate(parsed)
+        .map_err(|e| format!("open Polarr server: {e}"))?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
 fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> {
     let parsed = parse_external(&url)?;
 
-    // WebView2 (Windows) and WKWebView (macOS) must be created and driven on the
-    // UI thread. Tauri runs async commands on a worker thread, so hop to main on
-    // every platform. Creating the child webview off the UI thread on Windows
+    // WebView2 must be created and driven on the UI thread. Tauri runs async
+    // commands on a worker thread, so hop to main before creating the child.
+    // Creating the child webview off the UI thread on Windows
     // leaves WebView2 painting only its background color — a black content area
     // below the title bar — until a later main-thread layout or resize forces it
     // to composite.
@@ -809,8 +830,6 @@ fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> 
     let ready = run_on_main_sync(&app, move || create_or_reveal_server(&handle, parsed, url))?;
 
     // WebView2 can stay hidden until its first document reports Finished.
-    // macOS takes a different path in create_or_reveal_server: attach a blank
-    // WKWebView first, then let the native layout issue its NSURLRequest.
     if let Some(ready) = ready {
         ready.recv_timeout(Duration::from_secs(20)).map_err(|_| {
             "The server page did not finish loading. Check the URL and try again.".to_string()
@@ -833,6 +852,7 @@ fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> 
     Ok(())
 }
 
+#[cfg(not(target_os = "macos"))]
 fn schedule_connected_retries(app: AppHandle) {
     for ms in [80_u64, 200, 500, 1200] {
         let handle = app.clone();
@@ -854,6 +874,7 @@ fn schedule_connected_retries(app: AppHandle) {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn create_or_reveal_server(
     app: &AppHandle,
     parsed: Url,

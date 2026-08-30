@@ -16,6 +16,9 @@ export function ConnectPlaybackBar({
 }) {
   const { isRemotePlayback, activeConnectDevice, togglePanel } = usePlayer();
   if (!isRemotePlayback || !activeConnectDevice) return null;
+  const destination = activeConnectDevice.name.startsWith("Polarr for ")
+    ? activeConnectDevice.name
+    : "Polarr";
 
   return (
     <button
@@ -30,7 +33,7 @@ export function ConnectPlaybackBar({
     >
       <MonitorSpeaker className={compact ? "size-3.5" : "size-4"} />
       <span className="font-semibold tracking-tight">
-        Playing on {activeConnectDevice.name}
+        Playing on {destination}
       </span>
     </button>
   );

@@ -116,12 +116,9 @@ jobs:
           releaseBody: |
             ## What's changed
 
-            - **macOS connections** — more reliable loading when connecting to a server
-            - **Update window** — the main app stays hidden until the update check finishes
-            - **Discord Rich Presence** — shows the track and artist; album appears on cover hover
-            - **Discord permissions** — account linking requests permission to update activity
-            - **Login alerts** — shows Polarr for Windows/macOS/Linux instead of the embedded browser
-            - **Server compatibility** — checks server support before opening the app
+            - **macOS connections** — fixes the black screen after connecting to a Polarr server
+            - **Playback devices** — shows Polarr for macOS, Windows, or Linux instead of “desktop”
+            - **Discord linking** — restores the account linking flow
 
             ## Downloads
 

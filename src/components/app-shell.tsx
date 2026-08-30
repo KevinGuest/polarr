@@ -46,6 +46,7 @@ import {
 import { usePlayer } from "@/components/player-provider";
 import {
   captureDesktopQueryParam,
+  isOverlayTitlebar,
   isPolarrDesktop,
   markPolarrDesktop,
 } from "@/lib/desktop-shell";
@@ -218,11 +219,17 @@ function useDesktopShellMode() {
     if (typeof window === "undefined") return false;
     return isPolarrDesktop();
   });
+  const [overlayTitlebar, setOverlayTitlebar] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return isOverlayTitlebar();
+  });
   useEffect(() => {
     captureDesktopQueryParam();
     const sync = () => {
       const on = isPolarrDesktop();
+      const overlay = isOverlayTitlebar();
       setDesktopShell(on);
+      setOverlayTitlebar(overlay);
       if (on) markPolarrDesktop();
     };
     sync();
@@ -236,13 +243,13 @@ function useDesktopShellMode() {
       window.removeEventListener("storage", onStorage);
     };
   }, []);
-  return desktopShell;
+  return { desktopShell, overlayTitlebar };
 }
 
 function ShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { setPanel, track, isRemotePlayback } = usePlayer();
-  const desktopShell = useDesktopShellMode();
+  const { desktopShell, overlayTitlebar } = useDesktopShellMode();
   const isSearchPage = pathname === "/search";
   const isLibraryPage = pathname === "/library";
   const isArtistPage = pathname === "/artist";
@@ -358,9 +365,9 @@ function ShellInner({ children }: { children: React.ReactNode }) {
     </>
   );
 
-  // Desktop Tauri shell owns search / alerts / profile in the native title bar.
-  // Do not mount any web header row (zero height, no spacer).
-  const showWebHeaders = !desktopShell;
+  // Windows: native Tauri title bar owns search / alerts / profile.
+  // macOS overlay: this web header IS the title bar (under traffic lights).
+  const showWebHeaders = !desktopShell || overlayTitlebar;
 
   return (
     <div className="relative flex h-dvh flex-col bg-background text-foreground">
@@ -394,31 +401,66 @@ function ShellInner({ children }: { children: React.ReactNode }) {
           <header
             suppressHydrationWarning
             data-polarr-app-header
-            className="hidden shrink-0 grid-cols-[1fr_minmax(0,28rem)_1fr] items-center gap-3 border-b border-border px-5 py-3 lg:grid"
+            className={cn(
+              "hidden shrink-0 grid-cols-[1fr_minmax(0,28rem)_1fr] items-center gap-3 border-b border-border px-5 py-3 lg:grid",
+              overlayTitlebar &&
+                "relative h-12 min-h-12 grid-cols-1 gap-0 py-0",
+            )}
           >
-            <Link
-              href="/"
-              onClick={dismissOverlays}
-              className="inline-flex w-fit items-center justify-self-start text-foreground"
-              aria-label="Polarr home"
-            >
-              <PolarrMark className="size-8" />
-            </Link>
-            <div className="relative w-full justify-self-center">
-              <Suspense
-                fallback={
-                  <div className="flex h-9 w-full items-center justify-center rounded-full border border-border px-4 text-sm text-muted-foreground">
-                    Search
-                  </div>
-                }
-              >
-                <HeaderSearch />
-              </Suspense>
-            </div>
-            <div className="flex items-center justify-end gap-1">
-              <NotificationsBell />
-              <UserMenu />
-            </div>
+            {overlayTitlebar ? (
+              <div className="col-span-3 grid h-full grid-cols-[1fr_minmax(0,28rem)_1fr] items-center gap-3">
+                <div />
+                <div className="relative w-full">
+                  <Link
+                    href="/"
+                    onClick={dismissOverlays}
+                    className="absolute right-[calc(100%+8px)] top-1/2 inline-flex -translate-y-1/2 text-foreground"
+                    aria-label="Polarr home"
+                  >
+                    <PolarrMark className="size-8" />
+                  </Link>
+                  <Suspense
+                    fallback={
+                      <div className="flex h-9 w-full items-center justify-center rounded-full border border-border px-4 text-sm text-muted-foreground">
+                        Search
+                      </div>
+                    }
+                  >
+                    <HeaderSearch />
+                  </Suspense>
+                </div>
+                <div className="flex items-center justify-end gap-1">
+                  <NotificationsBell />
+                  <UserMenu />
+                </div>
+              </div>
+            ) : (
+              <>
+                <Link
+                  href="/"
+                  onClick={dismissOverlays}
+                  className="inline-flex w-fit items-center justify-self-start text-foreground"
+                  aria-label="Polarr home"
+                >
+                  <PolarrMark className="size-8" />
+                </Link>
+                <div className="relative w-full justify-self-center">
+                  <Suspense
+                    fallback={
+                      <div className="flex h-9 w-full items-center justify-center rounded-full border border-border px-4 text-sm text-muted-foreground">
+                        Search
+                      </div>
+                    }
+                  >
+                    <HeaderSearch />
+                  </Suspense>
+                </div>
+                <div className="flex items-center justify-end gap-1">
+                  <NotificationsBell />
+                  <UserMenu />
+                </div>
+              </>
+            )}
           </header>
           <header
             data-polarr-app-header

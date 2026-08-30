@@ -173,8 +173,9 @@
 }
 
 /* Tauri desktop shell: hide only app chrome headers (title bar owns them).
+   macOS overlay titlebar keeps this header — it IS the top bar.
    Do NOT target bare `header` — artist/playlist heroes use <header>. */
-html[data-polarr-desktop] [data-polarr-app-header] {
+html[data-polarr-desktop]:not([data-polarr-overlay-titlebar]) [data-polarr-app-header] {
   display: none !important;
   height: 0 !important;
   max-height: 0 !important;
@@ -189,6 +190,30 @@ html[data-polarr-desktop] [data-polarr-app-header] {
   position: absolute !important;
   clip: rect(0, 0, 0, 0) !important;
   flex: 0 0 0 !important;
+}
+
+/* macOS: web header sits under native traffic lights and is the app title bar. */
+html[data-polarr-overlay-titlebar] [data-polarr-app-header] {
+  min-height: 48px;
+  height: 48px;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 86px;
+  padding-right: 12px;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+html[data-polarr-overlay-titlebar] [data-polarr-app-header] a,
+html[data-polarr-overlay-titlebar] [data-polarr-app-header] button,
+html[data-polarr-overlay-titlebar] [data-polarr-app-header] input,
+html[data-polarr-overlay-titlebar] [data-polarr-app-header] [role="button"] {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+html[data-polarr-overlay-titlebar] [data-polarr-auth] {
+  padding-top: 4rem;
 }
 
 /* Keep legacy class names pointing at Satori typography weight */

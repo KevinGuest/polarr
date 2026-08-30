@@ -177,7 +177,10 @@ app.innerHTML = `
                 autocorrect="off"
               />
             </div>
-            <button type="submit" id="connect">Connect</button>
+            <button type="submit" id="connect">
+              <span class="connect-spinner" aria-hidden="true" hidden></span>
+              <span id="connect-label">Connect</span>
+            </button>
           </form>
         </div>
       </div>
@@ -206,6 +209,8 @@ const input = document.querySelector<HTMLInputElement>("#server-url")!;
 const toastEl = document.querySelector<HTMLDivElement>("#toast")!;
 const toastText = document.querySelector<HTMLSpanElement>("#toast-text")!;
 const button = document.querySelector<HTMLButtonElement>("#connect")!;
+const buttonLabel = document.querySelector<HTMLSpanElement>("#connect-label")!;
+const buttonSpinner = button.querySelector<HTMLSpanElement>(".connect-spinner")!;
 const titlebar = document.querySelector<HTMLElement>("#titlebar")!;
 const menuBtn = document.querySelector<HTMLButtonElement>("#menu-btn")!;
 const maxBtn = document.querySelector<HTMLButtonElement>("#win-max")!;
@@ -281,6 +286,13 @@ function applyProfileAvatar(name: string) {
 }
 
 let toastTimer: number | null = null;
+function setConnectButton(label: string, busy: boolean) {
+  button.disabled = busy;
+  buttonLabel.textContent = label;
+  buttonSpinner.hidden = !busy;
+  button.toggleAttribute("aria-busy", busy);
+}
+
 function showToast(message: string) {
   toastText.textContent = message;
   toastEl.hidden = false;
@@ -786,8 +798,7 @@ async function showSetup(prefill?: string) {
   stopChromeUrlPoll();
   setupView.hidden = false;
   if (prefill) input.value = prefill;
-  button.disabled = false;
-  button.textContent = "Connect";
+  setConnectButton("Connect", false);
   authState = {
     authenticated: false,
     username: null,
@@ -820,8 +831,7 @@ async function showServer(url: string) {
     serverOpen = false;
     setupView.hidden = false;
     setServerOpenClass(false);
-    button.disabled = false;
-    button.textContent = "Connect";
+    setConnectButton("Connect", false);
     return;
   }
   // Do not remove the only visible/recoverable UI until native child-webview
@@ -859,17 +869,15 @@ form.addEventListener("submit", async (event) => {
     return;
   }
 
-  button.disabled = true;
-  button.textContent = "Checking…";
+  setConnectButton("Checking…", true);
   try {
     const url = await invoke<string>("probe_server_url", { url: raw });
     await invoke<string>("set_server_url", { url });
-    button.textContent = "Connecting…";
+    setConnectButton("Connecting…", true);
     await showServer(url);
   } catch {
     showToast("URL not valid");
-    button.disabled = false;
-    button.textContent = "Connect";
+    setConnectButton("Connect", false);
   }
 });
 
@@ -1059,7 +1067,12 @@ async function bootstrap() {
     // Non-Tauri preview.
   }
 
+  // The updater owns launch sequencing: no update closes it and opens Polarr;
+  // an available update downloads, installs, and relaunches without allowing
+  // the desktop window to overlap it.
   const updaterDone = openUpdaterWindow();
+  await updaterDone;
+  await revealMainWindow();
 
   try {
     const saved = await invoke<{
@@ -1076,6 +1089,7 @@ async function bootstrap() {
       input.value = existing;
     }
     if (existing && !skipAuto) {
+      setConnectButton("Connecting…", true);
       try {
         const url = await invoke<string>("probe_server_url", { url: existing });
         await showServer(url);
@@ -1093,8 +1107,6 @@ async function bootstrap() {
     await showSetup();
   }
 
-  await updaterDone;
-  await revealMainWindow();
 }
 
 void bootstrap();

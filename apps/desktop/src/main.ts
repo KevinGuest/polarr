@@ -629,18 +629,15 @@ async function openAccountMenu(anchor: HTMLElement) {
   await toggleChromeMenu(anchor, items, "end");
 }
 
-/** Append desktop flags so the web app can match native chrome. */
+/** Append ?desktop=1 so the web app can hide its duplicate header. */
 function withDesktopParam(serverUrl: string): string {
   try {
     const u = new URL(serverUrl);
     u.searchParams.set("desktop", "1");
-    if (isMacPlatform()) u.searchParams.set("titlebar", "overlay");
     return u.toString();
   } catch {
     const base = serverUrl.replace(/\/$/, "");
-    const join = serverUrl.includes("?") ? "&" : "?";
-    const overlay = isMacPlatform() ? "&titlebar=overlay" : "";
-    return `${base}${join}desktop=1${overlay}`;
+    return `${base}${serverUrl.includes("?") ? "&" : "?"}desktop=1`;
   }
 }
 

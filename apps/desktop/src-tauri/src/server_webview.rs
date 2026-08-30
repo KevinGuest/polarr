@@ -123,7 +123,7 @@ pub const INIT_SCRIPT: &str = r#"
   // Also hide native scrollbars on Radix ScrollArea so WebView2 doesn't stack
   // OS overlay bars on top of the custom thumb.
   var HIDE_CSS =
-    "html[data-polarr-desktop]:not([data-polarr-overlay-titlebar]) [data-polarr-app-header]{" +
+    "html[data-polarr-desktop] [data-polarr-app-header]{" +
     "display:none!important;height:0!important;max-height:0!important;min-height:0!important;" +
     "overflow:hidden!important;border:0!important;padding:0!important;margin:0!important;" +
     "visibility:hidden!important;pointer-events:none!important;opacity:0!important;" +
@@ -809,11 +809,10 @@ fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> 
     // Nested WKWebViews intermittently paint only their background even after
     // WebKit has accepted and started the remote request. The primary WKWebView
     // already rendered the updater and connection UI reliably, so reuse it as
-    // the top-level browsing context on macOS. `?desktop=1&titlebar=overlay`
-    // keeps the web header as the 48px title bar under native traffic lights.
+    // the top-level browsing context on macOS. `?desktop=1` lets the shared web
+    // UI enable native integrations and desktop layout without a second view.
     main.navigate(parsed)
         .map_err(|e| format!("open Polarr server: {e}"))?;
-    crate::macos_window::align_traffic_lights(&app);
     Ok(())
 }
 

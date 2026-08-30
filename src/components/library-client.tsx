@@ -1,16 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  ChevronLeft,
   Clock,
+  Pause,
   Play,
   RefreshCw,
+  Shuffle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CoverArt } from "@/components/cover-art";
 import { LikedSongsCover, likedSongsGradientStyle } from "@/components/liked-songs-cover";
+import { NowPlayingBars } from "@/components/now-playing-bars";
+import { MobileSaveButton } from "@/components/saved-in-drawer";
+import { PolarrAvailabilityBadge } from "@/components/stream-quality-badge";
+import { TrackActionsDrawer } from "@/components/track-actions-drawer";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
 import { TrackRowIndex } from "@/components/track-row-index";
@@ -84,7 +91,7 @@ export function LibraryClient({
   mode?: "library" | "liked";
 }) {
   const router = useRouter();
-  const { play, track, queue } = usePlayer();
+  const { play, toggle, track, queue, playing } = usePlayer();
   const searchParams = useSearchParams();
   const filterAlbum = searchParams.get("album");
   const filterArtist = searchParams.get("artist");
@@ -267,6 +274,40 @@ export function LibraryClient({
     play(toPlayable(t), playableQueue);
   }
 
+  const [showStickyTitle, setShowStickyTitle] = useState(false);
+  const heroSentinelRef = useRef<HTMLDivElement>(null);
+  const inLiked = Boolean(
+    track && playableQueue.some((t) => t.id === track.id),
+  );
+
+  useEffect(() => {
+    if (mode !== "liked") return;
+    const el = heroSentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => setShowStickyTitle(!entry?.isIntersecting),
+      { threshold: 0, rootMargin: "-56px 0px 0px 0px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [mode, filteredTracks.length]);
+
+  function playLiked() {
+    if (inLiked) {
+      toggle();
+      return;
+    }
+    const first = filteredTracks[0];
+    if (first) playFrom(first);
+  }
+
+  function playLikedShuffled() {
+    const shuffled = [...playableQueue].sort(() => Math.random() - 0.5);
+    const first = shuffled[0];
+    if (!first) return;
+    play(first, shuffled);
+  }
+
   const albumView = mode !== "liked" && Boolean(filterAlbum);
 
   const featured =
@@ -342,7 +383,184 @@ export function LibraryClient({
   }
 
   return (
-    <div className="flex min-h-full flex-col">
+    <>
+      {mode === "liked" ? (
+        <div className="lg:hidden">
+          <div
+            className={cn(
+              "fixed inset-x-0 top-0 z-30 flex items-center gap-2 px-3 pb-2.5 pt-[max(0.5rem,var(--safe-top))] transition-colors duration-200",
+              showStickyTitle
+                ? "border-b border-border/40 bg-background/75 backdrop-blur-md"
+                : "bg-transparent",
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className={cn(
+                "rounded-full p-1.5",
+                showStickyTitle
+                  ? "text-foreground"
+                  : "bg-black/35 text-white backdrop-blur-sm",
+              )}
+              aria-label="Go back"
+            >
+              <ChevronLeft className="size-6" />
+            </button>
+            <h1
+              className={cn(
+                "min-w-0 flex-1 truncate text-base font-semibold transition-opacity duration-200",
+                showStickyTitle ? "opacity-100" : "opacity-0",
+              )}
+            >
+              Liked Songs
+            </h1>
+          </div>
+
+          <div className="relative pb-1 pt-[max(3.25rem,calc(var(--safe-top)+2.75rem))]">
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{
+                background: likedSongsGradientStyle(likedSeed).backgroundImage,
+                maskImage:
+                  "linear-gradient(180deg, black 0%, transparent 100%)",
+                WebkitMaskImage:
+                  "linear-gradient(180deg, black 0%, transparent 100%)",
+              }}
+              aria-hidden
+            />
+            <LikedSongsCover
+              className="relative mx-auto aspect-square w-[calc(100%-3rem)] max-w-[18rem] rounded-2xl shadow-2xl"
+              heartClassName="size-16"
+              seed={likedSeed}
+            />
+            <div ref={heroSentinelRef} className="relative h-px" aria-hidden />
+            <div className="relative space-y-3 px-4 pb-2 pt-4">
+              <h1 className="text-[1.75rem] font-bold leading-tight tracking-tight">
+                Liked Songs
+              </h1>
+              <p className="text-sm text-muted-foreground">{heroMeta}</p>
+              <div className="flex items-center gap-3 pt-1">
+                <div className="min-w-0 flex-1" />
+                <button
+                  type="button"
+                  onClick={playLikedShuffled}
+                  disabled={filteredTracks.length === 0}
+                  className="rounded-full p-2 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                  aria-label="Shuffle play"
+                >
+                  <Shuffle className="size-6" />
+                </button>
+                <button
+                  type="button"
+                  onClick={playLiked}
+                  disabled={filteredTracks.length === 0}
+                  className="flex size-14 items-center justify-center rounded-full bg-foreground text-background shadow-lg disabled:opacity-40"
+                  aria-label={inLiked && playing ? "Pause" : "Play"}
+                >
+                  {inLiked && playing ? (
+                    <Pause className="size-6" fill="currentColor" />
+                  ) : (
+                    <Play className="size-6 translate-x-0.5" fill="currentColor" />
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <section className="pt-2">
+            {filteredTracks.length === 0 ? (
+              <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+                No liked songs yet. Tap the heart on any track to save it here.
+              </p>
+            ) : (
+              <ul>
+                {filteredTracks.map((t) => {
+                  const playable = toPlayable(t);
+                  const isCurrent = isPlayerRowCurrent(
+                    track,
+                    {
+                      id: playable.id,
+                      localTrackId: t.id,
+                      title: t.title,
+                      artist: t.artist,
+                    },
+                    queue,
+                  );
+                  return (
+                    <li key={t.id}>
+                      <div className="flex w-full items-center gap-3 px-4 py-2.5">
+                        <button
+                          type="button"
+                          onClick={() => playFrom(t)}
+                          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                        >
+                          <CoverArt
+                            seed={`${t.artist}-${t.title}`}
+                            image={t.coverPath}
+                            className="size-12 shrink-0 rounded-md"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div
+                              className={cn(
+                                "flex min-w-0 items-center gap-2",
+                                isCurrent ? "text-primary" : "text-foreground",
+                              )}
+                            >
+                              {isCurrent ? (
+                                <NowPlayingBars playing={playing} />
+                              ) : null}
+                              <span className="truncate text-[15px] font-medium">
+                                {t.title}
+                              </span>
+                            </div>
+                            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+                              {t.explicit || titleLooksExplicit(t.title) ? (
+                                <ExplicitBadge />
+                              ) : null}
+                              <span className="min-w-0 truncate">
+                                {formatTrackArtistLine(t.artist, t.title)}
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <PolarrAvailabilityBadge available={!t.streamOnly} />
+                          <MobileSaveButton
+                            trackId={t.id}
+                            artist={t.artist}
+                            title={t.title}
+                            album={t.album}
+                            coverPath={t.coverPath}
+                            duration={t.duration}
+                            onPolarr={!t.streamOnly}
+                            alreadyInLibrary={!t.streamOnly}
+                            seedLiked
+                            size="sm"
+                            onSavedChange={() => onLikedChange(t.id, false)}
+                          />
+                        </div>
+                        <TrackActionsDrawer
+                          track={playable}
+                          onPolarr={!t.streamOnly}
+                          inLibrary={!t.streamOnly}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        </div>
+      ) : null}
+
+    <div
+      className={cn(
+        "flex min-h-full flex-col",
+        mode === "liked" && "hidden lg:flex",
+      )}
+    >
       <section
         className={cn(
           "relative -mx-4 -mt-4 border-b border-border px-4 pb-8 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10",
@@ -674,5 +892,6 @@ export function LibraryClient({
         )}
       </section>
     </div>
+    </>
   );
 }

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { Camera } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
-import { InsetGroup } from "@/components/media-shelf";
+import { InsetGroup, useFitCount } from "@/components/media-shelf";
 import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -71,6 +71,107 @@ function cacheBust(url: string | null, v: number) {
   if (!url) return null;
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}v=${v}`;
+}
+
+type ShelfItem = {
+  key: string;
+  href: string;
+  title: string;
+  subtitle: string;
+  seed: string;
+  image: string | null;
+};
+
+/**
+ * Profile media section — inset list on phone; on desktop a single row of
+ * tiles sized to the viewport (no horizontal scroll) with a Show all toggle.
+ */
+function ProfileTileShelf({
+  title,
+  items,
+  emptyText,
+}: {
+  title: string;
+  items: ShelfItem[];
+  emptyText: string;
+}) {
+  const { ref, count } = useFitCount(148, 16);
+  const [expanded, setExpanded] = useState(false);
+  const overflow = items.length > count;
+  const visible = expanded ? items : items.slice(0, count);
+
+  return (
+    <section className="space-y-4">
+      <div className="flex items-end justify-between gap-3">
+        <h2 className="text-[1.375rem] font-semibold tracking-tight">
+          {title}
+        </h2>
+        {overflow ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="hidden shrink-0 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground lg:block"
+          >
+            {expanded ? "Show less" : "Show all"}
+          </button>
+        ) : null}
+      </div>
+      {items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{emptyText}</p>
+      ) : (
+        <>
+          <InsetGroup className="lg:hidden">
+            {items.map((it) => (
+              <Link
+                key={it.key}
+                href={it.href}
+                className="flex min-h-14 items-center gap-3 px-3"
+              >
+                <CoverArt
+                  seed={it.seed}
+                  image={it.image}
+                  className="size-10 shrink-0 rounded-xl"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[17px]">
+                    {it.title}
+                  </span>
+                  <span className="block truncate text-[13px] text-muted-foreground">
+                    {it.subtitle}
+                  </span>
+                </span>
+              </Link>
+            ))}
+          </InsetGroup>
+          <div
+            ref={ref}
+            className="hidden w-full gap-4 lg:grid"
+            style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}
+          >
+            {visible.map((it) => (
+              <Link
+                key={it.key}
+                href={it.href}
+                className="group min-w-0 space-y-2"
+              >
+                <CoverArt
+                  seed={it.seed}
+                  image={it.image}
+                  className="aspect-square w-full rounded-2xl shadow-md shadow-black/30"
+                />
+                <div className="min-w-0 px-0.5">
+                  <p className="truncate text-sm font-semibold">{it.title}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {it.subtitle}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 export function ProfileClient({

@@ -245,6 +245,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
   const desktopShell = useDesktopShellMode();
   const isSearchPage = pathname === "/search";
   const isLibraryPage = pathname === "/library";
+  const isLikedSongsPage = pathname === "/library/liked";
   const isArtistPage = pathname === "/artist";
   const isAlbumPage = pathname.startsWith("/album");
   const isPlaylistPage = pathname.startsWith("/playlist");
@@ -318,6 +319,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
         isArtistPage && "max-lg:px-4 max-lg:py-0",
         isAlbumPage && "max-lg:px-0 max-lg:py-0",
         isPlaylistPage && "max-lg:px-0 max-lg:py-0",
+        isLikedSongsPage && "max-lg:px-0 max-lg:py-0",
         isProfilePage && "max-lg:px-4 max-lg:py-0",
         isBrowsePage && "max-lg:pt-[max(1rem,calc(var(--safe-top)+0.35rem))]",
         !isAdminPath &&
@@ -325,7 +327,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             ? "max-lg:pb-[calc(var(--mobile-dock-stack)+var(--mobile-dock-player-h)+1rem)]"
             : "max-lg:pb-[calc(var(--mobile-dock-stack)+1rem)]"),
       ),
-    [isAdminPath, isAlbumPage, isArtistPage, isBrowsePage, isLibraryPage, isPlaylistPage, isProfilePage, isSearchPage, track],
+    [isAdminPath, isAlbumPage, isArtistPage, isBrowsePage, isLibraryPage, isLikedSongsPage, isPlaylistPage, isProfilePage, isSearchPage, track],
   );
 
   const adminSidebarInner = (
@@ -424,6 +426,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
               "flex shrink-0 items-center gap-3 px-4 pb-3 pt-[max(0.75rem,var(--safe-top))] lg:hidden",
               isSearchPage && "hidden",
               isLibraryPage && "hidden",
+              isLikedSongsPage && "hidden",
               isArtistPage && "hidden",
               isAlbumPage && "hidden",
               isPlaylistPage && "hidden",

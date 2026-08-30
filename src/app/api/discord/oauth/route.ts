@@ -27,7 +27,7 @@ export function oauthStateCookieName() {
   return OAUTH_STATE_COOKIE;
 }
 
-/** Start Discord OAuth (identify). */
+/** Start Discord OAuth for account identity and desktop Rich Presence. */
 export async function GET() {
   const user = await getAuthUser();
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
@@ -57,7 +57,7 @@ export async function GET() {
     client_id: settings.discordClientId.trim(),
     redirect_uri: redirectUri(),
     response_type: "code",
-    scope: "identify",
+    scope: "identify rpc.activities.write",
     state,
     prompt: "consent",
   });

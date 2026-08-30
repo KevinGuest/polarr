@@ -14,6 +14,29 @@ export type ClientDescription = {
   device: string | null;
 };
 
+const DESKTOP_PLATFORM_COOKIE = "polarr_desktop_platform";
+
+const DESKTOP_LABELS: Record<string, string> = {
+  windows: "Polarr for Windows",
+  macos: "Polarr for macOS",
+  linux: "Polarr for Linux",
+  desktop: "Polarr Desktop",
+};
+
+function cookieValue(cookieHeader: string | null, name: string): string | null {
+  if (!cookieHeader) return null;
+  for (const part of cookieHeader.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator < 0 || part.slice(0, separator).trim() !== name) continue;
+    try {
+      return decodeURIComponent(part.slice(separator + 1).trim());
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 function detectOs(agent: string): string | null {
   if (/iPhone|iPod/i.test(agent)) return "iOS";
   if (/iPad/i.test(agent)) return "iPadOS";
@@ -61,4 +84,18 @@ export function describeUserAgent(
     browser && os ? `${browser} on ${os}` : browser || os || "Unknown";
 
   return { platform, device };
+}
+
+/**
+ * Prefer the desktop shell's explicit display hint over its embedded browser
+ * User-Agent. This hint is notification metadata only, never an auth signal.
+ */
+export function describeRequestClient(req: Request): ClientDescription {
+  const desktopPlatform = cookieValue(
+    req.headers.get("cookie"),
+    DESKTOP_PLATFORM_COOKIE,
+  );
+  const label = desktopPlatform ? DESKTOP_LABELS[desktopPlatform] : null;
+  if (label) return { platform: label, device: null };
+  return describeUserAgent(req.headers.get("user-agent"));
 }

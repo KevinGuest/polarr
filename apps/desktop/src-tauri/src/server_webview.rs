@@ -7,11 +7,14 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{mpsc, Mutex};
+use std::time::Duration;
+
+#[cfg(not(target_os = "macos"))]
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc, Arc, Mutex,
+    Arc,
 };
-use std::time::Duration;
 
 use serde_json::Value;
 use tauri::{
@@ -49,6 +52,7 @@ fn href_is_blank(s: &str) -> bool {
 
 /// Overlay child webviews on macOS often stay at about:blank even when created
 /// with WebviewUrl::External — the pane is WKWebView's default white.
+#[cfg(not(target_os = "macos"))]
 fn kick_server_load(wv: &tauri::Webview, url: &str) {
     match wv.url() {
         Ok(current) if !href_is_blank(current.as_str()) => return,
@@ -173,6 +177,17 @@ pub const INIT_SCRIPT: &str = r#"
     try { sessionStorage.setItem("polarr-desktop", "1"); } catch (_) {}
   }
 
+  function ensureClientIdentity() {
+    try {
+      var agent = navigator.userAgent || "";
+      var platform = /Windows/i.test(agent) ? "windows" :
+        (/Macintosh|Mac OS X/i.test(agent) ? "macos" :
+        (/Linux/i.test(agent) ? "linux" : "desktop"));
+      document.cookie = "polarr_desktop_platform=" + platform +
+        "; Path=/; SameSite=Lax";
+    } catch (_) {}
+  }
+
   function ensureStyle() {
     try {
       var el = document.getElementById("polarr-desktop-hide-header");
@@ -206,6 +221,7 @@ pub const INIT_SCRIPT: &str = r#"
   function applyDesktopMarkers() {
     ensureGlobal();
     ensureStorage();
+    ensureClientIdentity();
     ensureAttr();
     ensureStyle();
     nukeHeaders();
@@ -632,6 +648,7 @@ fn apply_layout(app: &AppHandle) -> Result<(), String> {
     let _ = wv.show();
     let url = last_server_url()
         .unwrap_or_else(|| wv.url().ok().map(|u| u.to_string()).unwrap_or_default());
+    #[cfg(not(target_os = "macos"))]
     if !url.is_empty() {
         kick_server_load(&wv, &url);
     }
@@ -669,10 +686,6 @@ fn same_origin(a: &Url, b: &Url) -> bool {
     a.scheme() == b.scheme()
         && a.host() == b.host()
         && a.port_or_known_default() == b.port_or_known_default()
-}
-
-fn is_loaded_http_url(url: &Url) -> bool {
-    matches!(url.scheme(), "http" | "https") && !href_is_blank(url.as_str())
 }
 
 fn reassert_desktop_markers(wv: &tauri::Webview) {
@@ -795,11 +808,9 @@ fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> 
     let handle = app.clone();
     let ready = run_on_main_sync(&app, move || create_or_reveal_server(&handle, parsed, url))?;
 
-    // add_child only confirms that the native WebView2/WKWebView control was
-    // created. It does not mean its first document loaded. Keep the working
-    // setup shell in front until the child reports a finished page load; this
-    // also turns a stalled navigation into a recoverable error instead of a
-    // permanently black content area.
+    // WebView2 can stay hidden until its first document reports Finished.
+    // macOS takes a different path in create_or_reveal_server: attach a blank
+    // WKWebView first, then let the native layout issue its NSURLRequest.
     if let Some(ready) = ready {
         ready.recv_timeout(Duration::from_secs(20)).map_err(|_| {
             "The server page did not finish loading. Check the URL and try again.".to_string()
@@ -822,34 +833,6 @@ fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> 
     Ok(())
 }
 
-fn wait_for_server_ready(app: &AppHandle, ready: mpsc::Receiver<()>) -> Result<(), String> {
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    loop {
-        if ready.recv_timeout(Duration::from_millis(100)).is_ok() {
-            return Ok(());
-        }
-
-        // WKWebView does not consistently deliver Tauri's Finished callback
-        // for an overlay child. A committed HTTP(S) URL is sufficient on macOS:
-        // the endpoint was already verified by probe_server_url and the active
-        // WKWebView can continue rendering after the native layout hand-off.
-        #[cfg(target_os = "macos")]
-        if let Some(wv) = app.get_webview(SERVER_WEBVIEW_LABEL) {
-            if let Ok(current) = wv.url() {
-                if is_loaded_http_url(&current) {
-                    return Ok(());
-                }
-            }
-        }
-
-        if std::time::Instant::now() >= deadline {
-            return Err(
-                "The server page did not finish loading. Check the URL and try again.".to_string(),
-            );
-        }
-    }
-}
-
 fn schedule_connected_retries(app: AppHandle) {
     for ms in [80_u64, 200, 500, 1200] {
         let handle = app.clone();
@@ -857,6 +840,7 @@ fn schedule_connected_retries(app: AppHandle) {
             std::thread::sleep(Duration::from_millis(ms));
             let for_main = handle.clone();
             let _ = handle.run_on_main_thread(move || {
+                #[cfg(not(target_os = "macos"))]
                 if let Some(url) = last_server_url() {
                     if let Some(wv) = for_main.get_webview(SERVER_WEBVIEW_LABEL) {
                         kick_server_load(&wv, &url);
@@ -885,6 +869,7 @@ fn create_or_reveal_server(
             Ok(current) => href_is_blank(current.as_str()) || !same_origin(&current, &parsed),
             Err(_) => true,
         };
+        #[cfg(not(target_os = "macos"))]
         if should_navigate {
             let _ = existing.navigate(parsed.clone());
             let href = serde_json::to_string(&url).map_err(|e| e.to_string())?;
@@ -892,6 +877,10 @@ fn create_or_reveal_server(
                 .eval(&format!("window.location.replace({href})"))
                 .map_err(|e| format!("navigate server webview: {e}"))?;
         } else {
+            reassert_desktop_markers(&existing);
+        }
+        #[cfg(target_os = "macos")]
+        if !should_navigate {
             reassert_desktop_markers(&existing);
         }
         apply_layout(app)?;
@@ -905,14 +894,28 @@ fn create_or_reveal_server(
     }
 
     let (pos, size) = content_bounds(&window)?;
-    let (ready_tx, ready_rx) = mpsc::channel();
-    let callback_target = parsed.clone();
-    let callback_once = Arc::new(AtomicBool::new(false));
-    let builder = WebviewBuilder::new(SERVER_WEBVIEW_LABEL, WebviewUrl::External(parsed.clone()))
+    // On macOS, beginning navigation inside add_child races the WKWebView's
+    // attachment to its NSWindow and can leave a healthy server on a blank
+    // background. Attach an about:blank view first; native layout starts the
+    // remote request only after the view hierarchy and frames are established.
+    #[cfg(target_os = "macos")]
+    let initial_url = WebviewUrl::External(
+        Url::parse("about:blank").map_err(|e| format!("create blank server URL: {e}"))?,
+    );
+    #[cfg(not(target_os = "macos"))]
+    let initial_url = WebviewUrl::External(parsed.clone());
+    let builder = WebviewBuilder::new(SERVER_WEBVIEW_LABEL, initial_url)
         .initialization_script(INIT_SCRIPT)
         .focused(true)
-        .background_color(tauri::webview::Color(9, 9, 11, 255))
-        .on_page_load(move |_webview, payload| {
+        .background_color(tauri::webview::Color(9, 9, 11, 255));
+    #[cfg(target_os = "macos")]
+    let ready_rx: Option<mpsc::Receiver<()>> = None;
+    #[cfg(not(target_os = "macos"))]
+    let (builder, ready_rx) = {
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let callback_target = parsed.clone();
+        let callback_once = Arc::new(AtomicBool::new(false));
+        let builder = builder.on_page_load(move |_webview, payload| {
             if !matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
                 || href_is_blank(payload.url().as_str())
                 || !same_origin(payload.url(), &callback_target)
@@ -922,6 +925,8 @@ fn create_or_reveal_server(
             }
             let _ = ready_tx.send(());
         });
+        (builder, Some(ready_rx))
+    };
 
     // Keep the setup shell full-size until the child exists. In particular,
     // WebView2/WKWebView creation can fail for machine-specific reasons; if we
@@ -930,20 +935,30 @@ fn create_or_reveal_server(
     let wv = window
         .add_child(builder, pos, size)
         .map_err(|e| format!("create server webview: {e}"))?;
-    // A newly-created native child is above the shell in the compositor even
-    // before it has painted a document. Hide it immediately and leave the
-    // setup shell full-sized until its Finished callback proves that content
-    // loaded. This prevents WebView2's black background from becoming the only
-    // visible/recoverable UI while navigation is pending or stalled.
+    // WebView2 can load while hidden, keeping its unpainted background behind
+    // the setup shell until Finished. Hiding WKWebView can suspend navigation,
+    // so macOS keeps the blank child live and performs the native handoff now.
+    #[cfg(not(target_os = "macos"))]
     if let Err(err) = wv.hide() {
         let _ = wv.close();
         return Err(format!("hide loading server webview: {err}"));
     }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = wv.navigate(parsed);
+        kick_server_load(&wv, &url);
+    }
     #[cfg(target_os = "macos")]
-    crate::macos_window::stage_server_load(app, &url);
-    let _ = wv.navigate(parsed);
-    kick_server_load(&wv, &url);
-    Ok(Some(ready_rx))
+    {
+        // apply_layout attaches and sizes the blank child before the Objective-C
+        // bridge calls loadRequest. Do not call kick_server_load on macOS: that
+        // would reintroduce the pre-attachment navigation race.
+        apply_layout(app)?;
+        let _ = wv.set_focus();
+        schedule_marker_kicks(app.clone());
+        schedule_connected_retries(app.clone());
+    }
+    Ok(ready_rx)
 }
 
 #[tauri::command]

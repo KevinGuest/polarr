@@ -154,7 +154,7 @@ export async function GET(req: Request) {
       result.token,
       await sessionCookieOptions(),
     );
-    const { notifyDiscord, notifyIpField, notifyPlatformFields } =
+    const { notifyDiscord, notifyIpField, notifyRequestPlatformFields } =
       await import("@/lib/admin-notify");
     notifyDiscord("userLogin", {
       title: "User signed in",
@@ -163,7 +163,7 @@ export async function GET(req: Request) {
         { name: "User", value: result.user.username, inline: true },
         { name: "Method", value: "discord", inline: true },
         notifyIpField(ip),
-        ...notifyPlatformFields(req.headers.get("user-agent")),
+        ...notifyRequestPlatformFields(req),
       ],
     });
     return NextResponse.redirect(`${publicBase}/`);

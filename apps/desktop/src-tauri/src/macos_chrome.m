@@ -207,6 +207,29 @@ static BOOL polarr_host_matches(NSString *href, const char *server_url) {
   return [have.host.lowercaseString isEqualToString:want.host.lowercaseString];
 }
 
+static NSInteger polarr_effective_port(NSURL *url) {
+  if (url.port != nil) {
+    return url.port.integerValue;
+  }
+  NSString *scheme = url.scheme.lowercaseString;
+  if ([scheme isEqualToString:@"http"]) {
+    return 80;
+  }
+  if ([scheme isEqualToString:@"https"]) {
+    return 443;
+  }
+  return -1;
+}
+
+static BOOL polarr_same_origin(NSURL *have, NSURL *want) {
+  if (!have || !want || have.host.length == 0 || want.host.length == 0) {
+    return NO;
+  }
+  return [have.scheme.lowercaseString isEqualToString:want.scheme.lowercaseString] &&
+         [have.host.lowercaseString isEqualToString:want.host.lowercaseString] &&
+         polarr_effective_port(have) == polarr_effective_port(want);
+}
+
 static void polarr_classify_webviews(NSView *content, const char *server_url, WKWebView **shellOut,
                                      WKWebView **serverOut) {
   NSMutableArray<WKWebView *> *all = [NSMutableArray array];
@@ -273,48 +296,6 @@ static void polarr_fill_inside(NSView *box, NSView *leaf) {
   }
 }
 
-void polarr_macos_stage_server_load(void *ns_window, const char *server_url) {
-  if (ns_window == NULL) {
-    return;
-  }
-  NSWindow *window = (__bridge NSWindow *)ns_window;
-  NSView *content = window.contentView;
-  if (!content) {
-    return;
-  }
-  polarr_paint_content(content);
-
-  WKWebView *shellWV = nil;
-  WKWebView *serverWV = nil;
-  polarr_classify_webviews(content, server_url, &shellWV, &serverWV);
-  if (!shellWV || !serverWV || shellWV == serverWV) {
-    return;
-  }
-
-  NSView *shellBox = polarr_content_child(content, shellWV);
-  NSView *serverBox = polarr_content_child(content, serverWV);
-  if (!shellBox || !serverBox || shellBox == serverBox) {
-    return;
-  }
-
-  // WKWebView pauses work while hidden on some macOS/WebKit versions. Leave
-  // the server view attached and visible so navigation can complete, but keep
-  // the known-good setup shell above it until Rust receives Finished and calls
-  // polarr_macos_layout_connected for the final split layout.
-  polarr_set_container_frame(serverBox, content.bounds,
-                             NSViewWidthSizable | NSViewHeightSizable);
-  polarr_fill_inside(serverBox, serverWV);
-  serverWV.hidden = NO;
-  polarr_macos_paint_webview((__bridge void *)serverWV);
-
-  polarr_set_container_frame(shellBox, content.bounds,
-                             NSViewWidthSizable | NSViewHeightSizable);
-  polarr_fill_inside(shellBox, shellWV);
-  shellWV.hidden = NO;
-  [content addSubview:serverBox positioned:NSWindowBelow relativeTo:shellBox];
-  [content addSubview:shellBox positioned:NSWindowAbove relativeTo:serverBox];
-}
-
 void polarr_macos_layout_connected(void *ns_window, double titlebar_h, const char *server_url) {
   if (ns_window == NULL) {
     return;
@@ -356,20 +337,29 @@ void polarr_macos_layout_connected(void *ns_window, double titlebar_h, const cha
     [content addSubview:serverBox positioned:NSWindowAbove relativeTo:shellBox];
     serverWV.hidden = NO;
     polarr_macos_paint_webview((__bridge void *)serverWV);
-    // Overlay + add_child often leaves the child at about:blank. Only kick a
-    // load while it is still blank so resizes do not reload a live session.
-    NSString *current = (serverWV.URL.absoluteString ?: @"").lowercaseString;
-    BOOL blank = current.length == 0 || [current hasPrefix:@"about:"];
-    if (blank && server_url && server_url[0] != '\0') {
-      NSString *href = [NSString stringWithUTF8String:server_url];
-      NSURL *dest = href.length ? [NSURL URLWithString:href] : nil;
-      if (dest) {
-        NSURLRequest *req =
-            [NSURLRequest requestWithURL:dest
-                             cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
-                         timeoutInterval:30.0];
-        [serverWV loadRequest:req];
-      }
+    // Start navigation only after add_child's wrapper and WKWebView have been
+    // attached and sized. Deferring one main-queue cycle avoids racing the
+    // initial NSURLRequest against WebKit view attachment. Origin comparison
+    // prevents resize/layout retries from reloading a live session.
+    NSString *href = server_url && server_url[0] != '\0'
+                         ? [NSString stringWithUTF8String:server_url]
+                         : @"";
+    NSURL *dest = href.length ? [NSURL URLWithString:href] : nil;
+    if (dest && !polarr_same_origin(serverWV.URL, dest)) {
+      __weak WKWebView *weakServerWV = serverWV;
+      dispatch_async(dispatch_get_main_queue(), ^{
+        WKWebView *liveServerWV = weakServerWV;
+        if (!liveServerWV) {
+          return;
+        }
+        if (!polarr_same_origin(liveServerWV.URL, dest)) {
+          NSURLRequest *req =
+              [NSURLRequest requestWithURL:dest
+                               cachePolicy:NSURLRequestUseProtocolCachePolicy
+                           timeoutInterval:30.0];
+          [liveServerWV loadRequest:req];
+        }
+      });
     }
   }
 }

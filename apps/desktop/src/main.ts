@@ -1059,9 +1059,6 @@ void appWindow.onResized(() => {
 
 async function bootstrap() {
   await syncMaximizedUi();
-  // Never gate the main window on updater or server network requests. On slow
-  // networks (especially at macOS cold start) that made the app appear hung.
-  await revealMainWindow();
   try {
     await listen("server-cleared", () => {
       void showSetup(input.value);
@@ -1070,7 +1067,11 @@ async function bootstrap() {
     // Non-Tauri preview.
   }
 
-  void openUpdaterWindow();
+  // The updater exclusively owns startup visibility. If no update is found it
+  // closes and Polarr opens; if an update is found it installs and relaunches
+  // without the full desktop window ever appearing behind it.
+  await openUpdaterWindow();
+  await revealMainWindow();
 
   try {
     const saved = await invoke<{
@@ -1104,7 +1105,6 @@ async function bootstrap() {
   } catch {
     await showSetup();
   }
-
 }
 
 void bootstrap();

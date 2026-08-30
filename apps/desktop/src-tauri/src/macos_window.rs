@@ -27,7 +27,6 @@ extern "C" {
         titlebar_h: f64,
         server_url: *const c_char,
     );
-    fn polarr_macos_stage_server_load(ns_window: *mut c_void, server_url: *const c_char);
     fn polarr_macos_fill_shell(ns_window: *mut c_void);
 }
 
@@ -76,22 +75,6 @@ pub fn layout_connected(app: &AppHandle, server_url: &str) {
         unsafe {
             polarr_macos_align_traffic_lights(ptr);
             polarr_macos_layout_connected(ptr, TITLEBAR_HEIGHT, c_url.as_ptr());
-        }
-    }
-}
-
-/// Keep WKWebView active while its first page loads, but place the setup shell
-/// above it. Hiding a WKWebView can suspend navigation and suppress the page
-/// load callback on macOS, so the cross-platform `Webview::hide` staging used
-/// by WebView2 cannot be used here.
-pub fn stage_server_load(app: &AppHandle, server_url: &str) {
-    let Some(window) = app.get_window("main") else {
-        return;
-    };
-    let c_url = CString::new(server_url).unwrap_or_else(|_| CString::new("").unwrap());
-    if let Ok(ptr) = window.ns_window() {
-        unsafe {
-            polarr_macos_stage_server_load(ptr, c_url.as_ptr());
         }
     }
 }

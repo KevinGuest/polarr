@@ -4,7 +4,7 @@
 use std::sync::Mutex;
 
 use discord_rich_presence::{
-    activity::{Activity, ActivityType, Assets, Timestamps},
+    activity::{Activity, ActivityType, Assets, StatusDisplayType, Timestamps},
     DiscordIpc, DiscordIpcClient,
 };
 use serde::Deserialize;
@@ -78,10 +78,7 @@ fn is_public_https_cover(raw: &str) -> bool {
     true
 }
 
-fn ensure_client(
-    slot: &mut Option<ConnectedClient>,
-    client_id: &str,
-) -> Result<(), String> {
+fn ensure_client(slot: &mut Option<ConnectedClient>, client_id: &str) -> Result<(), String> {
     let id = client_id.trim();
     if id.is_empty() {
         return Err("Discord Client ID is empty".into());
@@ -99,8 +96,7 @@ fn ensure_client(
     }
 
     let mut ipc = DiscordIpcClient::new(id);
-    ipc
-        .connect()
+    ipc.connect()
         .map_err(|e| format!("Connect to Discord failed (is Discord running?): {e}"))?;
     *slot = Some(ConnectedClient {
         client_id: id.to_string(),
@@ -109,10 +105,7 @@ fn ensure_client(
     Ok(())
 }
 
-fn apply_activity(
-    ipc: &mut DiscordIpcClient,
-    payload: &PresencePayload,
-) -> Result<(), String> {
+fn build_activity(payload: &PresencePayload) -> Activity<'static> {
     let details = truncate(&payload.title, 128);
     let state = truncate(&payload.artist, 128);
     let album_text = truncate(
@@ -124,22 +117,29 @@ fn apply_activity(
         128,
     );
 
-    let mut assets = Assets::new().large_text(album_text);
-    if let Some(cover) = payload
+    let cover = payload
         .cover_url
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .filter(|s| is_public_https_cover(s))
-    {
-        assets = assets.large_image(truncate(cover, 300));
-    }
+        .filter(|s| is_public_https_cover(s));
 
     let mut activity = Activity::new()
         .details(details)
         .state(state)
-        .assets(assets)
-        .activity_type(ActivityType::Listening);
+        .activity_type(ActivityType::Listening)
+        .status_display_type(StatusDisplayType::Details);
+
+    // Discord rejects an assets object that has hover text but no image.
+    // Most self-hosted Polarr covers are private URLs, so omit assets entirely
+    // unless Discord can fetch a public HTTPS image.
+    if let Some(cover) = cover {
+        activity = activity.assets(
+            Assets::new()
+                .large_image(truncate(cover, 300))
+                .large_text(album_text),
+        );
+    }
 
     if let Some(start) = payload.start_unix {
         let mut ts = Timestamps::new().start(start);
@@ -149,8 +149,11 @@ fn apply_activity(
         activity = activity.timestamps(ts);
     }
 
-    ipc
-        .set_activity(activity)
+    activity
+}
+
+fn apply_activity(ipc: &mut DiscordIpcClient, payload: &PresencePayload) -> Result<(), String> {
+    ipc.set_activity(build_activity(payload))
         .map_err(|e| format!("set_activity: {e}"))
 }
 
@@ -218,5 +221,56 @@ pub fn shutdown(state: &DiscordPresenceState) {
             let _ = client.ipc.clear_activity();
             let _ = client.ipc.close();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    fn payload(cover_url: Option<&str>) -> PresencePayload {
+        PresencePayload {
+            client_id: "123".into(),
+            title: "A Track".into(),
+            artist: "An Artist".into(),
+            album: Some("An Album".into()),
+            cover_url: cover_url.map(str::to_string),
+            start_unix: None,
+            end_unix: None,
+        }
+    }
+
+    #[test]
+    fn private_cover_omits_assets_object() {
+        let value = serde_json::to_value(build_activity(&payload(Some(
+            "http://192.168.1.10/api/cover/1",
+        ))))
+        .unwrap();
+        assert!(value.get("assets").is_none());
+    }
+
+    #[test]
+    fn public_cover_includes_image_and_album_text() {
+        let value = serde_json::to_value(build_activity(&payload(Some(
+            "https://cdn.example.com/cover.jpg",
+        ))))
+        .unwrap();
+        assert_eq!(
+            value.pointer("/assets/large_image"),
+            Some(&Value::String("https://cdn.example.com/cover.jpg".into()))
+        );
+        assert_eq!(
+            value.pointer("/assets/large_text"),
+            Some(&Value::String("An Album".into()))
+        );
+    }
+
+    #[test]
+    fn activity_is_listening_and_displays_track_title() {
+        let value = serde_json::to_value(build_activity(&payload(None))).unwrap();
+        assert_eq!(value.get("type"), Some(&Value::from(2)));
+        assert_eq!(value.get("status_display_type"), Some(&Value::from(2)));
+        assert_eq!(value.get("details"), Some(&Value::String("A Track".into())));
     }
 }

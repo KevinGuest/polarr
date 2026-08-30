@@ -13,6 +13,7 @@ export const DESKTOP_CHROME_DOWN_EVENT = "polarr-desktop-chrome-down";
 export const DESKTOP_QUERY_PARAM = "desktop";
 const STORAGE_KEY = "polarr-desktop";
 const HIDE_STYLE_ID = "polarr-desktop-hide-header";
+const DESKTOP_PLATFORM_COOKIE = "polarr_desktop_platform";
 const HIDE_CSS =
   "html[data-polarr-desktop] [data-polarr-app-header]{display:none!important;height:0!important;max-height:0!important;min-height:0!important;overflow:hidden!important;border:0!important;padding:0!important;margin:0!important;visibility:hidden!important;pointer-events:none!important;opacity:0!important;position:absolute!important;clip:rect(0,0,0,0)!important;flex:0 0 0!important;}";
 
@@ -110,6 +111,19 @@ export function hasPolarrDesktopGlobal(): boolean {
 
 export function markPolarrDesktop(): void {
   if (typeof window === "undefined") return;
+  try {
+    const agent = navigator.userAgent;
+    const platform = /Windows/i.test(agent)
+      ? "windows"
+      : /Macintosh|Mac OS X/i.test(agent)
+        ? "macos"
+        : /Linux/i.test(agent)
+          ? "linux"
+          : "desktop";
+    document.cookie = `${DESKTOP_PLATFORM_COOKIE}=${platform}; Path=/; SameSite=Lax`;
+  } catch {
+    /* notification display hint only */
+  }
   try {
     sessionStorage.setItem(STORAGE_KEY, "1");
   } catch {

@@ -7,7 +7,7 @@ import { discordConfigured, sendDiscordWebhook } from "@/lib/discord";
 import { getSettings } from "@/lib/db";
 import type { NotifyEventId } from "@/lib/notify-events";
 import { resolvePublicBaseUrl } from "@/lib/public-url";
-import { describeUserAgent } from "@/lib/user-agent";
+import { describeRequestClient, describeUserAgent } from "@/lib/user-agent";
 
 const COLORS: Partial<Record<NotifyEventId, number>> = {
   requestNew: 0x5865f2,
@@ -47,6 +47,16 @@ export function notifyPlatformFields(
   ua: string | null | undefined,
 ): DiscordNotifyField[] {
   const { platform, device } = describeUserAgent(ua);
+  const fields: DiscordNotifyField[] = [
+    { name: "Platform", value: platform, inline: true },
+  ];
+  if (device) fields.push({ name: "Device", value: device, inline: true });
+  return fields;
+}
+
+/** Platform fields that recognize the Polarr desktop shell. */
+export function notifyRequestPlatformFields(req: Request): DiscordNotifyField[] {
+  const { platform, device } = describeRequestClient(req);
   const fields: DiscordNotifyField[] = [
     { name: "Platform", value: platform, inline: true },
   ];

@@ -11,7 +11,7 @@ export function ConnectPlaybackBar({
 }: {
   className?: string;
   compact?: boolean;
-  /** Extend the green fill into the home-indicator inset. */
+  /** Extend the status surface into the home-indicator inset. */
   edge?: boolean;
 }) {
   const { isRemotePlayback, activeConnectDevice, togglePanel } = usePlayer();
@@ -22,7 +22,7 @@ export function ConnectPlaybackBar({
       type="button"
       onClick={() => togglePanel("devices")}
       className={cn(
-        "flex w-full items-center justify-center gap-2 bg-[#1ed760] text-black",
+        "flex w-full items-center justify-center gap-2 border-t border-border/60 bg-muted text-foreground",
         compact ? "min-h-7 py-1.5 text-[11px]" : "min-h-8 py-2 text-xs",
         edge && "pb-[max(0.5rem,var(--safe-bottom))]",
         className,

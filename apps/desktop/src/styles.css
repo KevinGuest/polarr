@@ -698,6 +698,36 @@ html.mac.server-open .titlebar {
   cursor: pointer;
   color: #09090b;
   background: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.connect-spinner {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(9, 9, 11, 0.28);
+  border-top-color: #09090b;
+  border-radius: 50%;
+  animation: connect-spin 0.7s linear infinite;
+}
+
+.connect-spinner[hidden] {
+  display: none !important;
+}
+
+@keyframes connect-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connect-spinner {
+    animation-duration: 1.4s;
+  }
 }
 
 .setup #connect:hover:not(:disabled) {

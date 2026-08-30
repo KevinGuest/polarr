@@ -899,10 +899,10 @@ fn create_or_reveal_server(
         .add_child(builder, pos, size)
         .map_err(|e| format!("create server webview: {e}"))?;
     // A newly-created native child is above the shell in the compositor even
-    // before it has painted a document. WebView2 can safely load while hidden.
-    // WKWebView cannot: hiding it may suspend navigation and prevent Finished
-    // from ever firing, so macOS keeps it active underneath the setup shell.
-    #[cfg(not(target_os = "macos"))]
+    // before it has painted a document. Hide it immediately and leave the
+    // setup shell full-sized until its Finished callback proves that content
+    // loaded. This prevents WebView2's black background from becoming the only
+    // visible/recoverable UI while navigation is pending or stalled.
     if let Err(err) = wv.hide() {
         let _ = wv.close();
         return Err(format!("hide loading server webview: {err}"));

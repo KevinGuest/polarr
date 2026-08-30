@@ -907,6 +907,8 @@ fn create_or_reveal_server(
         let _ = wv.close();
         return Err(format!("hide loading server webview: {err}"));
     }
+    #[cfg(target_os = "macos")]
+    crate::macos_window::stage_server_load(app, &url);
     let _ = wv.navigate(parsed);
     kick_server_load(&wv, &url);
     Ok(Some(ready_rx))

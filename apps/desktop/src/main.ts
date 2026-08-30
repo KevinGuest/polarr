@@ -1059,6 +1059,9 @@ void appWindow.onResized(() => {
 
 async function bootstrap() {
   await syncMaximizedUi();
+  // Never gate the main window on updater or server network requests. On slow
+  // networks (especially at macOS cold start) that made the app appear hung.
+  await revealMainWindow();
   try {
     await listen("server-cleared", () => {
       void showSetup(input.value);
@@ -1067,7 +1070,7 @@ async function bootstrap() {
     // Non-Tauri preview.
   }
 
-  const updaterDone = openUpdaterWindow();
+  void openUpdaterWindow();
 
   try {
     const saved = await invoke<{
@@ -1084,6 +1087,7 @@ async function bootstrap() {
       input.value = existing;
     }
     if (existing && !skipAuto) {
+      setConnectButton("Connecting…", true);
       try {
         const url = await invoke<string>("probe_server_url", { url: existing });
         await showServer(url);
@@ -1101,8 +1105,6 @@ async function bootstrap() {
     await showSetup();
   }
 
-  await updaterDone;
-  await revealMainWindow();
 }
 
 void bootstrap();

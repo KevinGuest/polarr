@@ -73,8 +73,8 @@ pub fn layout_connected(app: &AppHandle, server_url: &str) {
     let c_url = CString::new(server_url).unwrap_or_else(|_| CString::new("").unwrap());
     if let Ok(ptr) = window.ns_window() {
         unsafe {
-            polarr_macos_layout_connected(ptr, TITLEBAR_HEIGHT, c_url.as_ptr());
             polarr_macos_align_traffic_lights(ptr);
+            polarr_macos_layout_connected(ptr, TITLEBAR_HEIGHT, c_url.as_ptr());
         }
     }
 }
@@ -85,8 +85,8 @@ pub fn fill_shell(app: &AppHandle) {
     };
     if let Ok(ptr) = window.ns_window() {
         unsafe {
-            polarr_macos_fill_shell(ptr);
             polarr_macos_align_traffic_lights(ptr);
+            polarr_macos_fill_shell(ptr);
         }
     }
 }

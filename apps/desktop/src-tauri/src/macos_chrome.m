@@ -5,10 +5,7 @@
 static const CGFloat kTrafficLightX = 16.0;
 static const CGFloat kTitlebarH = 48.0;
 
-static BOOL polarr_traffic_aligning = NO;
-
 static void polarr_install_traffic_observers(NSWindow *window);
-static void polarr_observe_titlebar_views(NSWindow *window, NSView *titleBar, NSView *container);
 
 void polarr_macos_paint_window(void *ns_window) {
   if (ns_window == NULL) {
@@ -41,51 +38,40 @@ void polarr_macos_paint_webview(void *wk_webview) {
 }
 
 void polarr_macos_align_traffic_lights(void *ns_window) {
-  if (ns_window == NULL || polarr_traffic_aligning) {
+  if (ns_window == NULL) {
     return;
   }
-  polarr_traffic_aligning = YES;
-
   NSWindow *window = (__bridge NSWindow *)ns_window;
   window.titleVisibility = NSWindowTitleHidden;
   window.titlebarAppearsTransparent = YES;
-  if (@available(macOS 11.0, *)) {
-    window.titlebarSeparatorStyle = NSTitlebarSeparatorStyleNone;
-  }
   polarr_install_traffic_observers(window);
 
   NSButton *closeBtn = [window standardWindowButton:NSWindowCloseButton];
   NSButton *minBtn = [window standardWindowButton:NSWindowMiniaturizeButton];
   NSButton *zoomBtn = [window standardWindowButton:NSWindowZoomButton];
   if (!closeBtn || !minBtn || !zoomBtn) {
-    polarr_traffic_aligning = NO;
     return;
   }
 
   NSView *titleBar = closeBtn.superview;
   NSView *titleBarContainer = titleBar.superview;
   if (!titleBarContainer) {
-    polarr_traffic_aligning = NO;
     return;
   }
-
-  polarr_observe_titlebar_views(window, titleBar, titleBarContainer);
 
   // Match the 48px HTML title bar and center the 12pt lights on that line.
   // Only growing the container (tao's trafficLightPosition trick) leaves
   // NSTitlebarView at ~22pt, so the buttons stay glued to the top edge.
-  NSView *parent = titleBarContainer.superview;
+  NSRect windowFrame = window.frame;
   NSRect containerFrame = titleBarContainer.frame;
   containerFrame.size.height = kTitlebarH;
-  if (parent) {
-    CGFloat parentH = NSHeight(parent.bounds);
-    containerFrame.origin.y = parent.isFlipped ? 0.0 : (parentH - kTitlebarH);
-    titleBarContainer.autoresizingMask = parent.isFlipped
-                                             ? (NSViewWidthSizable | NSViewMaxYMargin)
-                                             : (NSViewWidthSizable | NSViewMinYMargin);
-  }
+  containerFrame.origin.y = NSHeight(windowFrame) - kTitlebarH;
+  titleBarContainer.frame = containerFrame;
 
-  NSRect titleBarFrame = NSMakeRect(0, 0, NSWidth(containerFrame), kTitlebarH);
+  NSRect titleBarFrame = titleBar.frame;
+  titleBarFrame.origin = NSZeroPoint;
+  titleBarFrame.size = containerFrame.size;
+  titleBar.frame = titleBarFrame;
 
   CGFloat spaceBetween = NSMinX(minBtn.frame) - NSMinX(closeBtn.frame);
   if (spaceBetween < 8.0) {
@@ -94,26 +80,6 @@ void polarr_macos_align_traffic_lights(void *ns_window) {
 
   CGFloat buttonHeight = NSHeight(closeBtn.frame);
   CGFloat btnY = floor((kTitlebarH - buttonHeight) / 2.0);
-  CGFloat expectedOriginY = parent ? (parent.isFlipped ? 0.0 : (NSHeight(parent.bounds) - kTitlebarH))
-                                   : NSMinY(titleBarContainer.frame);
-  BOOL already =
-      ABS(NSHeight(titleBarContainer.frame) - kTitlebarH) < 0.5 &&
-      ABS(NSMinY(titleBarContainer.frame) - expectedOriginY) < 0.5 &&
-      ABS(NSHeight(titleBar.frame) - kTitlebarH) < 0.5 &&
-      ABS(NSMinY(closeBtn.frame) - btnY) < 0.5 &&
-      ABS(NSMinX(closeBtn.frame) - kTrafficLightX) < 0.5;
-  if (already) {
-    polarr_traffic_aligning = NO;
-    return;
-  }
-
-  BOOL containerPosts = titleBarContainer.postsFrameChangedNotifications;
-  BOOL titleBarPosts = titleBar.postsFrameChangedNotifications;
-  titleBarContainer.postsFrameChangedNotifications = NO;
-  titleBar.postsFrameChangedNotifications = NO;
-
-  titleBarContainer.frame = containerFrame;
-  titleBar.frame = titleBarFrame;
 
   NSButton *buttons[3] = {closeBtn, minBtn, zoomBtn};
   for (NSInteger i = 0; i < 3; i++) {
@@ -122,40 +88,6 @@ void polarr_macos_align_traffic_lights(void *ns_window) {
     rect.origin.y = btnY;
     buttons[i].frame = rect;
   }
-
-  titleBarContainer.postsFrameChangedNotifications = containerPosts;
-  titleBar.postsFrameChangedNotifications = titleBarPosts;
-  polarr_traffic_aligning = NO;
-}
-
-static void polarr_observe_titlebar_views(NSWindow *window, NSView *titleBar, NSView *container) {
-  static const void *kPolarrViewObs = &kPolarrViewObs;
-  if (objc_getAssociatedObject(container, kPolarrViewObs)) {
-    return;
-  }
-  objc_setAssociatedObject(container, kPolarrViewObs, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-  titleBar.postsFrameChangedNotifications = YES;
-  container.postsFrameChangedNotifications = YES;
-
-  __weak NSWindow *weakWindow = window;
-  void (^realign)(NSNotification *) = ^(NSNotification *note) {
-    (void)note;
-    NSWindow *w = weakWindow;
-    if (w && !polarr_traffic_aligning) {
-      polarr_macos_align_traffic_lights((__bridge void *)w);
-    }
-  };
-
-  NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
-  [nc addObserverForName:NSViewFrameDidChangeNotification
-                  object:container
-                   queue:[NSOperationQueue mainQueue]
-              usingBlock:realign];
-  [nc addObserverForName:NSViewFrameDidChangeNotification
-                  object:titleBar
-                   queue:[NSOperationQueue mainQueue]
-              usingBlock:realign];
 }
 
 static void polarr_install_traffic_observers(NSWindow *window) {
@@ -172,11 +104,11 @@ static void polarr_install_traffic_observers(NSWindow *window) {
       polarr_macos_align_traffic_lights((__bridge void *)w);
     }
   };
+  // Become-key/main fire when the hidden launch window is finally shown.
+  // Skip DidResize here — changing the titlebar frame can emit it.
   for (NSNotificationName name in @[
          NSWindowDidBecomeKeyNotification,
          NSWindowDidBecomeMainNotification,
-         NSWindowDidResizeNotification,
-         NSWindowDidEndLiveResizeNotification,
          NSWindowDidDeminiaturizeNotification,
          NSWindowDidChangeBackingPropertiesNotification
        ]) {
@@ -430,11 +362,6 @@ void polarr_macos_layout_connected(void *ns_window, double titlebar_h, const cha
       });
     }
   }
-
-  polarr_macos_align_traffic_lights(ns_window);
-  dispatch_async(dispatch_get_main_queue(), ^{
-    polarr_macos_align_traffic_lights(ns_window);
-  });
 }
 
 void polarr_macos_fill_shell(void *ns_window) {
@@ -456,5 +383,4 @@ void polarr_macos_fill_shell(void *ns_window) {
                              NSViewWidthSizable | NSViewHeightSizable);
   polarr_fill_inside(shellBox, shellWV);
   [content addSubview:shellBox positioned:NSWindowAbove relativeTo:nil];
-  polarr_macos_align_traffic_lights(ns_window);
 }

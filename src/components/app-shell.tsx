@@ -521,27 +521,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
               adminSidebarInner
             ) : (
               <TooltipProvider delayDuration={300}>
-                {/* Desktop app: no web header — logo in the rail is home. Web: header logo. */}
-                {desktopShell ? (
-                  <Link
-                    href="/"
-                    onClick={() => {
-                      dismissOverlays();
-                      setLibraryExpanded(false);
-                    }}
-                    aria-label="Polarr home"
-                    title="Home"
-                    className={cn(
-                      "mb-3 inline-flex items-center rounded-md text-foreground transition-opacity hover:opacity-90",
-                      libraryCollapsed ? "justify-center px-1" : "px-1",
-                    )}
-                  >
-                    <PolarrMark
-                      className={libraryCollapsed ? "size-8" : "size-9"}
-                    />
-                  </Link>
-                ) : null}
-
+                {/* Desktop home is the titlebar mark (left of search), not the rail. */}
                 <div className="mt-1 flex min-h-0 flex-1 flex-col">
                   <Suspense fallback={null}>
                     <LibrarySidebar

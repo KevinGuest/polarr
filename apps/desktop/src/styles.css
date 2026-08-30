@@ -212,12 +212,12 @@ html.mac .win-controls {
 }
 
 .titlebar-brand-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  display: block;
   width: 100%;
+  height: 36px;
   position: relative;
   z-index: 1;
+  pointer-events: none;
 }
 
 .titlebar-brand-btn {
@@ -226,13 +226,18 @@ html.mac .win-controls {
   background: transparent;
   padding: 0;
   margin: 0;
-  flex: 0 0 auto;
+  position: absolute;
+  right: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   border-radius: 8px;
   line-height: 0;
+  pointer-events: auto;
+  z-index: 2;
 }
 
 .titlebar-brand-btn[hidden] {
@@ -265,8 +270,9 @@ html.mac .win-controls {
 }
 
 .titlebar-center {
-  /* Pin to the window midline. Overlay traffic-light padding and
-     asymmetric left/right chrome would otherwise shift this cluster. */
+  /* Size to the search field only and pin that to the window midline.
+     The logo hangs to the left via absolute positioning so it cannot
+     stretch this box under the traffic lights or shift the search. */
   grid-area: center;
   position: absolute;
   left: 50%;
@@ -276,22 +282,14 @@ html.mac .win-controls {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
   min-width: 0;
-  width: auto;
+  width: min(var(--search-max), calc(100vw - 280px));
+  max-width: var(--search-max);
   pointer-events: none;
 }
 
-.titlebar-center .titlebar-brand-search {
-  pointer-events: auto;
-}
-
-.titlebar-center:has(.titlebar-search:not([hidden])) {
-  width: min(var(--search-max), calc(100% - 280px));
-}
-
-html.mac .titlebar-center:has(.titlebar-search:not([hidden])) {
-  width: min(var(--search-max), calc(100% - 340px));
+html.mac .titlebar-center {
+  width: min(var(--search-max), calc(100vw - 340px));
 }
 
 .titlebar-right {
@@ -443,14 +441,12 @@ html.mac .titlebar-center:has(.titlebar-search:not([hidden])) {
   background: var(--border);
 }
 
-/* Centered search — beside Polarr mark in title bar center */
+/* Centered search — Polarr mark hangs immediately to its left */
 .titlebar-search {
   position: relative;
-  flex: 1 1 0;
-  min-width: 0;
-  width: auto;
-  align-self: center;
+  width: 100%;
   height: 36px;
+  pointer-events: auto;
 }
 
 .titlebar-search[hidden] {

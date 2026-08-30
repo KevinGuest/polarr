@@ -9,7 +9,7 @@ import { discordOAuthConfigured, getSettings } from "@/lib/db";
 import {
   getDiscordRedirectUri,
   oauthStateCookieName,
-} from "@/app/api/discord/oauth/route";
+} from "@/lib/discord-oauth";
 
 export const dynamic = "force-dynamic";
 

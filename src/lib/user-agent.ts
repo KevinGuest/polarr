@@ -91,11 +91,12 @@ export function describeUserAgent(
  * User-Agent. This hint is notification metadata only, never an auth signal.
  */
 export function describeRequestClient(req: Request): ClientDescription {
+  const nativePlatform = req.headers.get("x-polarr-desktop-platform")?.trim();
   const desktopPlatform = cookieValue(
     req.headers.get("cookie"),
     DESKTOP_PLATFORM_COOKIE,
   );
-  const label = desktopPlatform ? DESKTOP_LABELS[desktopPlatform] : null;
+  const label = DESKTOP_LABELS[nativePlatform || desktopPlatform || ""];
   if (label) return { platform: label, device: null };
   return describeUserAgent(req.headers.get("user-agent"));
 }

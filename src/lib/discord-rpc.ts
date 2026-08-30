@@ -105,14 +105,8 @@ export function resolvePublicCoverUrl(raw?: string | null): string | undefined {
   }
 }
 
-function buildState(artist: string, album?: string) {
-  const a = artist.trim();
-  const al = album?.trim();
-  if (al && a) {
-    const combined = `${a} · ${al}`;
-    if (combined.length <= 128) return combined;
-  }
-  return clip(a || al || "Unknown artist");
+function buildArtistState(artist: string) {
+  return clip(artist.trim() || "Unknown artist");
 }
 
 function buildTimestamps(progressSec?: number, durationSec?: number) {
@@ -169,7 +163,8 @@ function activityFields(track: DiscordActivityPayload) {
   const timestamps = buildTimestamps(track.progressSec, track.durationSec);
   return {
     details: clip(track.title || "Unknown track"),
-    state: buildState(track.artist, track.album),
+    // Keep the activity line artist-only. Album belongs to the cover hover.
+    state: buildArtistState(track.artist),
     coverUrl: cover ?? null,
     albumText: clip(track.album || track.title || "Polarr"),
     startUnix: timestamps.start,

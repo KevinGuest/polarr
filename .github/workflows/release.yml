@@ -114,6 +114,15 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
           releaseBody: |
+            ## What's changed
+
+            - **macOS connections** — more reliable loading when connecting to a server
+            - **Update window** — the main app stays hidden until the update check finishes
+            - **Discord Rich Presence** — shows the track and artist; album appears on cover hover
+            - **Discord permissions** — account linking requests permission to update activity
+            - **Login alerts** — shows Polarr for Windows/macOS/Linux instead of the embedded browser
+            - **Server compatibility** — checks server support before opening the app
+
             ## Downloads
 
             - **macOS (Apple Silicon + Intel):** `Polarr_*_universal.dmg`

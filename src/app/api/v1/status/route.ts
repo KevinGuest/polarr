@@ -7,6 +7,7 @@ import {
 } from "@/lib/db";
 import { LidarrClient } from "@/lib/lidarr";
 import { ytDlpAvailable } from "@/lib/fallback-download";
+import { desktopServerManifest } from "@/lib/desktop-protocol";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,8 @@ export async function GET() {
   return json({
     app: "polarr",
     status: "ok",
-    version: "0.1.0",
+    version: desktopServerManifest().serverVersion,
+    desktop: desktopServerManifest(),
     setupComplete: settings.setupComplete,
     hasUsers: hasUsers(),
     libraryCount: countTracks(),

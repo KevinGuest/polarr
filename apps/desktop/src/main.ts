@@ -6,6 +6,10 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./styles.css";
 import { getAppVersion } from "./updater";
+import {
+  probePolarrServer,
+  type DesktopServerManifest,
+} from "./server-api";
 
 const appWindow = getCurrentWindow();
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -42,6 +46,7 @@ let authState: AuthState = {
 };
 
 let serverOpen = false;
+let activeServerManifest: DesktopServerManifest | null = null;
 
 if (isMacPlatform()) {
   document.documentElement.classList.add("mac");
@@ -578,6 +583,11 @@ async function changeServer() {
   } catch {
     // Still return to setup UI.
   }
+  try {
+    await invoke("desktop_api_reset_session");
+  } catch {
+    // Best-effort; cookies are scoped to their original server regardless.
+  }
   await showSetup(input.value);
 }
 
@@ -585,6 +595,14 @@ async function openAppMenu(anchor: HTMLElement) {
   const version = await getAppVersion();
   const items: ChromeMenuItem[] = [
     { kind: "label", text: `Polarr ${version}` },
+    ...(activeServerManifest
+      ? ([
+          {
+            kind: "label",
+            text: `Server ${activeServerManifest.serverVersion}`,
+          },
+        ] as ChromeMenuItem[])
+      : []),
     { kind: "separator" },
     { kind: "action", id: "change-server", text: "Change Server…" },
     { kind: "separator" },
@@ -794,6 +812,7 @@ function stopChromeUrlPoll() {
 
 async function showSetup(prefill?: string) {
   serverOpen = false;
+  activeServerManifest = null;
   setServerOpenClass(false);
   stopChromeUrlPoll();
   setupView.hidden = false;
@@ -871,12 +890,14 @@ form.addEventListener("submit", async (event) => {
 
   setConnectButton("Checking…", true);
   try {
-    const url = await invoke<string>("probe_server_url", { url: raw });
+    const probe = await probePolarrServer(raw);
+    const url = probe.url;
+    activeServerManifest = probe.manifest;
     await invoke<string>("set_server_url", { url });
     setConnectButton("Connecting…", true);
     await showServer(url);
-  } catch {
-    showToast("URL not valid");
+  } catch (error) {
+    showToast(typeof error === "string" ? error : "URL not valid");
     setConnectButton("Connect", false);
   }
 });
@@ -1090,11 +1111,12 @@ async function bootstrap() {
     if (existing && !skipAuto) {
       setConnectButton("Connecting…", true);
       try {
-        const url = await invoke<string>("probe_server_url", { url: existing });
-        await showServer(url);
-      } catch {
+        const probe = await probePolarrServer(existing);
+        activeServerManifest = probe.manifest;
+        await showServer(probe.url);
+      } catch (error) {
         await showSetup(existing);
-        showToast("URL not valid");
+        showToast(typeof error === "string" ? error : "URL not valid");
       }
     } else {
       await showSetup(existing ?? undefined);

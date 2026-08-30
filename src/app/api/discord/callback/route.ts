@@ -11,7 +11,7 @@ import {
 import {
   getDiscordRedirectUri,
   oauthStateCookieName,
-} from "@/app/api/discord/oauth/route";
+} from "@/lib/discord-oauth";
 import { resolvePublicBaseUrl } from "@/lib/public-url";
 import { getRequestIpFromRequest } from "@/lib/request-client";
 import {

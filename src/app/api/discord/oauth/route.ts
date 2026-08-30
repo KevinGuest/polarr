@@ -6,26 +6,12 @@ import {
   discordOAuthConfigured,
   getSettings,
 } from "@/lib/db";
-import { resolvePublicBaseUrl } from "@/lib/public-url";
+import {
+  getDiscordRedirectUri,
+  oauthStateCookieName,
+} from "@/lib/discord-oauth";
 
 export const dynamic = "force-dynamic";
-
-const OAUTH_STATE_COOKIE = "polarr_discord_oauth";
-
-function redirectUri(): string {
-  const s = getSettings();
-  const base = resolvePublicBaseUrl(s);
-  if (base) return `${base}/api/discord/callback`;
-  return "http://localhost:3000/api/discord/callback";
-}
-
-export function getDiscordRedirectUri() {
-  return redirectUri();
-}
-
-export function oauthStateCookieName() {
-  return OAUTH_STATE_COOKIE;
-}
 
 /** Start Discord OAuth for account identity and desktop Rich Presence. */
 export async function GET() {
@@ -46,7 +32,7 @@ export async function GET() {
   const state = randomBytes(16).toString("hex");
   const cookieStore = await cookies();
   // link:<userId>:<state> — callback distinguishes from login:<state>
-  cookieStore.set(OAUTH_STATE_COOKIE, `link:${user.id}:${state}`, {
+  cookieStore.set(oauthStateCookieName(), `link:${user.id}:${state}`, {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
@@ -55,7 +41,7 @@ export async function GET() {
 
   const params = new URLSearchParams({
     client_id: settings.discordClientId.trim(),
-    redirect_uri: redirectUri(),
+    redirect_uri: getDiscordRedirectUri(),
     response_type: "code",
     scope: "identify rpc.activities.write",
     state,
@@ -64,7 +50,7 @@ export async function GET() {
 
   return json({
     url: `https://discord.com/api/oauth2/authorize?${params.toString()}`,
-    redirectUri: redirectUri(),
+    redirectUri: getDiscordRedirectUri(),
   });
 }
 

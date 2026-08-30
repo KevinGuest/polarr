@@ -19,6 +19,21 @@ description = "Check that a URL is a Polarr server before connecting"
 commands.allow = ["probe_server_url"]
 
 [[permission]]
+identifier = "allow-probe-server"
+description = "Read Polarr server compatibility and capability information"
+commands.allow = ["probe_server"]
+
+[[permission]]
+identifier = "allow-desktop-api-request"
+description = "Send an API request to the configured Polarr server from the bundled UI"
+commands.allow = ["desktop_api_request"]
+
+[[permission]]
+identifier = "allow-desktop-api-reset-session"
+description = "Clear the bundled UI's native Polarr server session"
+commands.allow = ["desktop_api_reset_session"]
+
+[[permission]]
 identifier = "allow-open-server-webview"
 description = "Open the Polarr server webview"
 commands.allow = ["open_server_webview"]

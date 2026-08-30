@@ -1,10 +1,11 @@
-﻿use std::fs;
+use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
 use url::Url;
 
+mod desktop_api;
 mod discord_presence;
 #[cfg(target_os = "macos")]
 mod macos_window;
@@ -12,6 +13,7 @@ mod offline;
 mod server_webview;
 
 const CONFIG_FILE: &str = "server.json";
+const DESKTOP_PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct ServerConfig {
@@ -23,6 +25,31 @@ struct ServerConfig {
 struct ServerLaunchState {
     url: Option<String>,
     skip_auto_connect: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopProtocolRange {
+    min: u32,
+    max: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopServerManifest {
+    app: String,
+    server_version: String,
+    protocol: DesktopProtocolRange,
+    capabilities: Vec<String>,
+    web_app_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerProbeResult {
+    url: String,
+    manifest: Option<DesktopServerManifest>,
+    legacy: bool,
 }
 
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -155,12 +182,40 @@ fn looks_like_polarr(body: &serde_json::Value) -> bool {
         && body.get("hasUsers").is_some()
 }
 
-async fn probe_polarr(base: &str) -> Result<(), String> {
+fn validate_desktop_manifest(manifest: &DesktopServerManifest) -> Result<(), String> {
+    if manifest.app != "polarr" {
+        return Err("URL is not a Polarr server".into());
+    }
+    if manifest.protocol.min > DESKTOP_PROTOCOL_VERSION {
+        return Err(format!(
+            "This server requires a newer Polarr Desktop (server {})",
+            manifest.server_version
+        ));
+    }
+    if manifest.protocol.max < DESKTOP_PROTOCOL_VERSION {
+        return Err(format!(
+            "This Polarr Desktop requires a newer Polarr server (server {})",
+            manifest.server_version
+        ));
+    }
+    Ok(())
+}
+
+async fn probe_polarr(base: &str) -> Result<Option<DesktopServerManifest>, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::limited(3))
         .build()
         .map_err(|e| e.to_string())?;
+
+    if let Ok(response) = client.get(format!("{base}/api/v1/desktop")).send().await {
+        if response.status().is_success() {
+            if let Ok(manifest) = response.json::<DesktopServerManifest>().await {
+                validate_desktop_manifest(&manifest)?;
+                return Ok(Some(manifest));
+            }
+        }
+    }
 
     for path in ["/api/v1/status", "/api/status"] {
         let response = match client.get(format!("{base}{path}")).send().await {
@@ -174,7 +229,7 @@ async fn probe_polarr(base: &str) -> Result<(), String> {
             continue;
         };
         if looks_like_polarr(&body) {
-            return Ok(());
+            return Ok(None);
         }
     }
 
@@ -183,11 +238,22 @@ async fn probe_polarr(base: &str) -> Result<(), String> {
 
 #[tauri::command]
 async fn probe_server_url(url: String) -> Result<String, String> {
+    Ok(probe_server(url).await?.url)
+}
+
+#[tauri::command]
+async fn probe_server(url: String) -> Result<ServerProbeResult, String> {
     let candidates = candidate_urls(&url)?;
     let mut last_err = "URL not valid".to_string();
     for candidate in candidates {
         match probe_polarr(&candidate).await {
-            Ok(()) => return Ok(candidate),
+            Ok(manifest) => {
+                return Ok(ServerProbeResult {
+                    url: candidate,
+                    legacy: manifest.is_none(),
+                    manifest,
+                })
+            }
             Err(err) => last_err = err,
         }
     }
@@ -228,12 +294,14 @@ fn clear_server_url(app: AppHandle) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let presence = discord_presence::DiscordPresenceState::default();
+    let desktop_api = desktop_api::DesktopApiState::default();
     let offline_state = offline::OfflineState::default();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(presence)
+        .manage(desktop_api)
         .manage(offline_state)
         .setup(|app| {
             server_webview::install_chrome_down_relay(app.handle());
@@ -318,6 +386,9 @@ pub fn run() {
             set_server_url,
             clear_server_url,
             probe_server_url,
+            probe_server,
+            desktop_api::desktop_api_request,
+            desktop_api::desktop_api_reset_session,
             server_webview::open_server_webview,
             server_webview::hide_server_webview,
             server_webview::show_server_webview,
@@ -411,7 +482,20 @@ fn http_response(
 
 #[cfg(test)]
 mod tests {
-    use super::{candidate_urls, inject_mdns_host, normalize_url};
+    use super::{
+        candidate_urls, inject_mdns_host, normalize_url, validate_desktop_manifest,
+        DesktopProtocolRange, DesktopServerManifest,
+    };
+
+    fn manifest(min: u32, max: u32) -> DesktopServerManifest {
+        DesktopServerManifest {
+            app: "polarr".into(),
+            server_version: "0.6.21".into(),
+            protocol: DesktopProtocolRange { min, max },
+            capabilities: vec!["web-app".into()],
+            web_app_path: "/".into(),
+        }
+    }
 
     #[test]
     fn umbrel_keeps_port_and_adds_local() {
@@ -448,5 +532,17 @@ mod tests {
             normalize_url("http://192.168.1.10:3647").unwrap(),
             "http://192.168.1.10:3647"
         );
+    }
+
+    #[test]
+    fn accepts_compatible_desktop_protocol() {
+        assert!(validate_desktop_manifest(&manifest(1, 1)).is_ok());
+        assert!(validate_desktop_manifest(&manifest(1, 2)).is_ok());
+    }
+
+    #[test]
+    fn rejects_incompatible_desktop_protocol() {
+        assert!(validate_desktop_manifest(&manifest(2, 2)).is_err());
+        assert!(validate_desktop_manifest(&manifest(0, 0)).is_err());
     }
 }

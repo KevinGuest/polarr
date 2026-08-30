@@ -1,5 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
+#[cfg(not(target_os = "windows"))]
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, RunEvent};
@@ -50,6 +52,51 @@ struct ServerProbeResult {
     url: String,
     manifest: Option<DesktopServerManifest>,
     legacy: bool,
+}
+
+fn clean_device_name(raw: &str) -> Option<String> {
+    let name = raw.trim().trim_end_matches(".local").trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.chars().take(80).collect())
+    }
+}
+
+fn native_device_name() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    if let Ok(name) = std::env::var("COMPUTERNAME") {
+        if let Some(name) = clean_device_name(&name) {
+            return Some(name);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    if let Ok(output) = Command::new("/usr/sbin/scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+    {
+        if output.status.success() {
+            if let Some(name) = clean_device_name(&String::from_utf8_lossy(&output.stdout)) {
+                return Some(name);
+            }
+        }
+    }
+
+    if let Ok(name) = std::env::var("HOSTNAME") {
+        if let Some(name) = clean_device_name(&name) {
+            return Some(name);
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    if let Ok(output) = Command::new("hostname").output() {
+        if output.status.success() {
+            return clean_device_name(&String::from_utf8_lossy(&output.stdout));
+        }
+    }
+
+    None
 }
 
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -291,6 +338,11 @@ fn clear_server_url(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn get_desktop_device_name() -> String {
+    native_device_name().unwrap_or_else(|| "This Computer".to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let presence = discord_presence::DiscordPresenceState::default();
@@ -387,6 +439,7 @@ pub fn run() {
             clear_server_url,
             probe_server_url,
             probe_server,
+            get_desktop_device_name,
             desktop_api::desktop_api_request,
             desktop_api::desktop_api_reset_session,
             server_webview::open_server_webview,
@@ -483,8 +536,8 @@ fn http_response(
 #[cfg(test)]
 mod tests {
     use super::{
-        candidate_urls, inject_mdns_host, normalize_url, validate_desktop_manifest,
-        DesktopProtocolRange, DesktopServerManifest,
+        candidate_urls, clean_device_name, inject_mdns_host, normalize_url,
+        validate_desktop_manifest, DesktopProtocolRange, DesktopServerManifest,
     };
 
     fn manifest(min: u32, max: u32) -> DesktopServerManifest {
@@ -532,6 +585,19 @@ mod tests {
             normalize_url("http://192.168.1.10:3647").unwrap(),
             "http://192.168.1.10:3647"
         );
+    }
+
+    #[test]
+    fn cleans_native_device_names() {
+        assert_eq!(
+            clean_device_name("DESKTOP-SSNAPJL\n").as_deref(),
+            Some("DESKTOP-SSNAPJL")
+        );
+        assert_eq!(
+            clean_device_name("Studio-Mac.local").as_deref(),
+            Some("Studio-Mac")
+        );
+        assert_eq!(clean_device_name("   "), None);
     }
 
     #[test]

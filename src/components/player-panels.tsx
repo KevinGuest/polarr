@@ -34,7 +34,11 @@ import { ExplicitBadge } from "@/components/explicit-badge";
 import { StreamQualityBadge } from "@/components/stream-quality-badge";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { ConnectPlaybackBar } from "@/components/connect-playback-bar";
-import { usePlayer, type PlayerTrack } from "@/components/player-provider";
+import {
+  usePlayer,
+  type ConnectDeviceInfo,
+  type PlayerTrack,
+} from "@/components/player-provider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { albumHref } from "@/lib/album-ref";
@@ -520,6 +524,17 @@ function ConnectKindIcon({
   return <Laptop className={cls} />;
 }
 
+function connectDeviceSubtitle(device: ConnectDeviceInfo): string {
+  if (device.self) {
+    if (device.kind === "phone") return "This Phone";
+    if (device.kind === "tablet") return "This Tablet";
+    return "This Computer";
+  }
+  if (device.kind === "phone") return "Phone";
+  if (device.kind === "tablet") return "Tablet";
+  return "Computer";
+}
+
 function ConnectBody() {
   const {
     connectDevices,
@@ -544,8 +559,13 @@ function ConnectBody() {
               kind={active.kind}
               className="text-foreground"
             />
-            <div className="min-w-0 flex-1 text-sm font-semibold text-foreground">
-              {active.name}
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold text-foreground">
+                {active.name}
+              </div>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                {connectDeviceSubtitle(active)}
+              </div>
             </div>
           </button>
           <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
@@ -565,22 +585,30 @@ function ConnectBody() {
       ) : null}
 
       {others.length > 0 ? (
-        <ul className="mt-4 space-y-1">
-          {others.map((device) => (
-            <li key={device.id}>
-              <button
-                type="button"
-                onClick={() => transferPlayback(device.id)}
-                className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition-colors hover:bg-muted/40"
-              >
-                <ConnectKindIcon kind={device.kind} />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                  {device.name}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <>
+          <h3 className="mt-6 px-4 text-sm font-semibold">Select a device</h3>
+          <ul className="mt-2 space-y-1">
+            {others.map((device) => (
+              <li key={device.id}>
+                <button
+                  type="button"
+                  onClick={() => transferPlayback(device.id)}
+                  className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition-colors hover:bg-muted/40"
+                >
+                  <ConnectKindIcon kind={device.kind} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">
+                      {device.name}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {connectDeviceSubtitle(device)}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
       ) : (
         <>
           <h3 className="mt-6 text-sm font-semibold">Select a device</h3>

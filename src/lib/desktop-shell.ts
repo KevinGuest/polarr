@@ -11,11 +11,14 @@ export const DESKTOP_CHROME_UP_EVENT = "polarr-desktop-chrome-up";
 /** Shell → server (navigate / search / hello). */
 export const DESKTOP_CHROME_DOWN_EVENT = "polarr-desktop-chrome-down";
 export const DESKTOP_QUERY_PARAM = "desktop";
+export const OVERLAY_TITLEBAR_QUERY_PARAM = "titlebar";
+export const OVERLAY_TITLEBAR_QUERY_VALUE = "overlay";
 const STORAGE_KEY = "polarr-desktop";
+const OVERLAY_STORAGE_KEY = "polarr-desktop-overlay";
 const HIDE_STYLE_ID = "polarr-desktop-hide-header";
 const DESKTOP_PLATFORM_COOKIE = "polarr_desktop_platform";
 const HIDE_CSS =
-  "html[data-polarr-desktop] [data-polarr-app-header]{display:none!important;height:0!important;max-height:0!important;min-height:0!important;overflow:hidden!important;border:0!important;padding:0!important;margin:0!important;visibility:hidden!important;pointer-events:none!important;opacity:0!important;position:absolute!important;clip:rect(0,0,0,0)!important;flex:0 0 0!important;}";
+  "html[data-polarr-desktop]:not([data-polarr-overlay-titlebar]) [data-polarr-app-header]{display:none!important;height:0!important;max-height:0!important;min-height:0!important;overflow:hidden!important;border:0!important;padding:0!important;margin:0!important;visibility:hidden!important;pointer-events:none!important;opacity:0!important;position:absolute!important;clip:rect(0,0,0,0)!important;flex:0 0 0!important;}";
 
 export type DesktopAuthPayload = {
   authenticated: boolean;
@@ -109,6 +112,53 @@ export function hasPolarrDesktopGlobal(): boolean {
   return Boolean(w.__POLARR_DESKTOP__);
 }
 
+function applyOverlayTitlebarAttr(on: boolean) {
+  if (on) {
+    document.documentElement.dataset.polarrOverlayTitlebar = "1";
+    document.documentElement.setAttribute("data-polarr-overlay-titlebar", "1");
+  } else {
+    delete document.documentElement.dataset.polarrOverlayTitlebar;
+    document.documentElement.removeAttribute("data-polarr-overlay-titlebar");
+  }
+}
+
+export function isOverlayTitlebar(): boolean {
+  if (typeof window === "undefined") return false;
+  if (document.documentElement.dataset.polarrOverlayTitlebar === "1") return true;
+  if (
+    document.documentElement.getAttribute("data-polarr-overlay-titlebar") === "1"
+  ) {
+    return true;
+  }
+  try {
+    if (sessionStorage.getItem(OVERLAY_STORAGE_KEY) === "1") return true;
+  } catch {
+    /* ignore */
+  }
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get(OVERLAY_TITLEBAR_QUERY_PARAM) === OVERLAY_TITLEBAR_QUERY_VALUE) {
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  // macOS desktop loads the server in the main webview under native traffic
+  // lights, so the web header is the title bar.
+  try {
+    if (
+      isPolarrDesktop() &&
+      /Macintosh|Mac OS X/i.test(navigator.userAgent) &&
+      !/iPhone|iPad|iPod/i.test(navigator.userAgent)
+    ) {
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
 export function markPolarrDesktop(): void {
   if (typeof window === "undefined") return;
   try {
@@ -131,6 +181,16 @@ export function markPolarrDesktop(): void {
   }
   document.documentElement.dataset.polarrDesktop = "1";
   document.documentElement.setAttribute("data-polarr-desktop", "1");
+
+  const overlay = isOverlayTitlebar();
+  if (overlay) {
+    try {
+      sessionStorage.setItem(OVERLAY_STORAGE_KEY, "1");
+    } catch {
+      /* private mode */
+    }
+  }
+  applyOverlayTitlebarAttr(overlay);
 
   let style = document.getElementById(HIDE_STYLE_ID) as HTMLStyleElement | null;
   if (!style) {
@@ -183,14 +243,27 @@ export function isPolarrDesktop(): boolean {
   return false;
 }
 
-/** Capture ?desktop=1 into sessionStorage and strip it from the address bar. */
+/** Capture ?desktop=1 (and macOS overlay titlebar) into sessionStorage and strip them. */
 export function captureDesktopQueryParam(): boolean {
   if (typeof window === "undefined") return false;
   try {
     const url = new URL(window.location.href);
-    if (url.searchParams.get(DESKTOP_QUERY_PARAM) !== "1") return false;
-    markPolarrDesktop();
+    const desktop = url.searchParams.get(DESKTOP_QUERY_PARAM) === "1";
+    const overlay =
+      url.searchParams.get(OVERLAY_TITLEBAR_QUERY_PARAM) ===
+      OVERLAY_TITLEBAR_QUERY_VALUE;
+    if (!desktop && !overlay) return false;
+    if (overlay) {
+      try {
+        sessionStorage.setItem(OVERLAY_STORAGE_KEY, "1");
+      } catch {
+        /* private mode */
+      }
+      applyOverlayTitlebarAttr(true);
+    }
+    if (desktop || overlay) markPolarrDesktop();
     url.searchParams.delete(DESKTOP_QUERY_PARAM);
+    url.searchParams.delete(OVERLAY_TITLEBAR_QUERY_PARAM);
     const next = `${url.pathname}${url.search}${url.hash}`;
     window.history.replaceState(window.history.state, "", next);
     return true;

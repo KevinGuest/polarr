@@ -41,6 +41,7 @@
     "core:app:allow-default-window-icon",
     "core:event:default",
     "allow-get-server-url",
+    "allow-get-desktop-device-name",
     "allow-set-server-url",
     "allow-clear-server-url",
     "allow-probe-server-url",

@@ -4,6 +4,11 @@ description = "Read the saved Polarr server URL"
 commands.allow = ["get_server_url"]
 
 [[permission]]
+identifier = "allow-get-desktop-device-name"
+description = "Read the computer name for Polarr Connect"
+commands.allow = ["get_desktop_device_name"]
+
+[[permission]]
 identifier = "allow-set-server-url"
 description = "Save the Polarr server URL"
 commands.allow = ["set_server_url"]

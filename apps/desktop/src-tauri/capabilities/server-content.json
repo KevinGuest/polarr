@@ -9,6 +9,7 @@
   },
   "permissions": [
     "core:event:default",
+    "allow-get-desktop-device-name",
     "allow-desktop-chrome-up",
     "allow-discord-set-presence",
     "allow-discord-clear-presence",

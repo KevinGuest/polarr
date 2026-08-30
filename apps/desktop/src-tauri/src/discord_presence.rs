@@ -154,7 +154,30 @@ fn build_activity(payload: &PresencePayload) -> Activity<'static> {
 
 fn apply_activity(ipc: &mut DiscordIpcClient, payload: &PresencePayload) -> Result<(), String> {
     ipc.set_activity(build_activity(payload))
-        .map_err(|e| format!("set_activity: {e}"))
+        .map_err(|e| format!("set_activity: {e}"))?;
+    let (_, response) = ipc
+        .recv()
+        .map_err(|e| format!("Discord did not confirm the activity: {e}"))?;
+    if response.get("evt").and_then(|value| value.as_str()) == Some("ERROR") {
+        let message = response
+            .pointer("/data/message")
+            .and_then(|value| value.as_str())
+            .unwrap_or("Discord rejected the activity");
+        return Err(message.to_string());
+    }
+    Ok(())
+}
+
+fn clear_activity(ipc: &mut DiscordIpcClient) -> Result<(), String> {
+    ipc.clear_activity()
+        .map_err(|e| format!("clear_activity: {e}"))?;
+    let (_, response) = ipc
+        .recv()
+        .map_err(|e| format!("Discord did not confirm clearing the activity: {e}"))?;
+    if response.get("evt").and_then(|value| value.as_str()) == Some("ERROR") {
+        return Err("Discord rejected clearing the activity".to_string());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -195,7 +218,7 @@ pub fn discord_clear_presence(state: State<'_, DiscordPresenceState>) -> Result<
         .map_err(|_| "Discord presence lock poisoned".to_string())?;
 
     if let Some(client) = guard.as_mut() {
-        let _ = client.ipc.clear_activity();
+        clear_activity(&mut client.ipc)?;
     }
     Ok(())
 }

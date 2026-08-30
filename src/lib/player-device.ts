@@ -8,6 +8,11 @@ export type LocalConnectDevice = {
   kind: ConnectDeviceKind;
 };
 
+type TauriInvoke = (
+  cmd: string,
+  args?: Record<string, unknown>,
+) => Promise<unknown>;
+
 function ua(): string {
   if (typeof navigator === "undefined") return "";
   return navigator.userAgent || "";
@@ -18,14 +23,11 @@ export function detectConnectDevice(): LocalConnectDevice {
   const agent = ua();
 
   if (typeof window !== "undefined" && isPolarrDesktop()) {
-    const platform = /Macintosh|Mac OS X/i.test(agent)
-      ? "macOS"
-      : /Windows/i.test(agent)
-        ? "Windows"
-        : /Linux/i.test(agent)
-          ? "Linux"
-          : "Desktop";
-    return { id, name: `Polarr for ${platform}`, kind: "computer" };
+    return {
+      id,
+      name: /Macintosh|Mac OS X/i.test(agent) ? "This Mac" : "This Computer",
+      kind: "computer",
+    };
   }
 
   if (/iPhone/i.test(agent)) {
@@ -55,11 +57,24 @@ export function detectConnectDevice(): LocalConnectDevice {
   return { id, name: "This web browser", kind: "computer" };
 }
 
-export function selfDeviceLabel(device: LocalConnectDevice): string {
-  if (device.kind === "phone") {
-    return device.name.startsWith("This ") ? device.name : `This ${device.name}`;
+export async function resolveConnectDevice(): Promise<LocalConnectDevice> {
+  const device = detectConnectDevice();
+  if (typeof window === "undefined" || !isPolarrDesktop()) return device;
+
+  const w = window as Window & {
+    __TAURI__?: { core?: { invoke?: TauriInvoke } };
+    __TAURI_INTERNALS__?: { invoke?: TauriInvoke };
+  };
+  const invoke = w.__TAURI__?.core?.invoke ?? w.__TAURI_INTERNALS__?.invoke;
+  if (typeof invoke !== "function") return device;
+
+  try {
+    const name = await invoke("get_desktop_device_name");
+    if (typeof name === "string" && name.trim()) {
+      return { ...device, name: name.trim().slice(0, 80) };
+    }
+  } catch {
+    /* fall back to the platform label */
   }
-  if (device.name.startsWith("Polarr for ")) return `This ${device.name}`;
-  if (device.name.startsWith("This ")) return device.name;
-  return `This ${device.name}`;
+  return device;
 }

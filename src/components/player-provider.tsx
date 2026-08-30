@@ -18,7 +18,7 @@ import { LISTEN_HEARTBEAT_SECONDS } from "@/lib/listen";
 import { offlineStreamUrl } from "@/lib/desktop-offline";
 import {
   detectConnectDevice,
-  selfDeviceLabel,
+  resolveConnectDevice,
   type LocalConnectDevice,
 } from "@/lib/player-device";
 import type {
@@ -1616,7 +1616,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const self = localDeviceRef.current;
       const infos: ConnectDeviceInfo[] = devices.map((d) => ({
         id: d.id,
-        name: d.id === self.id ? selfDeviceLabel(self) : d.name,
+        name: d.id === self.id ? self.name : d.name,
         kind: d.kind,
         self: d.id === self.id,
         active: Boolean(ownerId) ? d.id === ownerId : d.id === self.id,
@@ -1624,7 +1624,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       if (!infos.some((d) => d.self) && self.id) {
         infos.unshift({
           id: self.id,
-          name: selfDeviceLabel(self),
+          name: self.name,
           kind: self.kind,
           self: true,
           active: !ownerId || ownerId === self.id,
@@ -1645,6 +1645,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (typeof window === "undefined") return;
     localDeviceRef.current = detectConnectDevice();
     let cancelled = false;
+    void resolveConnectDevice().then((device) => {
+      if (!cancelled) localDeviceRef.current = device;
+    });
 
     const runCommands = (commands: ConnectCommand[]) => {
       for (const command of commands) {

@@ -801,7 +801,9 @@ fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> 
     // also turns a stalled navigation into a recoverable error instead of a
     // permanently black content area.
     if let Some(ready) = ready {
-        wait_for_server_ready(ready)?;
+        ready.recv_timeout(Duration::from_secs(20)).map_err(|_| {
+            "The server page did not finish loading. Check the URL and try again.".to_string()
+        })?;
 
         // The new child has loaded successfully while hidden. Reveal it and
         // shrink the setup shell as one UI-thread operation so there is always
@@ -820,15 +822,30 @@ fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> 
     Ok(())
 }
 
-fn wait_for_server_ready(ready: mpsc::Receiver<()>) -> Result<(), String> {
+fn wait_for_server_ready(app: &AppHandle, ready: mpsc::Receiver<()>) -> Result<(), String> {
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     loop {
         if ready.recv_timeout(Duration::from_millis(100)).is_ok() {
             return Ok(());
         }
 
+        // WKWebView does not consistently deliver Tauri's Finished callback
+        // for an overlay child. A committed HTTP(S) URL is sufficient on macOS:
+        // the endpoint was already verified by probe_server_url and the active
+        // WKWebView can continue rendering after the native layout hand-off.
+        #[cfg(target_os = "macos")]
+        if let Some(wv) = app.get_webview(SERVER_WEBVIEW_LABEL) {
+            if let Ok(current) = wv.url() {
+                if is_loaded_http_url(&current) {
+                    return Ok(());
+                }
+            }
+        }
+
         if std::time::Instant::now() >= deadline {
-            return Err("Failed to connect.".to_string());
+            return Err(
+                "The server page did not finish loading. Check the URL and try again.".to_string(),
+            );
         }
     }
 }
@@ -889,6 +906,7 @@ fn create_or_reveal_server(
 
     let (pos, size) = content_bounds(&window)?;
     let (ready_tx, ready_rx) = mpsc::channel();
+    let callback_target = parsed.clone();
     let callback_once = Arc::new(AtomicBool::new(false));
     let builder = WebviewBuilder::new(SERVER_WEBVIEW_LABEL, WebviewUrl::External(parsed.clone()))
         .initialization_script(INIT_SCRIPT)
@@ -897,7 +915,7 @@ fn create_or_reveal_server(
         .on_page_load(move |_webview, payload| {
             if !matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
                 || href_is_blank(payload.url().as_str())
-                || !is_loaded_http_url(payload.url())
+                || !same_origin(payload.url(), &callback_target)
                 || callback_once.swap(true, Ordering::SeqCst)
             {
                 return;
@@ -913,29 +931,18 @@ fn create_or_reveal_server(
         .add_child(builder, pos, size)
         .map_err(|e| format!("create server webview: {e}"))?;
     // A newly-created native child is above the shell in the compositor even
-    // before it has painted a document. WebView2 can safely load while hidden.
-    // WKWebView cannot: hiding it may suspend navigation and prevent Finished
-    // from ever firing, so macOS keeps it active underneath the setup shell.
-    #[cfg(not(target_os = "macos"))]
+    // before it has painted a document. Hide it immediately and leave the
+    // setup shell full-sized until its Finished callback proves that content
+    // loaded. This prevents WebView2's black background from becoming the only
+    // visible/recoverable UI while navigation is pending or stalled.
     if let Err(err) = wv.hide() {
         let _ = wv.close();
         return Err(format!("hide loading server webview: {err}"));
     }
+    #[cfg(target_os = "macos")]
+    crate::macos_window::stage_server_load(app, &url);
     let _ = wv.navigate(parsed);
     kick_server_load(&wv, &url);
-    #[cfg(target_os = "macos")]
-    {
-        // WKWebView overlay children do not reliably emit Tauri's Finished
-        // callback. The URL has already passed the native server probe, so do
-        // the native split layout now and let WebKit finish painting in place.
-        // Waiting for a callback here made every macOS connection take the full
-        // timeout and then fail despite a healthy server.
-        apply_layout(app)?;
-        let _ = wv.set_focus();
-        schedule_marker_kicks(app.clone());
-        schedule_connected_retries(app.clone());
-        return Ok(None);
-    }
     Ok(Some(ready_rx))
 }
 

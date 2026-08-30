@@ -7,13 +7,16 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc, Arc, Mutex,
+};
 use std::time::Duration;
 
 use serde_json::Value;
 use tauri::{
-    AppHandle, Emitter, Listener, LogicalPosition, LogicalSize, Manager, WebviewUrl,
-    webview::WebviewBuilder,
+    webview::WebviewBuilder, AppHandle, Emitter, Listener, LogicalPosition, LogicalSize, Manager,
+    WebviewUrl,
 };
 use url::Url;
 
@@ -541,7 +544,9 @@ fn window_logical_size(window: &tauri::Window) -> Result<LogicalSize<f64>, Strin
     Ok(physical.to_logical(scale))
 }
 
-fn content_bounds(window: &tauri::Window) -> Result<(LogicalPosition<f64>, LogicalSize<f64>), String> {
+fn content_bounds(
+    window: &tauri::Window,
+) -> Result<(LogicalPosition<f64>, LogicalSize<f64>), String> {
     let logical = window_logical_size(window)?;
     let height = (logical.height - TITLEBAR_HEIGHT).max(80.0);
     let width = logical.width.max(320.0);
@@ -625,12 +630,8 @@ fn apply_layout(app: &AppHandle) -> Result<(), String> {
     let (pos, size) = content_bounds(&window)?;
     set_webview_frame(&wv, pos, size)?;
     let _ = wv.show();
-    let url = last_server_url().unwrap_or_else(|| {
-        wv.url()
-            .ok()
-            .map(|u| u.to_string())
-            .unwrap_or_default()
-    });
+    let url = last_server_url()
+        .unwrap_or_else(|| wv.url().ok().map(|u| u.to_string()).unwrap_or_default());
     if !url.is_empty() {
         kick_server_load(&wv, &url);
     }
@@ -798,7 +799,21 @@ fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> 
     if let Some(ready) = ready {
         ready.recv_timeout(Duration::from_secs(20)).map_err(|_| {
             "The server page did not finish loading. Check the URL and try again.".to_string()
-        })??;
+        })?;
+
+        // The new child has loaded successfully while hidden. Reveal it and
+        // shrink the setup shell as one UI-thread operation so there is always
+        // a usable surface covering the window during the hand-off.
+        let handle = app.clone();
+        run_on_main_sync(&app, move || {
+            apply_layout(&handle)?;
+            if let Some(wv) = handle.get_webview(SERVER_WEBVIEW_LABEL) {
+                let _ = wv.set_focus();
+            }
+            Ok(())
+        })?;
+        schedule_marker_kicks(app.clone());
+        schedule_connected_retries(app.clone());
     }
     Ok(())
 }
@@ -827,7 +842,7 @@ fn create_or_reveal_server(
     app: &AppHandle,
     parsed: Url,
     url: String,
-) -> Result<Option<mpsc::Receiver<Result<(), String>>>, String> {
+) -> Result<Option<mpsc::Receiver<()>>, String> {
     remember_server_url(&url);
     let window = app
         .get_window("main")
@@ -858,6 +873,9 @@ fn create_or_reveal_server(
     }
 
     let (pos, size) = content_bounds(&window)?;
+    let (ready_tx, ready_rx) = mpsc::channel();
+    let callback_target = parsed.clone();
+    let callback_once = Arc::new(AtomicBool::new(false));
     let builder = WebviewBuilder::new(SERVER_WEBVIEW_LABEL, WebviewUrl::External(parsed.clone()))
         .initialization_script(INIT_SCRIPT)
         .focused(true)
@@ -866,10 +884,12 @@ fn create_or_reveal_server(
             if !matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
                 || href_is_blank(payload.url().as_str())
                 || !same_origin(payload.url(), &callback_target)
-                || callback_once.swap(true, std::sync::atomic::Ordering::SeqCst)
+                || callback_once.swap(true, Ordering::SeqCst)
             {
                 return;
             }
+            let _ = ready_tx.send(());
+        });
 
     // Keep the setup shell full-size until the child exists. In particular,
     // WebView2/WKWebView creation can fail for machine-specific reasons; if we
@@ -878,28 +898,24 @@ fn create_or_reveal_server(
     let wv = window
         .add_child(builder, pos, size)
         .map_err(|e| format!("create server webview: {e}"))?;
-    if let Err(err) = pin_shell_to_titlebar(app) {
+    // A newly-created native child is above the shell in the compositor even
+    // before it has painted a document. Hide it immediately and leave the
+    // setup shell full-sized until its Finished callback proves that content
+    // loaded. This prevents WebView2's black background from becoming the only
+    // visible/recoverable UI while navigation is pending or stalled.
+    if let Err(err) = wv.hide() {
         let _ = wv.close();
-        return Err(err);
+        return Err(format!("hide loading server webview: {err}"));
     }
     let _ = wv.navigate(parsed);
     kick_server_load(&wv, &url);
-    apply_layout(app)?;
-    let _ = wv.show();
-    let _ = wv.set_focus();
-    #[cfg(target_os = "macos")]
-    crate::macos_window::layout_connected(app, &url);
-
-    schedule_marker_kicks(app.clone());
-    schedule_connected_retries(app.clone());
-    Ok(())
+    Ok(Some(ready_rx))
 }
 
 #[tauri::command]
 pub async fn hide_server_webview(app: AppHandle) -> Result<(), String> {
     if let Some(wv) = app.get_webview(SERVER_WEBVIEW_LABEL) {
-        wv.hide()
-            .map_err(|e| format!("hide server webview: {e}"))?;
+        wv.hide().map_err(|e| format!("hide server webview: {e}"))?;
     }
     dispatch_fill_shell(&app);
     Ok(())
@@ -909,8 +925,7 @@ pub async fn hide_server_webview(app: AppHandle) -> Result<(), String> {
 pub async fn show_server_webview(app: AppHandle) -> Result<(), String> {
     if let Some(wv) = app.get_webview(SERVER_WEBVIEW_LABEL) {
         apply_layout_on_main(&app);
-        wv.show()
-            .map_err(|e| format!("show server webview: {e}"))?;
+        wv.show().map_err(|e| format!("show server webview: {e}"))?;
         let _ = wv.set_focus();
     }
     Ok(())

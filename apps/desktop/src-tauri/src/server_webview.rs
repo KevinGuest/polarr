@@ -671,6 +671,10 @@ fn same_origin(a: &Url, b: &Url) -> bool {
         && a.port_or_known_default() == b.port_or_known_default()
 }
 
+fn is_loaded_http_url(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https") && !href_is_blank(url.as_str())
+}
+
 fn reassert_desktop_markers(wv: &tauri::Webview) {
     let _ = wv.eval(INIT_SCRIPT);
 }
@@ -816,6 +820,34 @@ fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> 
         schedule_connected_retries(app.clone());
     }
     Ok(())
+}
+
+fn wait_for_server_ready(app: &AppHandle, ready: mpsc::Receiver<()>) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        if ready.recv_timeout(Duration::from_millis(100)).is_ok() {
+            return Ok(());
+        }
+
+        // WKWebView does not consistently deliver Tauri's Finished callback
+        // for an overlay child. A committed HTTP(S) URL is sufficient on macOS:
+        // the endpoint was already verified by probe_server_url and the active
+        // WKWebView can continue rendering after the native layout hand-off.
+        #[cfg(target_os = "macos")]
+        if let Some(wv) = app.get_webview(SERVER_WEBVIEW_LABEL) {
+            if let Ok(current) = wv.url() {
+                if is_loaded_http_url(&current) {
+                    return Ok(());
+                }
+            }
+        }
+
+        if std::time::Instant::now() >= deadline {
+            return Err(
+                "The server page did not finish loading. Check the URL and try again.".to_string(),
+            );
+        }
+    }
 }
 
 fn schedule_connected_retries(app: AppHandle) {

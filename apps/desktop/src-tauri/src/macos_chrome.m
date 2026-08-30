@@ -273,6 +273,48 @@ static void polarr_fill_inside(NSView *box, NSView *leaf) {
   }
 }
 
+void polarr_macos_stage_server_load(void *ns_window, const char *server_url) {
+  if (ns_window == NULL) {
+    return;
+  }
+  NSWindow *window = (__bridge NSWindow *)ns_window;
+  NSView *content = window.contentView;
+  if (!content) {
+    return;
+  }
+  polarr_paint_content(content);
+
+  WKWebView *shellWV = nil;
+  WKWebView *serverWV = nil;
+  polarr_classify_webviews(content, server_url, &shellWV, &serverWV);
+  if (!shellWV || !serverWV || shellWV == serverWV) {
+    return;
+  }
+
+  NSView *shellBox = polarr_content_child(content, shellWV);
+  NSView *serverBox = polarr_content_child(content, serverWV);
+  if (!shellBox || !serverBox || shellBox == serverBox) {
+    return;
+  }
+
+  // WKWebView pauses work while hidden on some macOS/WebKit versions. Leave
+  // the server view attached and visible so navigation can complete, but keep
+  // the known-good setup shell above it until Rust receives Finished and calls
+  // polarr_macos_layout_connected for the final split layout.
+  polarr_set_container_frame(serverBox, content.bounds,
+                             NSViewWidthSizable | NSViewHeightSizable);
+  polarr_fill_inside(serverBox, serverWV);
+  serverWV.hidden = NO;
+  polarr_macos_paint_webview((__bridge void *)serverWV);
+
+  polarr_set_container_frame(shellBox, content.bounds,
+                             NSViewWidthSizable | NSViewHeightSizable);
+  polarr_fill_inside(shellBox, shellWV);
+  shellWV.hidden = NO;
+  [content addSubview:serverBox positioned:NSWindowBelow relativeTo:shellBox];
+  [content addSubview:shellBox positioned:NSWindowAbove relativeTo:serverBox];
+}
+
 void polarr_macos_layout_connected(void *ns_window, double titlebar_h, const char *server_url) {
   if (ns_window == NULL) {
     return;

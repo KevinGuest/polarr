@@ -21,7 +21,7 @@ jobs:
         include:
           - platform: macos-latest
             target: universal-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
             artifact_glob: apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
             artifact_name: macos-universal
           - platform: windows-latest

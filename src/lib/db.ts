@@ -16,7 +16,10 @@ import {
   serializeNotifyEvents,
   type NotifyEventFlags,
 } from "./notify-events";
-import { LISTEN_QUALIFY_SECONDS } from "./listen";
+import {
+  LISTEN_HEARTBEAT_SECONDS,
+  LISTEN_QUALIFY_SECONDS,
+} from "./listen";
 import {
   isUserRole,
   type UserRole,
@@ -5728,8 +5731,8 @@ export function recordPlay(userId: string, trackId: string) {
 
 /**
  * Credit listening time toward a track. Creates/updates play_history and
- * refreshes played_at once the listen has reached 15 seconds (and on every
- * further credit so the “others listening” shelf stays current).
+ * refreshes the household feed after the first full player heartbeat. Recent
+ * history still uses the longer listen qualification threshold.
  *
  * Live/stream ids are resolved via metadata into a durable tracks row so
  * Recently played survives across sessions.
@@ -5786,7 +5789,9 @@ export function creditTrackListen(
     // Bump played_at whenever this listen qualifies (or already had).
     const bumpPlayedAt =
       next >= LISTEN_QUALIFY_SECONDS || prev >= LISTEN_QUALIFY_SECONDS;
-    qualified = bumpPlayedAt;
+    qualified =
+      next >= LISTEN_HEARTBEAT_SECONDS ||
+      prev >= LISTEN_HEARTBEAT_SECONDS;
     getDb()
       .prepare(
         `UPDATE play_history
@@ -5802,7 +5807,7 @@ export function creditTrackListen(
          VALUES (?, ?, ?, ?, ?)`,
       )
       .run(newId(), userId, resolvedId, at, add);
-    qualified = add >= LISTEN_QUALIFY_SECONDS;
+    qualified = add >= LISTEN_HEARTBEAT_SECONDS;
   }
 
   if (qualified) {
@@ -5987,6 +5992,7 @@ export function listOthersListening(
        INNER JOIN tracks t ON t.id = f.track_id
        INNER JOIN users u ON u.id = f.user_id
        WHERE f.user_id != ?
+         AND julianday(f.played_at) >= julianday('now', '-24 hours')
        ORDER BY f.played_at DESC
        LIMIT ?`,
     )
@@ -6601,6 +6607,5 @@ export function listenHoursChart(dayCount = 14) {
     series: byUser.series,
   };
 }
-
 
 

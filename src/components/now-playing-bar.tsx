@@ -10,6 +10,7 @@ import {
 import { createPortal } from "react-dom";
 import {
   Maximize2,
+  ListMusic,
   Mic2,
   MonitorSpeaker,
   Pause,
@@ -369,6 +370,32 @@ export function NowPlayingBar() {
                 aria-pressed={isPanelOpen("devices")}
               >
                 <MonitorSpeaker className="size-3.5" />
+              </button>
+            </BarTooltip>
+            <BarTooltip
+              label={
+                isPanelOpen("queue")
+                  ? "Hide queue and recently played"
+                  : "Show queue and recently played"
+              }
+            >
+              <button
+                type="button"
+                onClick={() => togglePanel("queue")}
+                className={cn(
+                  "rounded p-1.5 transition-colors",
+                  isPanelOpen("queue")
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+                aria-label={
+                  isPanelOpen("queue")
+                    ? "Hide queue and recently played"
+                    : "Show queue and recently played"
+                }
+                aria-pressed={isPanelOpen("queue")}
+              >
+                <ListMusic className="size-3.5" />
               </button>
             </BarTooltip>
             <div className="flex items-center gap-2 pl-0.5">

@@ -1685,8 +1685,10 @@ function MobilePlayerSheet() {
   return createPortal(sheet, document.body);
 }
 
-/** Permanent queue / recently-played rail (desktop). */
+/** Toggleable queue / recently-played rail (desktop). */
 export function PlayerQueueRail() {
+  const { isPanelOpen } = usePlayer();
+  if (!isPanelOpen("queue")) return null;
   return (
     <div className="hidden h-full lg:flex">
       <QueuePanel />

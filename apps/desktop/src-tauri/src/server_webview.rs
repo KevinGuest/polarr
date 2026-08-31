@@ -114,22 +114,53 @@ pub const TITLEBAR_HEIGHT: f64 = 48.0;
 const CHROME_UP_EVENT: &str = "polarr-desktop-chrome-up";
 const CHROME_DOWN_EVENT: &str = "polarr-desktop-chrome-down";
 
-/// Injected on every document load. Hard-hides web `<header>` even on old
-/// production builds that lack `data-polarr-app-header` / DesktopChromeBridge.
+/// Injected on every document load.
+/// Windows: hide the page header so the native title bar owns chrome.
+/// macOS: never hide it — the in-page header is the overlay title bar, even
+/// on older self-hosted builds that only understand `?desktop=1`.
 pub const INIT_SCRIPT: &str = r#"
 (function () {
-  // Only hide app chrome marked with data-polarr-app-header — NEVER bare
+  var agent = navigator.userAgent || "";
+  var IS_MAC = /Macintosh|Mac OS X/i.test(agent) && !/iPhone|iPad|iPod/i.test(agent);
+
+  // Only touch app chrome marked with data-polarr-app-header — NEVER bare
   // <header> (artist/playlist heroes use <header> too).
-  // Also hide native scrollbars on Radix ScrollArea so WebView2 doesn't stack
-  // OS overlay bars on top of the custom thumb.
-  var HIDE_CSS =
+  var HIDE_ONLY_CSS =
     "html[data-polarr-desktop]:not([data-polarr-overlay-titlebar]) [data-polarr-app-header]{" +
     "display:none!important;height:0!important;max-height:0!important;min-height:0!important;" +
     "overflow:hidden!important;border:0!important;padding:0!important;margin:0!important;" +
     "visibility:hidden!important;pointer-events:none!important;opacity:0!important;" +
     "position:absolute!important;left:-9999px!important;top:0!important;width:0!important;" +
     "clip:rect(0,0,0,0)!important;flex:0 0 0!important;" +
+    "}";
+
+  // Higher specificity than older `html[data-polarr-desktop] [data-polarr-app-header]` hide rules.
+  var OVERLAY_CSS =
+    "html[data-polarr-overlay-titlebar] [data-polarr-app-header]," +
+    "html[data-polarr-desktop][data-polarr-overlay-titlebar] [data-polarr-app-header]{" +
+    "display:grid!important;height:48px!important;min-height:48px!important;max-height:48px!important;" +
+    "grid-template-columns:minmax(86px,1fr) minmax(0,28rem) minmax(86px,1fr)!important;" +
+    "align-items:center!important;gap:12px!important;padding:0 12px!important;margin:0!important;" +
+    "overflow:visible!important;visibility:visible!important;pointer-events:auto!important;opacity:1!important;" +
+    "position:relative!important;left:auto!important;top:auto!important;width:auto!important;" +
+    "clip:auto!important;flex:0 0 48px!important;-webkit-app-region:drag!important;" +
     "}" +
+    "html[data-polarr-overlay-titlebar] [data-polarr-app-header]~[data-polarr-app-header]{" +
+    "display:none!important;height:0!important;min-height:0!important;max-height:0!important;" +
+    "overflow:hidden!important;visibility:hidden!important;pointer-events:none!important;" +
+    "flex:0 0 0!important;padding:0!important;margin:0!important;border:0!important;" +
+    "}" +
+    "html[data-polarr-overlay-titlebar] [data-polarr-app-header]>a:first-child{" +
+    "justify-self:end!important;-webkit-app-region:no-drag!important;" +
+    "}" +
+    "html[data-polarr-overlay-titlebar] [data-polarr-app-header] a," +
+    "html[data-polarr-overlay-titlebar] [data-polarr-app-header] button," +
+    "html[data-polarr-overlay-titlebar] [data-polarr-app-header] input," +
+    "html[data-polarr-overlay-titlebar] [data-polarr-app-header] [role=button]{" +
+    "-webkit-app-region:no-drag!important;" +
+    "}";
+
+  var BASE_CSS =
     "html[data-polarr-desktop] [data-slot=scroll-area-viewport]," +
     "html[data-polarr-desktop] [data-radix-scroll-area-viewport]{" +
     "scrollbar-width:none!important;-ms-overflow-style:none!important;" +
@@ -139,6 +170,9 @@ pub const INIT_SCRIPT: &str = r#"
     "display:none!important;width:0!important;height:0!important;" +
     "}" +
     "html,body{background:#09090b!important;color-scheme:dark;}";
+
+  var HIDE_CSS = HIDE_ONLY_CSS + OVERLAY_CSS + BASE_CSS;
+  var MAC_CSS = OVERLAY_CSS + BASE_CSS;
 
   function ensureGlobal() {
     try {
@@ -168,8 +202,24 @@ pub const INIT_SCRIPT: &str = r#"
 
   function ensureAttr() {
     try {
-      document.documentElement.dataset.polarrDesktop = "1";
-      document.documentElement.setAttribute("data-polarr-desktop", "1");
+      // Overlay must land before data-polarr-desktop. Older servers hide the
+      // header as soon as they see the desktop marker, and that hide wins if
+      // overlay is applied even one frame later.
+      if (IS_MAC) {
+        if (document.documentElement.getAttribute("data-polarr-overlay-titlebar") !== "1") {
+          document.documentElement.dataset.polarrOverlayTitlebar = "1";
+          document.documentElement.setAttribute("data-polarr-overlay-titlebar", "1");
+        }
+        try {
+          if (sessionStorage.getItem("polarr-desktop-overlay") !== "1") {
+            sessionStorage.setItem("polarr-desktop-overlay", "1");
+          }
+        } catch (_) {}
+      }
+      if (document.documentElement.getAttribute("data-polarr-desktop") !== "1") {
+        document.documentElement.dataset.polarrDesktop = "1";
+        document.documentElement.setAttribute("data-polarr-desktop", "1");
+      }
     } catch (_) {}
   }
 
@@ -179,36 +229,82 @@ pub const INIT_SCRIPT: &str = r#"
 
   function ensureClientIdentity() {
     try {
-      var agent = navigator.userAgent || "";
       var platform = /Windows/i.test(agent) ? "windows" :
-        (/Macintosh|Mac OS X/i.test(agent) ? "macos" :
+        (IS_MAC ? "macos" :
         (/Linux/i.test(agent) ? "linux" : "desktop"));
       document.cookie = "polarr_desktop_platform=" + platform +
         "; Path=/; SameSite=Lax";
     } catch (_) {}
   }
 
+  function upsertStyle(id, css, pinLast) {
+    var root = document.body || document.head || document.documentElement;
+    var el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement("style");
+      el.id = id;
+      el.textContent = css;
+      root.appendChild(el);
+      return;
+    }
+    if (el.textContent !== css) el.textContent = css;
+    if (pinLast && (el.parentNode !== root || root.lastChild !== el)) {
+      root.appendChild(el);
+    }
+  }
+
   function ensureStyle() {
     try {
-      var el = document.getElementById("polarr-desktop-hide-header");
-      if (!el) {
-        el = document.createElement("style");
-        el.id = "polarr-desktop-hide-header";
-        el.textContent = HIDE_CSS;
-        (document.body || document.head || document.documentElement).appendChild(el);
+      if (IS_MAC) {
+        // Older DesktopChromeBridge overwrites #polarr-desktop-hide-header with
+        // hide-only CSS. Neutralize that sheet and keep a dedicated overlay sheet.
+        upsertStyle("polarr-desktop-hide-header", MAC_CSS, false);
+        upsertStyle("polarr-desktop-overlay-header", MAC_CSS, true);
       } else {
-        el.textContent = HIDE_CSS;
+        upsertStyle("polarr-desktop-hide-header", HIDE_CSS, false);
       }
     } catch (_) {}
+  }
+
+  function clearHideStyles(h) {
+    h.removeAttribute("hidden");
+    h.style.removeProperty("display");
+    h.style.removeProperty("height");
+    h.style.removeProperty("min-height");
+    h.style.removeProperty("max-height");
+    h.style.removeProperty("overflow");
+    h.style.removeProperty("visibility");
+    h.style.removeProperty("pointer-events");
+    h.style.removeProperty("opacity");
+    h.style.removeProperty("position");
+    h.style.removeProperty("left");
+    h.style.removeProperty("clip");
+    h.style.removeProperty("flex");
   }
 
   function nukeHeaders() {
     try {
       var list = document.querySelectorAll("[data-polarr-app-header]");
+      // macOS always preserves the in-page header, even if overlay attr lost a race.
+      var overlay = IS_MAC ||
+        document.documentElement.getAttribute("data-polarr-overlay-titlebar") === "1";
       for (var i = 0; i < list.length; i++) {
         var h = list[i];
-        h.setAttribute("hidden", "");
-        h.style.setProperty("display", "none", "important");
+        if (overlay) {
+          if (i > 0) {
+            if (h.getAttribute("hidden") == null) h.setAttribute("hidden", "");
+            if (h.style.getPropertyValue("display") !== "none") {
+              h.style.setProperty("display", "none", "important");
+            }
+            continue;
+          }
+          clearHideStyles(h);
+          continue;
+        }
+        if (h.getAttribute("hidden") == null) h.setAttribute("hidden", "");
+        if (h.style.getPropertyValue("display") !== "none") {
+          h.style.setProperty("display", "none", "important");
+        }
         h.style.setProperty("height", "0", "important");
         h.style.setProperty("max-height", "0", "important");
         h.style.setProperty("overflow", "hidden", "important");
@@ -218,13 +314,20 @@ pub const INIT_SCRIPT: &str = r#"
     } catch (_) {}
   }
 
+  var applyingMarkers = false;
   function applyDesktopMarkers() {
-    ensureGlobal();
-    ensureStorage();
-    ensureClientIdentity();
-    ensureAttr();
-    ensureStyle();
-    nukeHeaders();
+    if (applyingMarkers) return;
+    applyingMarkers = true;
+    try {
+      ensureGlobal();
+      ensureStorage();
+      ensureClientIdentity();
+      ensureAttr();
+      ensureStyle();
+      nukeHeaders();
+    } finally {
+      applyingMarkers = false;
+    }
   }
 
   function getInvoke() {
@@ -470,7 +573,11 @@ pub const INIT_SCRIPT: &str = r#"
       });
       window.__polarrDesktopMo.observe(document.documentElement, {
         attributes: true,
-        attributeFilter: ["data-polarr-desktop", "class"],
+        attributeFilter: [
+          "data-polarr-desktop",
+          "data-polarr-overlay-titlebar",
+          "class",
+        ],
       });
     }
   } catch (_) {}
@@ -478,7 +585,9 @@ pub const INIT_SCRIPT: &str = r#"
   try {
     if (!window.__polarrHeaderMo && document.documentElement) {
       window.__polarrHeaderMo = new MutationObserver(function () {
-        nukeHeaders();
+        // Re-run the full marker pass so macOS overlay is restored if an older
+        // page hid the header between mutations.
+        applyDesktopMarkers();
       });
       var startObs = function () {
         try {
@@ -720,7 +829,6 @@ fn schedule_main_marker_kicks(app: AppHandle) {
             let _ = app.run_on_main_thread(move || {
                 if let Some(wv) = handle.get_webview("main") {
                     reassert_macos_overlay(&wv);
-                    crate::macos_window::align_traffic_lights(&handle);
                 }
             });
         }
@@ -801,8 +909,6 @@ pub fn install_resize_handler(app: &AppHandle) {
                     | tauri::WindowEvent::ScaleFactorChanged { .. }
                     | tauri::WindowEvent::Focused(_)
             ) {
-                #[cfg(target_os = "macos")]
-                crate::macos_window::align_traffic_lights(&handle);
                 dispatch_layout(&handle);
             }
         });
@@ -851,7 +957,6 @@ fn open_server_webview_inner(app: AppHandle, url: String) -> Result<(), String> 
     // Reassert the native-shell markers on the destination document so macOS
     // always uses the centered search + adjacent logo layout after navigation.
     schedule_main_marker_kicks(app.clone());
-    crate::macos_window::align_traffic_lights(&app);
     Ok(())
 }
 

@@ -2666,7 +2666,7 @@ dependencies = [
 
 [[package]]
 name = "polarr-desktop"
-version = "0.2.10"
+version = "0.2.11"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",

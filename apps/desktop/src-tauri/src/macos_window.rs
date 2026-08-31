@@ -21,7 +21,6 @@ use super::server_webview::TITLEBAR_HEIGHT;
 extern "C" {
     fn polarr_macos_paint_window(ns_window: *mut c_void);
     fn polarr_macos_paint_webview(wk_webview: *mut c_void);
-    fn polarr_macos_align_traffic_lights(ns_window: *mut c_void);
     fn polarr_macos_layout_connected(
         ns_window: *mut c_void,
         titlebar_h: f64,
@@ -39,7 +38,6 @@ pub fn apply(app: &AppHandle) {
     if let Ok(ptr) = window.ns_window() {
         unsafe {
             polarr_macos_paint_window(ptr);
-            polarr_macos_align_traffic_lights(ptr);
         }
     }
     if let Some(shell) = app.get_webview("main") {
@@ -54,17 +52,6 @@ pub fn paint_shell(wv: &Webview) {
     });
 }
 
-pub fn align_traffic_lights(app: &AppHandle) {
-    let Some(window) = app.get_window("main") else {
-        return;
-    };
-    if let Ok(ptr) = window.ns_window() {
-        unsafe {
-            polarr_macos_align_traffic_lights(ptr);
-        }
-    }
-}
-
 /// Pin the shell wrapper to the 48px title bar and put the server wrapper under it.
 pub fn layout_connected(app: &AppHandle, server_url: &str) {
     let Some(window) = app.get_window("main") else {
@@ -73,7 +60,6 @@ pub fn layout_connected(app: &AppHandle, server_url: &str) {
     let c_url = CString::new(server_url).unwrap_or_else(|_| CString::new("").unwrap());
     if let Ok(ptr) = window.ns_window() {
         unsafe {
-            polarr_macos_align_traffic_lights(ptr);
             polarr_macos_layout_connected(ptr, TITLEBAR_HEIGHT, c_url.as_ptr());
         }
     }
@@ -85,7 +71,6 @@ pub fn fill_shell(app: &AppHandle) {
     };
     if let Ok(ptr) = window.ns_window() {
         unsafe {
-            polarr_macos_align_traffic_lights(ptr);
             polarr_macos_fill_shell(ptr);
         }
     }

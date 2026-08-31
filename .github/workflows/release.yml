@@ -116,9 +116,10 @@ jobs:
           releaseBody: |
             ## What's changed
 
-            - **macOS connections** — fixes the black screen after connecting to a Polarr server
-            - **Playback devices** — shows Polarr for macOS, Windows, or Linux instead of “desktop”
-            - **Discord linking** — restores the account linking flow
+            - **macOS startup** — fixes the instant crash after opening or reconnecting
+            - **Desktop header** — aligns the logo, Home button, and search with the main view
+            - **Player restore** — keeps the last track visible after reopening Polarr
+            - **Queue panel** — show or hide Queue and Recently Played from the player bar
 
             ## Downloads
 

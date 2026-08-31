@@ -11,6 +11,7 @@ import {
   DoorOpen,
   Download,
   Gauge,
+  Home,
   Info,
   ListMusic,
   ListVideo,
@@ -248,7 +249,7 @@ function useDesktopShellMode() {
 
 function ShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { setPanel, track, isRemotePlayback } = usePlayer();
+  const { setPanel, track, isRemotePlayback, isPanelOpen } = usePlayer();
   const { desktopShell, overlayTitlebar } = useDesktopShellMode();
   const isSearchPage = pathname === "/search";
   const isLibraryPage = pathname === "/library";
@@ -279,6 +280,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
     pathname === "/admin" || pathname.startsWith("/admin/");
   const dismissOverlays = () => setPanel("none");
   const useLibraryPageScroll = isLibraryPage && mobileViewport;
+  const queueRailOpen = isPanelOpen("queue");
 
   useEffect(() => {
     if (desktopShell) {
@@ -408,28 +410,46 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             )}
           >
             {overlayTitlebar ? (
-              <div className="col-span-3 grid h-full w-full grid-cols-[minmax(86px,1fr)_minmax(0,28rem)_minmax(86px,1fr)] items-center gap-3 px-3">
+              <div
+                className="relative col-span-3 grid h-full w-full items-center px-3"
+                style={{
+                  gridTemplateColumns: `${libraryCollapsed ? "72px" : "18rem"} minmax(0, 1fr) ${queueRailOpen ? "24rem" : "0px"}`,
+                }}
+              >
                 <div />
-                <div className="relative w-full">
-                  <Link
-                    href="/"
-                    onClick={dismissOverlays}
-                    className="absolute right-[calc(100%+8px)] top-1/2 inline-flex -translate-y-1/2 text-foreground"
-                    aria-label="Polarr home"
-                  >
-                    <PolarrMark className="size-8" />
-                  </Link>
-                  <Suspense
-                    fallback={
-                      <div className="flex h-9 w-full items-center justify-center rounded-full border border-border px-4 text-sm text-muted-foreground">
-                        Search
-                      </div>
-                    }
-                  >
-                    <HeaderSearch />
-                  </Suspense>
+                <div className="flex min-w-0 justify-center px-3">
+                  <div className="relative w-full max-w-[28rem]">
+                    <div className="absolute right-[calc(100%+8px)] top-1/2 flex -translate-y-1/2 items-center gap-1">
+                      <Link
+                        href="/"
+                        onClick={dismissOverlays}
+                        className="inline-flex text-foreground"
+                        aria-label="Polarr home"
+                      >
+                        <PolarrMark className="size-8" />
+                      </Link>
+                      <Link
+                        href="/"
+                        onClick={dismissOverlays}
+                        className="inline-flex rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        aria-label="Home"
+                      >
+                        <Home className="size-4" />
+                      </Link>
+                    </div>
+                    <Suspense
+                      fallback={
+                        <div className="flex h-9 w-full items-center justify-center rounded-full border border-border px-4 text-sm text-muted-foreground">
+                          Search
+                        </div>
+                      }
+                    >
+                      <HeaderSearch />
+                    </Suspense>
+                  </div>
                 </div>
-                <div className="flex items-center justify-end gap-1">
+                <div />
+                <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center justify-end gap-1">
                   <NotificationsBell />
                   <UserMenu />
                 </div>

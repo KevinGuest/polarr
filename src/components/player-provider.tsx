@@ -257,16 +257,13 @@ const CLOSED_PANELS: OpenPanels = {
   lyrics: false,
   devices: false,
   nowPlaying: false,
-  queue: true, // permanent rail — never closable
+  queue: false,
 };
 
 const DEFAULT_PANELS: OpenPanels = {
   ...CLOSED_PANELS,
+  queue: true,
 };
-
-function withQueuePinned(panels: OpenPanels): OpenPanels {
-  return panels.queue ? panels : { ...panels, queue: true };
-}
 
 export type ConnectDeviceInfo = {
   id: string;
@@ -330,6 +327,7 @@ const PlayerContext = createContext<PlayerContextValue | null>(null);
 
 const PLAYER_CHANNEL = "polarr-player";
 const PLAYER_STORAGE_KEY = "polarr-player-v1";
+const QUEUE_RAIL_STORAGE_KEY = "polarr-queue-rail-v1";
 
 type SyncPayload = {
   track: PlayerTrack | null;
@@ -817,20 +815,48 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     useState<ConnectDeviceInfo | null>(null);
   const [isRemotePlayback, setIsRemotePlayback] = useState(false);
   const [openPanels, setOpenPanelsState] = useState<OpenPanels>(DEFAULT_PANELS);
-  const setOpenPanels = useCallback(
-    (update: OpenPanels | ((prev: OpenPanels) => OpenPanels)) => {
-      setOpenPanelsState((prev) => {
-        const next = typeof update === "function" ? update(prev) : update;
-        return withQueuePinned(next);
-      });
-    },
-    [],
-  );
+  const setOpenPanels = setOpenPanelsState;
+  const [queuePreferenceReady, setQueuePreferenceReady] = useState(false);
   const [queueTab, setQueueTab] = useState<QueueTab>("queue");
   /** Bumped on seek so Discord progress bar timestamps resync. */
   const [presenceRev, setPresenceRev] = useState(0);
   const pathname = usePathname();
   const prevPathnameRef = useRef(pathname);
+
+  useEffect(() => {
+    let cancelled = false;
+    let queueOpen: boolean | null = null;
+    try {
+      const stored = localStorage.getItem(QUEUE_RAIL_STORAGE_KEY);
+      if (stored === "0" || stored === "1") {
+        queueOpen = stored === "1";
+      }
+    } catch {
+      /* private mode */
+    }
+    queueMicrotask(() => {
+      if (cancelled) return;
+      if (queueOpen != null) {
+        setOpenPanelsState((prev) => ({ ...prev, queue: queueOpen! }));
+      }
+      setQueuePreferenceReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!queuePreferenceReady) return;
+    try {
+      localStorage.setItem(
+        QUEUE_RAIL_STORAGE_KEY,
+        openPanels.queue ? "1" : "0",
+      );
+    } catch {
+      /* private mode */
+    }
+  }, [openPanels.queue, queuePreferenceReady]);
 
   // Leave karaoke / overlay panels when navigating away (sidebar album, etc.)
   useEffect(() => {
@@ -1532,6 +1558,51 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       queueMicrotask(() => {
         applyingRemoteRef.current = false;
       });
+    } else {
+      // Fresh install / cleared web storage: keep the player visible with the
+      // last server-side listen, paused at the bottom. This also survives a
+      // desktop reinstall because recent plays live on the Polarr server.
+      void fetch("/api/recent?limit=1", { cache: "no-store" })
+        .then(async (res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (trackRef.current) return;
+          const row = Array.isArray(data?.items) ? data.items[0] : null;
+          if (!row?.id || !row?.title || !row?.artist) return;
+          const ready = withPlayerMeta({
+            id: String(row.id),
+            title: String(row.title),
+            artist: String(row.artist),
+            album: String(row.album || ""),
+            coverPath: row.coverPath || null,
+            explicit: Boolean(row.explicit),
+            duration: Number(row.duration) || null,
+          });
+          const restoredQueue = [ready];
+          ownerIdRef.current = tabIdRef.current;
+          trackRef.current = ready;
+          queueRef.current = restoredQueue;
+          playingRef.current = false;
+          progressRef.current = 0;
+          durationRef.current = ready.duration || 0;
+          setTrack(ready);
+          setQueue(restoredQueue);
+          setPlaying(false);
+          setProgress(0);
+          setDuration(ready.duration || 0);
+          setAudioSrc(audio, audioSrcFor(ready));
+          writeStored({
+            track: ready,
+            queue: restoredQueue,
+            playing: false,
+            progress: 0,
+            duration: ready.duration || 0,
+            volume: volumeRef.current,
+            shuffle: shuffleRef.current,
+            ownerId: tabIdRef.current,
+            updatedAt: Date.now(),
+          });
+        })
+        .catch(() => null);
     }
 
     channel?.postMessage({
@@ -2745,18 +2816,22 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const isPanelOpen = useCallback(
-    (id: PlayerPanelId) => (id === "queue" ? true : openPanels[id]),
+    (id: PlayerPanelId) => openPanels[id],
     [openPanels],
   );
 
   const closePanel = useCallback((id: PlayerPanelId) => {
-    if (id === "queue") return;
     setOpenPanels((prev) => ({ ...prev, [id]: false }));
   }, [setOpenPanels]);
 
   const setPanel = useCallback((next: PlayerPanel) => {
     if (next === "none") {
-      setOpenPanels(CLOSED_PANELS);
+      setOpenPanels((prev) => ({
+        ...prev,
+        lyrics: false,
+        devices: false,
+        nowPlaying: false,
+      }));
       return;
     }
     if (next === "queue") {
@@ -2767,13 +2842,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [setOpenPanels]);
 
   const togglePanel = useCallback((next: PlayerPanelId) => {
-    if (next === "queue") return;
     setOpenPanels((prev) => ({ ...prev, [next]: !prev[next] }));
   }, [setOpenPanels]);
 
   const openQueue = useCallback((tab?: QueueTab) => {
     if (tab) setQueueTab(tab);
-  }, []);
+    setOpenPanels((prev) => ({ ...prev, queue: true }));
+  }, [setOpenPanels]);
 
   const transferPlayback = useCallback((deviceId: string) => {
     const self = localDeviceRef.current;

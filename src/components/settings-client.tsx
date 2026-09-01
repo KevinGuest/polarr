@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -63,6 +64,15 @@ type SettingsTab =
   | "playback"
   | "discord";
 type AccountEdit = "username" | "email" | "password" | null;
+
+type AudioOutputOption = {
+  deviceId: string;
+  label: string;
+};
+
+type AudioOutputMediaDevices = MediaDevices & {
+  selectAudioOutput?: () => Promise<MediaDeviceInfo>;
+};
 
 type ImportSummary = {
   playlistId: string;
@@ -196,13 +206,13 @@ function EqualizerChart({
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}
-      className="block h-auto w-full overflow-visible"
+      className="block h-auto w-full overflow-visible text-foreground"
       aria-label="Six-band equalizer"
     >
       <defs>
         <linearGradient id="equalizer-fill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#22c55e" stopOpacity="0.42" />
-          <stop offset="100%" stopColor="#22c55e" stopOpacity="0.03" />
+          <stop offset="0%" stopColor="currentColor" stopOpacity="0.2" />
+          <stop offset="100%" stopColor="currentColor" stopOpacity="0.02" />
         </linearGradient>
       </defs>
       <text x="0" y={top + 7} className="fill-muted-foreground text-[15px] font-semibold">
@@ -226,7 +236,7 @@ function EqualizerChart({
       <polyline
         points={line}
         fill="none"
-        stroke="#22c55e"
+        stroke="currentColor"
         strokeWidth="3"
         strokeLinejoin="round"
         className="transition-all"
@@ -298,7 +308,13 @@ export function SettingsClient() {
       : readPlaybackSettings(),
   );
   const [desktopApp, setDesktopApp] = useState(false);
-  const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
+  const [audioOutputs, setAudioOutputs] = useState<AudioOutputOption[]>([]);
+  const [audioOutputBusy, setAudioOutputBusy] = useState(false);
+  const [audioOutputMessage, setAudioOutputMessage] = useState<string | null>(
+    null,
+  );
+  const [audioOutputPickerAvailable, setAudioOutputPickerAvailable] =
+    useState(false);
 
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -399,17 +415,85 @@ export function SettingsClient() {
     });
   }
 
+  const refreshAudioOutputs = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      setAudioOutputMessage(
+        "This desktop webview uses your system audio output.",
+      );
+      return;
+    }
+    setAudioOutputBusy(true);
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const outputs = devices
+        .filter((device) => device.kind === "audiooutput")
+        .filter((device) => device.deviceId && device.deviceId !== "default")
+        .map((device, index) => ({
+          deviceId: device.deviceId,
+          label: device.label || `Audio output ${index + 1}`,
+        }));
+      setAudioOutputs(outputs);
+      setAudioOutputMessage(
+        outputs.length > 0
+          ? null
+          : "No individual outputs were exposed. Polarr will follow your system output.",
+      );
+    } catch {
+      setAudioOutputMessage(
+        "Polarr could not read audio outputs. It will follow your system output.",
+      );
+    } finally {
+      setAudioOutputBusy(false);
+    }
+  }, []);
+
+  async function chooseAudioOutput() {
+    const mediaDevices = navigator.mediaDevices as AudioOutputMediaDevices;
+    if (typeof mediaDevices?.selectAudioOutput !== "function") {
+      await refreshAudioOutputs();
+      return;
+    }
+    setAudioOutputBusy(true);
+    try {
+      const selected = await mediaDevices.selectAudioOutput();
+      if (!selected.deviceId) return;
+      setAudioOutputs((current) => [
+        {
+          deviceId: selected.deviceId,
+          label: selected.label || "Selected audio output",
+        },
+        ...current.filter((device) => device.deviceId !== selected.deviceId),
+      ]);
+      updatePlayback({ outputDeviceId: selected.deviceId });
+      setAudioOutputMessage(null);
+    } catch (error) {
+      if ((error as DOMException)?.name !== "NotAllowedError") {
+        setAudioOutputMessage("The audio output could not be selected.");
+      }
+    } finally {
+      setAudioOutputBusy(false);
+    }
+  }
+
   useEffect(() => {
     const desktop = isPolarrDesktop();
     queueMicrotask(() => setDesktopApp(desktop));
-    if (!desktop || !navigator.mediaDevices?.enumerateDevices) return;
-    void navigator.mediaDevices
-      .enumerateDevices()
-      .then((devices) =>
-        setAudioOutputs(devices.filter((device) => device.kind === "audiooutput")),
-      )
-      .catch(() => setAudioOutputs([]));
-  }, []);
+    if (!desktop) return;
+    const mediaDevices = navigator.mediaDevices as AudioOutputMediaDevices;
+    queueMicrotask(() =>
+      setAudioOutputPickerAvailable(
+        typeof mediaDevices?.selectAudioOutput === "function",
+      ),
+    );
+    queueMicrotask(() => void refreshAudioOutputs());
+    const refresh = () => void refreshAudioOutputs();
+    mediaDevices?.addEventListener?.("devicechange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      mediaDevices?.removeEventListener?.("devicechange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [refreshAudioOutputs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -770,48 +854,57 @@ export function SettingsClient() {
   }
 
   const active = SERVICES.find((s) => s.id === service)!;
+  const settingsTitle =
+    tab === "home"
+      ? "Settings"
+      : tab === "server"
+        ? "Server Info"
+        : tab === "account"
+          ? "Account"
+          : tab === "playlists"
+            ? "Playlists"
+            : tab === "playback"
+              ? "Playback"
+              : "Discord";
+  const settingsDescription =
+    tab === "home"
+      ? "Manage Polarr and your connections."
+      : tab === "account"
+        ? "Account information and sign-in security."
+        : tab === "server"
+          ? "Information about this Polarr server."
+          : tab === "playlists"
+            ? "Bring playlists into your library."
+            : tab === "playback"
+              ? "Shape how music sounds and moves between songs."
+              : "Discord account and listening presence.";
 
   return (
     <div className="mx-auto max-w-2xl space-y-8">
-      <div className="relative">
-        {tab !== "home" ? (
-          <button
-            type="button"
-            onClick={() => setTab("home")}
-            className="absolute left-0 top-0.5 inline-flex size-9 items-center justify-center rounded-full hover:bg-muted sm:-left-12"
-            aria-label="Back to settings"
-          >
-            <ArrowLeft className="size-5" />
-          </button>
-        ) : null}
-        <div className={cn("space-y-1", tab !== "home" && "pl-12 sm:pl-0")}>
-          <h1 className="text-[2rem] font-semibold tracking-tight">
-            {tab === "home"
-              ? "Settings"
-              : tab === "server"
-                ? "Server Info"
-                : tab === "account"
-                  ? "Account"
-                  : tab === "playlists"
-                    ? "Playlists"
-                    : tab === "playback"
-                      ? "Playback"
-                      : "Discord"}
+      <div className="space-y-1">
+        <div className="flex min-w-0 items-center gap-3">
+          {tab !== "home" ? (
+            <button
+              type="button"
+              onClick={() => setTab("home")}
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-full hover:bg-muted"
+              aria-label="Back to settings"
+            >
+              <ArrowLeft className="size-5" />
+            </button>
+          ) : null}
+          <h1 className="min-w-0 text-[2rem] font-semibold tracking-tight">
+            {settingsTitle}
           </h1>
-          <p className="text-[15px] text-muted-foreground">
-            {tab === "home"
-              ? "Manage Polarr and your connections."
-              : tab === "account"
-                ? "Account information and sign-in security."
-                : tab === "server"
-                  ? "Information about this Polarr server."
-                  : tab === "playlists"
-                    ? "Bring playlists into your library."
-                    : tab === "playback"
-                      ? "Shape how music sounds and moves between songs."
-                      : "Discord account and listening presence."}
-          </p>
         </div>
+        <p
+          className={cn(
+            "text-[15px] text-muted-foreground",
+            tab !== "home" && "pl-12",
+          )}
+        >
+          {settingsDescription}
+        </p>
       </div>
 
       {tab === "home" ? (
@@ -1069,11 +1162,36 @@ export function SettingsClient() {
                   <Label htmlFor="audio-output">Audio output</Label>
                   <select id="audio-output" value={playback.outputDeviceId} onChange={(event) => updatePlayback({ outputDeviceId: event.target.value })} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring">
                     <option value="default">System default</option>
-                    {audioOutputs.filter((device) => device.deviceId !== "default").map((device, index) => (
-                      <option key={device.deviceId} value={device.deviceId}>{device.label || `Audio output ${index + 1}`}</option>
+                    {audioOutputs.map((device) => (
+                      <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
                     ))}
                   </select>
-                  <p className="text-sm text-muted-foreground">Choose a connected speaker, headphone, or other audio device.</p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {audioOutputPickerAvailable ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={audioOutputBusy}
+                        onClick={() => void chooseAudioOutput()}
+                      >
+                        Choose device
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={audioOutputBusy}
+                      onClick={() => void refreshAudioOutputs()}
+                    >
+                      {audioOutputBusy ? "Checking…" : "Refresh devices"}
+                    </Button>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {audioOutputMessage ||
+                      "Choose a connected speaker, headphone, or other audio device."}
+                  </p>
                 </div>
               </InsetGroup>
             </section>

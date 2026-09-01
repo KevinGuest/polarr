@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AUTH_CONTROL, AUTH_SUBMIT, AuthFieldGroup } from "@/components/auth-screen";
 import { InsetGroup } from "@/components/media-shelf";
@@ -131,6 +136,148 @@ function SettingsRow({
   );
 }
 
+function formatEqFrequency(frequency: number): string {
+  return frequency >= 1000
+    ? `${Number((frequency / 1000).toFixed(1))}kHz`
+    : `${frequency}Hz`;
+}
+
+function EqualizerChart({
+  bands,
+  enabled,
+  onChange,
+}: {
+  bands: number[];
+  enabled: boolean;
+  onChange: (index: number, value: number) => void;
+}) {
+  const width = 720;
+  const height = 280;
+  const left = 62;
+  const right = 662;
+  const top = 34;
+  const bottom = 218;
+  const middle = (top + bottom) / 2;
+  const range = (bottom - top) / 2;
+  const points = EQ_FREQUENCIES.map((_, index) => {
+    const x = left + ((right - left) * index) / (EQ_FREQUENCIES.length - 1);
+    const value = Math.max(-12, Math.min(12, bands[index] || 0));
+    const y = middle - (value / 12) * range;
+    return { x, y, value };
+  });
+  const line = points.map((point) => `${point.x},${point.y}`).join(" ");
+  const area = `M ${left} ${bottom} L ${line.replaceAll(" ", " L ")} L ${right} ${bottom} Z`;
+
+  function valueFromPointer(event: ReactPointerEvent<SVGCircleElement>) {
+    const svg = event.currentTarget.ownerSVGElement;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const y = ((event.clientY - rect.top) / rect.height) * height;
+    const value = Math.round(((middle - y) / range) * 12);
+    const index = Number(event.currentTarget.dataset.index);
+    onChange(index, Math.max(-12, Math.min(12, value)));
+  }
+
+  function moveWithKeyboard(
+    event: ReactKeyboardEvent<SVGCircleElement>,
+    index: number,
+  ) {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    onChange(
+      index,
+      Math.max(
+        -12,
+        Math.min(12, (bands[index] || 0) + (event.key === "ArrowUp" ? 1 : -1)),
+      ),
+    );
+  }
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="block h-auto w-full overflow-visible"
+      aria-label="Six-band equalizer"
+    >
+      <defs>
+        <linearGradient id="equalizer-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#22c55e" stopOpacity="0.42" />
+          <stop offset="100%" stopColor="#22c55e" stopOpacity="0.03" />
+        </linearGradient>
+      </defs>
+      <text x="0" y={top + 7} className="fill-muted-foreground text-[15px] font-semibold">
+        +12dB
+      </text>
+      <text x="0" y={bottom + 6} className="fill-muted-foreground text-[15px] font-semibold">
+        −12dB
+      </text>
+      <line x1={left} x2={right} y1={middle} y2={middle} className="stroke-border" />
+      {points.map((point, index) => (
+        <line
+          key={`rail-${EQ_FREQUENCIES[index]}`}
+          x1={point.x}
+          x2={point.x}
+          y1={top}
+          y2={bottom}
+          className="stroke-border"
+        />
+      ))}
+      <path d={area} fill="url(#equalizer-fill)" className="transition-all" />
+      <polyline
+        points={line}
+        fill="none"
+        stroke="#22c55e"
+        strokeWidth="3"
+        strokeLinejoin="round"
+        className="transition-all"
+      />
+      {points.map((point, index) => (
+        <g key={EQ_FREQUENCIES[index]}>
+          <circle
+            cx={point.x}
+            cy={point.y}
+            r="12"
+            fill="transparent"
+            className={enabled ? "cursor-ns-resize" : "cursor-not-allowed"}
+            data-index={index}
+            onPointerDown={(event) => {
+              if (!enabled) return;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              valueFromPointer(event);
+            }}
+            onPointerMove={(event) => {
+              if (enabled && event.currentTarget.hasPointerCapture(event.pointerId)) {
+                valueFromPointer(event);
+              }
+            }}
+            onKeyDown={(event) => enabled && moveWithKeyboard(event, index)}
+            tabIndex={enabled ? 0 : -1}
+            role="slider"
+            aria-label={`${formatEqFrequency(EQ_FREQUENCIES[index])} gain`}
+            aria-valuemin={-12}
+            aria-valuemax={12}
+            aria-valuenow={point.value}
+          />
+          <circle
+            cx={point.x}
+            cy={point.y}
+            r="5.5"
+            className="pointer-events-none fill-foreground transition-all"
+          />
+          <text
+            x={point.x}
+            y={bottom + 42}
+            textAnchor="middle"
+            className="fill-muted-foreground text-[14px] font-semibold"
+          >
+            {formatEqFrequency(EQ_FREQUENCIES[index])}
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 export function SettingsClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -245,6 +392,7 @@ export function SettingsClient() {
   }
 
   function applyEqPreset(preset: EqPreset) {
+    if (preset === "custom") return;
     updatePlayback({
       equalizerPreset: preset,
       equalizerBands: [...EQ_PRESETS[preset].bands],
@@ -625,18 +773,18 @@ export function SettingsClient() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-8">
-      <div className="flex items-start gap-3">
+      <div className="relative">
         {tab !== "home" ? (
           <button
             type="button"
             onClick={() => setTab("home")}
-            className="mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-full hover:bg-muted"
+            className="absolute left-0 top-0.5 inline-flex size-9 items-center justify-center rounded-full hover:bg-muted sm:-left-12"
             aria-label="Back to settings"
           >
             <ArrowLeft className="size-5" />
           </button>
         ) : null}
-        <div className="space-y-1">
+        <div className={cn("space-y-1", tab !== "home" && "pl-12 sm:pl-0")}>
           <h1 className="text-[2rem] font-semibold tracking-tight">
             {tab === "home"
               ? "Settings"
@@ -809,15 +957,22 @@ export function SettingsClient() {
               />
             </div>
             <InsetGroup>
-              <div className="space-y-5 px-4 py-4">
-                <label className="block space-y-2">
-                  <span className="text-sm font-medium">Preset</span>
+              <div
+                className={cn(
+                  "space-y-5 px-4 py-4 transition-opacity sm:px-6 sm:py-5",
+                  !playback.equalizerEnabled && "opacity-50",
+                )}
+              >
+                <label className="flex max-w-xs items-center gap-5">
+                  <span className="text-sm font-medium text-muted-foreground">
+                    Preset
+                  </span>
                   <select
                     value={playback.equalizerPreset}
                     onChange={(event) =>
                       applyEqPreset(event.target.value as EqPreset)
                     }
-                    className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    className="h-9 min-w-36 flex-1 appearance-none rounded-md border-0 bg-transparent px-3 text-sm outline-none hover:bg-muted focus:ring-2 focus:ring-ring"
                     disabled={!playback.equalizerEnabled}
                   >
                     {Object.entries(EQ_PRESETS).map(([id, preset]) => (
@@ -827,32 +982,31 @@ export function SettingsClient() {
                     ))}
                   </select>
                 </label>
-                <div className="grid grid-cols-2 gap-x-5 gap-y-4 sm:grid-cols-3">
-                  {EQ_FREQUENCIES.map((frequency, index) => (
-                    <label key={frequency} className="space-y-1.5">
-                      <span className="flex justify-between text-xs text-muted-foreground">
-                        <span>{frequency >= 1000 ? `${frequency / 1000}k` : frequency} Hz</span>
-                        <span>{playback.equalizerBands[index] > 0 ? "+" : ""}{playback.equalizerBands[index]} dB</span>
-                      </span>
-                      <input
-                        type="range"
-                        min={-12}
-                        max={12}
-                        step={1}
-                        value={playback.equalizerBands[index]}
-                        disabled={!playback.equalizerEnabled}
-                        onChange={(event) => {
-                          const bands = [...playback.equalizerBands];
-                          bands[index] = Number(event.target.value);
-                          updatePlayback({
-                            equalizerPreset: "flat",
-                            equalizerBands: bands,
-                          });
-                        }}
-                        className="w-full accent-foreground disabled:opacity-50"
-                      />
-                    </label>
-                  ))}
+                <div className="mx-auto max-w-[48rem] pt-1">
+                  <EqualizerChart
+                    bands={playback.equalizerBands}
+                    enabled={playback.equalizerEnabled}
+                    onChange={(index, value) => {
+                      const bands = [...playback.equalizerBands];
+                      bands[index] = value;
+                      updatePlayback({
+                        equalizerPreset: "custom",
+                        equalizerBands: bands,
+                      });
+                    }}
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-full px-5"
+                    disabled={!playback.equalizerEnabled}
+                    onClick={() => applyEqPreset("flat")}
+                  >
+                    Reset
+                  </Button>
                 </div>
               </div>
             </InsetGroup>

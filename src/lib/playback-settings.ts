@@ -3,7 +3,13 @@ export const PLAYBACK_SETTINGS_EVENT = "polarr-playback-settings-changed";
 
 export const EQ_FREQUENCIES = [60, 150, 400, 1000, 2400, 15000] as const;
 
-export type EqPreset = "flat" | "bass" | "treble" | "vocal" | "acoustic";
+export type EqPreset =
+  | "flat"
+  | "bass"
+  | "treble"
+  | "vocal"
+  | "acoustic"
+  | "custom";
 export type VolumeLevel = "quiet" | "normal" | "loud";
 
 export type PlaybackSettings = {
@@ -24,6 +30,7 @@ export const EQ_PRESETS: Record<EqPreset, { label: string; bands: number[] }> = 
   treble: { label: "Treble Boost", bands: [-2, -1, 0, 2, 4, 5] },
   vocal: { label: "Vocal", bands: [-2, -1, 1, 4, 3, 1] },
   acoustic: { label: "Acoustic", bands: [2, 1, 0, 2, 3, 2] },
+  custom: { label: "Custom", bands: [0, 0, 0, 0, 0, 0] },
 };
 
 export const DEFAULT_PLAYBACK_SETTINGS: PlaybackSettings = {

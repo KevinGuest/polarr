@@ -67,6 +67,11 @@ export type DesktopChromeFromShell =
       channel: typeof DESKTOP_CHROME_CHANNEL;
       type: "open-profile";
       id?: string;
+    }
+  | {
+      channel: typeof DESKTOP_CHROME_CHANNEL;
+      type: "open-profile-drawer";
+      id?: string;
     };
 
 type TauriEventApi = {

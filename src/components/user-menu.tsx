@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
@@ -25,6 +25,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { UserAvatar } from "@/components/user-avatar";
 import { cn } from "@/lib/utils";
+
+export const OPEN_PROFILE_DRAWER_EVENT = "polarr-open-profile-drawer";
 
 export function UserMenu({
   variant = "icon",
@@ -174,13 +176,25 @@ function DrawerRow({
 export function ProfileDrawer({
   side = "left",
   className,
+  showTrigger = true,
+  listenForDesktopTrigger = false,
 }: {
   side?: "left" | "right";
   className?: string;
+  showTrigger?: boolean;
+  listenForDesktopTrigger?: boolean;
 }) {
   const router = useRouter();
   const { user, avatarSrc, isStaff, clear } = useAuth();
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!listenForDesktopTrigger) return;
+    const openDrawer = () => setOpen(true);
+    window.addEventListener(OPEN_PROFILE_DRAWER_EVENT, openDrawer);
+    return () =>
+      window.removeEventListener(OPEN_PROFILE_DRAWER_EVENT, openDrawer);
+  }, [listenForDesktopTrigger]);
 
   async function logout() {
     setOpen(false);
@@ -201,7 +215,7 @@ export function ProfileDrawer({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <button
+      {showTrigger ? <button
         type="button"
         onClick={() => setOpen(true)}
         className={cn(
@@ -217,7 +231,7 @@ export function ProfileDrawer({
           avatarUrl={avatarSrc}
           textClassName="text-sm font-semibold"
         />
-      </button>
+      </button> : null}
 
       <DialogPortal>
         <DialogOverlay className="z-[70] bg-black/55" />

@@ -27,6 +27,23 @@ import type {
   ConnectPlaybackState,
   ConnectTrack,
 } from "@/lib/player-sync";
+import {
+  EQ_FREQUENCIES,
+  PLAYBACK_SETTINGS_EVENT,
+  readPlaybackSettings,
+  volumeLevelGain,
+  type PlaybackSettings,
+} from "@/lib/playback-settings";
+
+type AudioEffectsGraph = {
+  source: MediaElementAudioSourceNode;
+  filters: BiquadFilterNode[];
+  master: GainNode;
+  splitter: ChannelSplitterNode;
+  merger: ChannelMergerNode;
+  monoLeft: GainNode;
+  monoRight: GainNode;
+};
 
 export type KaraokeUiStatus =
   | "idle"
@@ -738,6 +755,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   /** Demucs instrumental bus (full-quality stereo stem). */
   const instAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const effectsGraphsRef = useRef<AudioEffectsGraph[]>([]);
+  const playbackSettingsRef = useRef<PlaybackSettings>(readPlaybackSettings());
   const instReadyRef = useRef(false);
   /** Bumps when karaoke prep is cancelled/superseded so aborted loads don't flash Unavailable. */
   const karaokeGenRef = useRef(0);
@@ -956,21 +976,143 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const configureEffectsGraph = useCallback(
+    (graph: AudioEffectsGraph, settings: PlaybackSettings) => {
+      const context = audioContextRef.current;
+      if (!context) return;
+      const firstFilter = graph.filters[0];
+      graph.source.disconnect();
+      graph.splitter.disconnect();
+      graph.merger.disconnect();
+      graph.monoLeft.disconnect();
+      graph.monoRight.disconnect();
+      graph.filters.forEach((filter) => filter.disconnect());
+      graph.master.disconnect();
+
+      if (settings.monoAudio) {
+        graph.source.connect(graph.splitter);
+        graph.splitter.connect(graph.monoLeft, 0);
+        graph.splitter.connect(graph.monoRight, 1);
+        graph.monoLeft.connect(graph.merger, 0, 0);
+        graph.monoLeft.connect(graph.merger, 0, 1);
+        graph.monoRight.connect(graph.merger, 0, 0);
+        graph.monoRight.connect(graph.merger, 0, 1);
+        graph.merger.connect(firstFilter);
+      } else {
+        graph.source.connect(firstFilter);
+      }
+
+      graph.filters.forEach((filter, index) => {
+        filter.frequency.value = EQ_FREQUENCIES[index];
+        filter.Q.value = 1;
+        filter.gain.value = settings.equalizerEnabled
+          ? settings.equalizerBands[index] || 0
+          : 0;
+        const next = graph.filters[index + 1];
+        filter.connect(next || graph.master);
+      });
+      graph.master.gain.value = volumeLevelGain(settings.volumeLevel);
+      graph.master.connect(context.destination);
+    },
+    [],
+  );
+
+  const applyOutputDevice = useCallback((settings: PlaybackSettings) => {
+    const sinkId = settings.outputDeviceId || "default";
+    for (const element of [audioRef.current, instAudioRef.current]) {
+      if (!element) continue;
+      const selectable = element as HTMLAudioElement & {
+        setSinkId?: (id: string) => Promise<void>;
+      };
+      if (typeof selectable.setSinkId === "function") {
+        void selectable.setSinkId(sinkId).catch(() => null);
+      }
+      element.preload = settings.gaplessEnabled ? "auto" : "metadata";
+    }
+  }, []);
+
+  const ensureAudioEffects = useCallback(() => {
+    if (audioContextRef.current || !audioRef.current || !instAudioRef.current) {
+      return;
+    }
+    const AudioContextCtor =
+      window.AudioContext ||
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext })
+        .webkitAudioContext;
+    if (!AudioContextCtor) return;
+    try {
+      const context = new AudioContextCtor();
+      audioContextRef.current = context;
+      effectsGraphsRef.current = [audioRef.current, instAudioRef.current].map(
+        (element) => {
+          const filters = EQ_FREQUENCIES.map(() => {
+            const filter = context.createBiquadFilter();
+            filter.type = "peaking";
+            return filter;
+          });
+          const monoLeft = context.createGain();
+          const monoRight = context.createGain();
+          monoLeft.gain.value = 0.5;
+          monoRight.gain.value = 0.5;
+          return {
+            source: context.createMediaElementSource(element),
+            filters,
+            master: context.createGain(),
+            splitter: context.createChannelSplitter(2),
+            merger: context.createChannelMerger(2),
+            monoLeft,
+            monoRight,
+          };
+        },
+      );
+      effectsGraphsRef.current.forEach((graph) =>
+        configureEffectsGraph(graph, playbackSettingsRef.current),
+      );
+      applyOutputDevice(playbackSettingsRef.current);
+    } catch {
+      effectsGraphsRef.current = [];
+      void audioContextRef.current?.close().catch(() => null);
+      audioContextRef.current = null;
+    }
+  }, [applyOutputDevice, configureEffectsGraph]);
+
   const playBoth = useCallback(async () => {
     const mix = audioRef.current;
     if (!mix) return false;
+    ensureAudioEffects();
+    if (audioContextRef.current?.state === "suspended") {
+      await audioContextRef.current.resume().catch(() => null);
+    }
     const ok = await safePlay(mix);
     if (ok && instReadyRef.current && vocalLevelRef.current < 0.999) {
       await ensureInstPlaying();
     }
     applyMixVolumes();
     return ok;
-  }, [applyMixVolumes, ensureInstPlaying]);
+  }, [applyMixVolumes, ensureAudioEffects, ensureInstPlaying]);
 
   const pauseBoth = useCallback(() => {
     audioRef.current?.pause();
     instAudioRef.current?.pause();
   }, []);
+
+  useEffect(() => {
+    const applySettings = (settings: PlaybackSettings) => {
+      playbackSettingsRef.current = settings;
+      effectsGraphsRef.current.forEach((graph) =>
+        configureEffectsGraph(graph, settings),
+      );
+      applyOutputDevice(settings);
+    };
+    applySettings(readPlaybackSettings());
+    const onSettings = (event: Event) => {
+      const detail = (event as CustomEvent<PlaybackSettings>).detail;
+      applySettings(detail || readPlaybackSettings());
+    };
+    window.addEventListener(PLAYBACK_SETTINGS_EVENT, onSettings);
+    return () =>
+      window.removeEventListener(PLAYBACK_SETTINGS_EVENT, onSettings);
+  }, [applyOutputDevice, configureEffectsGraph]);
 
   useEffect(() => {
     shuffleRef.current = shuffle;
@@ -1679,6 +1821,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       instAudioRef.current = null;
       channel?.close();
       channelRef.current = null;
+      effectsGraphsRef.current = [];
+      const context = audioContextRef.current;
+      audioContextRef.current = null;
+      if (context) void context.close().catch(() => null);
     };
   }, [applyRemote, isOwner]);
 

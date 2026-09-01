@@ -1,7 +1,7 @@
 {
   "name": "polarr-desktop",
   "private": true,
-  "version": "0.2.13",
+  "version": "0.2.14",
   "description": "Polarr desktop shell (Tauri 2) — loads your self-hosted Polarr server",
   "type": "module",
   "scripts": {

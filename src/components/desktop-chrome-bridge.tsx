@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuthOptional } from "@/components/auth-provider";
+import { OPEN_PROFILE_DRAWER_EVENT } from "@/components/user-menu";
 import {
   absolutizeUrl,
   captureDesktopQueryParam,
@@ -229,6 +230,12 @@ export function DesktopChromeBridge() {
 
       if (data.type === "open-profile") {
         router.push("/profile");
+        ack(data.id);
+        return;
+      }
+
+      if (data.type === "open-profile-drawer") {
+        window.dispatchEvent(new Event(OPEN_PROFILE_DRAWER_EVENT));
         ack(data.id);
         return;
       }

@@ -88,9 +88,6 @@ app.innerHTML = `
       <div class="titlebar-center" id="titlebar-center">
         <div class="titlebar-brand-search">
           <div class="titlebar-brand-actions" id="titlebar-brand-actions" hidden>
-            <span class="titlebar-brand-mark" aria-label="Polarr">
-              <img class="titlebar-brand" id="titlebar-brand" src="/polarr-icon.png" alt="" width="32" height="32" />
-            </span>
             <button type="button" class="titlebar-home-btn" id="titlebar-home-btn" aria-label="Home" title="Home">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="m3 10 9-7 9 7"/>
@@ -502,6 +499,10 @@ async function toggleChromeMenu(
   await openChromeMenu(anchor, items, align);
 }
 
+// Kept for compatibility with older shell menu events; current profile actions
+// are rendered by the shared web drawer.
+void toggleChromeMenu;
+
 const UPDATER_WINDOW_LABEL = "updater";
 
 async function revealMainWindow() {
@@ -571,24 +572,6 @@ function openUpdaterWindow(): Promise<void> {
       }
     })();
   });
-}
-
-async function openAccountMenu(anchor: HTMLElement) {
-  const name = authState.username || "Account";
-  const items: ChromeMenuItem[] = [
-    { kind: "label", text: name },
-    { kind: "separator" },
-    { kind: "action", id: "profile", text: "Profile" },
-    { kind: "action", id: "settings", text: "Settings" },
-  ];
-  if (authState.isStaff) {
-    items.push({ kind: "action", id: "admin", text: "Admin" });
-  }
-  items.push(
-    { kind: "separator" },
-    { kind: "action", id: "logout", text: "Logout", danger: true },
-  );
-  await toggleChromeMenu(anchor, items, "end");
 }
 
 /** Append desktop flags so the web app can match native chrome. */
@@ -979,7 +962,8 @@ alertsBtn.addEventListener("click", (event) => {
 profileBtn.addEventListener("click", (event) => {
   event.preventDefault();
   event.stopPropagation();
-  void openAccountMenu(profileBtn);
+  void closeChromeMenu();
+  postToServer({ type: "open-profile-drawer" });
 });
 
 void listen<{ id?: string }>("polarr-chrome-menu-action", (event) => {

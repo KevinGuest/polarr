@@ -18,6 +18,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { isPolarrDesktop } from "@/lib/desktop-shell";
+import {
+  DEFAULT_PLAYBACK_SETTINGS,
+  EQ_FREQUENCIES,
+  EQ_PRESETS,
+  readPlaybackSettings,
+  writePlaybackSettings,
+  type EqPreset,
+  type PlaybackSettings,
+  type VolumeLevel,
+} from "@/lib/playback-settings";
 import {
   isPasswordLongEnough,
   MIN_PASSWORD_LENGTH,
@@ -39,7 +50,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-type SettingsTab = "home" | "server" | "account" | "playlists" | "discord";
+type SettingsTab =
+  | "home"
+  | "server"
+  | "account"
+  | "playlists"
+  | "playback"
+  | "discord";
 type AccountEdit = "username" | "email" | "password" | null;
 
 type ImportSummary = {
@@ -122,11 +139,19 @@ export function SettingsClient() {
     tabParam === "server" ||
     tabParam === "account" ||
     tabParam === "playlists" ||
+    tabParam === "playback" ||
     tabParam === "discord"
       ? tabParam
       : "home";
 
   const [loading, setLoading] = useState(true);
+  const [playback, setPlayback] = useState<PlaybackSettings>(() =>
+    typeof window === "undefined"
+      ? DEFAULT_PLAYBACK_SETTINGS
+      : readPlaybackSettings(),
+  );
+  const [desktopApp, setDesktopApp] = useState(false);
+  const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
 
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -210,6 +235,33 @@ export function SettingsClient() {
   function setTab(next: SettingsTab) {
     router.replace(`/settings?tab=${next}`, { scroll: false });
   }
+
+  function updatePlayback(patch: Partial<PlaybackSettings>) {
+    setPlayback((current) => {
+      const next = { ...current, ...patch };
+      writePlaybackSettings(next);
+      return next;
+    });
+  }
+
+  function applyEqPreset(preset: EqPreset) {
+    updatePlayback({
+      equalizerPreset: preset,
+      equalizerBands: [...EQ_PRESETS[preset].bands],
+    });
+  }
+
+  useEffect(() => {
+    const desktop = isPolarrDesktop();
+    queueMicrotask(() => setDesktopApp(desktop));
+    if (!desktop || !navigator.mediaDevices?.enumerateDevices) return;
+    void navigator.mediaDevices
+      .enumerateDevices()
+      .then((devices) =>
+        setAudioOutputs(devices.filter((device) => device.kind === "audiooutput")),
+      )
+      .catch(() => setAudioOutputs([]));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -594,7 +646,9 @@ export function SettingsClient() {
                   ? "Account"
                   : tab === "playlists"
                     ? "Playlists"
-                    : "Discord"}
+                    : tab === "playback"
+                      ? "Playback"
+                      : "Discord"}
           </h1>
           <p className="text-[15px] text-muted-foreground">
             {tab === "home"
@@ -605,7 +659,9 @@ export function SettingsClient() {
                   ? "Information about this Polarr server."
                   : tab === "playlists"
                     ? "Bring playlists into your library."
-                    : "Discord account and listening presence."}
+                    : tab === "playback"
+                      ? "Shape how music sounds and moves between songs."
+                      : "Discord account and listening presence."}
           </p>
         </div>
       </div>
@@ -624,10 +680,22 @@ export function SettingsClient() {
                 detail={username}
                 onClick={() => setTab("account")}
               />
+            </InsetGroup>
+          </section>
+          <section className="space-y-2">
+            <h2 className="px-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Music
+            </h2>
+            <InsetGroup>
               <SettingsRow
                 title="Playlists"
                 detail="Import and manage playlist connections"
                 onClick={() => setTab("playlists")}
+              />
+              <SettingsRow
+                title="Playback"
+                detail="Equalizer, transitions, volume, and audio output"
+                onClick={() => setTab("playback")}
               />
             </InsetGroup>
           </section>
@@ -718,6 +786,145 @@ export function SettingsClient() {
             Import playlist
           </Button>
         </section>
+      ) : null}
+
+      {tab === "playback" ? (
+        <div className="space-y-7">
+          <section className="space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-[1.375rem] font-semibold tracking-tight">
+                  Equalizer
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Adjust the balance of bass, mids, and treble.
+                </p>
+              </div>
+              <Switch
+                checked={playback.equalizerEnabled}
+                onCheckedChange={(equalizerEnabled) =>
+                  updatePlayback({ equalizerEnabled })
+                }
+                aria-label="Enable equalizer"
+              />
+            </div>
+            <InsetGroup>
+              <div className="space-y-5 px-4 py-4">
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium">Preset</span>
+                  <select
+                    value={playback.equalizerPreset}
+                    onChange={(event) =>
+                      applyEqPreset(event.target.value as EqPreset)
+                    }
+                    className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    disabled={!playback.equalizerEnabled}
+                  >
+                    {Object.entries(EQ_PRESETS).map(([id, preset]) => (
+                      <option key={id} value={id}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="grid grid-cols-2 gap-x-5 gap-y-4 sm:grid-cols-3">
+                  {EQ_FREQUENCIES.map((frequency, index) => (
+                    <label key={frequency} className="space-y-1.5">
+                      <span className="flex justify-between text-xs text-muted-foreground">
+                        <span>{frequency >= 1000 ? `${frequency / 1000}k` : frequency} Hz</span>
+                        <span>{playback.equalizerBands[index] > 0 ? "+" : ""}{playback.equalizerBands[index]} dB</span>
+                      </span>
+                      <input
+                        type="range"
+                        min={-12}
+                        max={12}
+                        step={1}
+                        value={playback.equalizerBands[index]}
+                        disabled={!playback.equalizerEnabled}
+                        onChange={(event) => {
+                          const bands = [...playback.equalizerBands];
+                          bands[index] = Number(event.target.value);
+                          updatePlayback({
+                            equalizerPreset: "flat",
+                            equalizerBands: bands,
+                          });
+                        }}
+                        className="w-full accent-foreground disabled:opacity-50"
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </InsetGroup>
+          </section>
+
+          <section className="space-y-2">
+            <h2 className="px-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Transitions
+            </h2>
+            <InsetGroup>
+              <div className="flex min-h-16 items-center justify-between gap-4 px-4 py-3">
+                <div>
+                  <p className="text-[16px] font-medium">Crossfade songs</p>
+                  <p className="text-sm text-muted-foreground">Blend the end of one song into the next.</p>
+                </div>
+                <Switch checked={playback.crossfadeEnabled} onCheckedChange={(crossfadeEnabled) => updatePlayback({ crossfadeEnabled })} />
+              </div>
+              {playback.crossfadeEnabled ? (
+                <div className="border-t border-border/70 px-4 py-3">
+                  <div className="mb-2 flex justify-between text-sm"><span>Duration</span><span className="text-muted-foreground">{playback.crossfadeSeconds} seconds</span></div>
+                  <input type="range" min={1} max={12} value={playback.crossfadeSeconds} onChange={(event) => updatePlayback({ crossfadeSeconds: Number(event.target.value) })} className="w-full accent-foreground" />
+                </div>
+              ) : null}
+              <div className="flex min-h-16 items-center justify-between gap-4 border-t border-border/70 px-4 py-3">
+                <div>
+                  <p className="text-[16px] font-medium">Gapless playback</p>
+                  <p className="text-sm text-muted-foreground">Remove silence between consecutive tracks.</p>
+                </div>
+                <Switch checked={playback.gaplessEnabled} onCheckedChange={(gaplessEnabled) => updatePlayback({ gaplessEnabled })} />
+              </div>
+            </InsetGroup>
+          </section>
+
+          <section className="space-y-2">
+            <h2 className="px-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Audio</h2>
+            <InsetGroup>
+              <div className="space-y-2 px-4 py-3">
+                <Label htmlFor="volume-level">Volume level</Label>
+                <select id="volume-level" value={playback.volumeLevel} onChange={(event) => updatePlayback({ volumeLevel: event.target.value as VolumeLevel })} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring">
+                  <option value="quiet">Quiet</option>
+                  <option value="normal">Normal</option>
+                  <option value="loud">Loud</option>
+                </select>
+                <p className="text-sm text-muted-foreground">
+                  Quiet and Normal preserve audio quality. Loud may diminish audio quality.
+                </p>
+              </div>
+              <div className="flex min-h-16 items-center justify-between gap-4 border-t border-border/70 px-4 py-3">
+                <div><p className="text-[16px] font-medium">Mono audio</p><p className="text-sm text-muted-foreground">Play the same sound through both channels.</p></div>
+                <Switch checked={playback.monoAudio} onCheckedChange={(monoAudio) => updatePlayback({ monoAudio })} />
+              </div>
+            </InsetGroup>
+          </section>
+
+          {desktopApp ? (
+            <section className="space-y-2">
+              <h2 className="px-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Output</h2>
+              <InsetGroup>
+                <div className="space-y-2 px-4 py-3">
+                  <Label htmlFor="audio-output">Audio output</Label>
+                  <select id="audio-output" value={playback.outputDeviceId} onChange={(event) => updatePlayback({ outputDeviceId: event.target.value })} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring">
+                    <option value="default">System default</option>
+                    {audioOutputs.filter((device) => device.deviceId !== "default").map((device, index) => (
+                      <option key={device.deviceId} value={device.deviceId}>{device.label || `Audio output ${index + 1}`}</option>
+                    ))}
+                  </select>
+                  <p className="text-sm text-muted-foreground">Choose a connected speaker, headphone, or other audio device.</p>
+                </div>
+              </InsetGroup>
+            </section>
+          ) : null}
+        </div>
       ) : null}
 
       {tab === "discord" ? (

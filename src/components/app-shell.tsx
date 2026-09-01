@@ -441,13 +441,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                 <div />
                 <div className="flex min-w-0 justify-center px-3">
                   <div className="relative w-full max-w-[28rem]">
-                    <div className="absolute right-[calc(100%+8px)] top-1/2 flex -translate-y-1/2 items-center gap-1">
-                      <span
-                        className="inline-flex text-foreground"
-                        aria-label="Polarr"
-                      >
-                        <PolarrMark className="size-8" />
-                      </span>
+                    <div className="absolute right-[calc(100%+8px)] top-1/2 flex -translate-y-1/2 items-center">
                       <Link
                         href="/"
                         onClick={dismissOverlays}
@@ -654,6 +648,13 @@ function ShellInner({ children }: { children: React.ReactNode }) {
 
       {!isAdminPath && <NowPlayingBar />}
       {!isAdminPath && !desktopShell && <MobileBottomDock />}
+      {desktopShell && !overlayTitlebar ? (
+        <ProfileDrawer
+          side="right"
+          showTrigger={false}
+          listenForDesktopTrigger
+        />
+      ) : null}
     </div>
   );
 }

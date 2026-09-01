@@ -4,6 +4,7 @@ import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import packageJson from "../package.json";
 import "./styles.css";
 import {
   probePolarrServer,
@@ -15,6 +16,7 @@ const app = document.querySelector<HTMLDivElement>("#app")!;
 const CHROME_CHANNEL = "polarr-desktop-chrome";
 const CHROME_UP_EVENT = "polarr-desktop-chrome-up";
 const CHROME_DOWN_EVENT = "polarr-desktop-chrome-down";
+const DESKTOP_VERSION = packageJson.version;
 
 function isMacPlatform(): boolean {
   return (
@@ -85,9 +87,18 @@ app.innerHTML = `
 
       <div class="titlebar-center" id="titlebar-center">
         <div class="titlebar-brand-search">
-          <button type="button" class="titlebar-brand-btn" id="titlebar-brand-btn" aria-label="Home" hidden>
-            <img class="titlebar-brand" id="titlebar-brand" src="/polarr-icon.png" alt="" width="32" height="32" />
-          </button>
+          <div class="titlebar-brand-actions" id="titlebar-brand-actions" hidden>
+            <span class="titlebar-brand-mark" aria-label="Polarr">
+              <img class="titlebar-brand" id="titlebar-brand" src="/polarr-icon.png" alt="" width="32" height="32" />
+            </span>
+            <button type="button" class="titlebar-home-btn" id="titlebar-home-btn" aria-label="Home" title="Home">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m3 10 9-7 9 7"/>
+                <path d="M5 9v11h14V9"/>
+                <path d="M9 20v-6h6v6"/>
+              </svg>
+            </button>
+          </div>
           <div class="titlebar-search" id="titlebar-search" hidden>
             <div class="titlebar-search-idle" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -190,7 +201,7 @@ app.innerHTML = `
 `;
 
 (window as unknown as { __POLARR_DESKTOP__?: Record<string, unknown> }).__POLARR_DESKTOP__ = {
-  version: "0.2.0",
+  version: DESKTOP_VERSION,
   offline: true,
   discordRpc: true,
   chrome: true,
@@ -209,8 +220,11 @@ const maxBtn = document.querySelector<HTMLButtonElement>("#win-max")!;
 const iconMax = maxBtn.querySelector<SVGElement>(".icon-max")!;
 const iconRestore = maxBtn.querySelector<SVGElement>(".icon-restore")!;
 const appFrame = document.querySelector<HTMLDivElement>(".app-frame")!;
-const titlebarBrandBtn = document.querySelector<HTMLButtonElement>(
-  "#titlebar-brand-btn",
+const titlebarBrandActions = document.querySelector<HTMLDivElement>(
+  "#titlebar-brand-actions",
+)!;
+const titlebarHomeBtn = document.querySelector<HTMLButtonElement>(
+  "#titlebar-home-btn",
 )!;
 const searchWrap = document.querySelector<HTMLDivElement>("#titlebar-search")!;
 const searchInput = document.querySelector<HTMLInputElement>("#chrome-search")!;
@@ -223,7 +237,7 @@ function isInteractiveTitlebarTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   return Boolean(
     target.closest(
-      "button, input, a, label, .menu-wrap, .profile-wrap, .titlebar-search, .titlebar-brand-btn, .mac-traffic, .win-controls, .titlebar-nav",
+      "button, input, a, label, .menu-wrap, .profile-wrap, .titlebar-search, .titlebar-brand-actions, .mac-traffic, .win-controls, .titlebar-nav",
     ),
   );
 }
@@ -582,13 +596,16 @@ function withDesktopParam(serverUrl: string): string {
   try {
     const u = new URL(serverUrl);
     u.searchParams.set("desktop", "1");
+    // A versioned document URL prevents WebView2 from reopening an HTML shell
+    // cached by an older desktop release after the server UI has updated.
+    u.searchParams.set("desktop-version", DESKTOP_VERSION);
     if (isMacPlatform()) u.searchParams.set("titlebar", "overlay");
     return u.toString();
   } catch {
     const base = serverUrl.replace(/\/$/, "");
     const join = serverUrl.includes("?") ? "&" : "?";
     const overlay = isMacPlatform() ? "&titlebar=overlay" : "";
-    return `${base}${join}desktop=1${overlay}`;
+    return `${base}${join}desktop=1&desktop-version=${encodeURIComponent(DESKTOP_VERSION)}${overlay}`;
   }
 }
 
@@ -604,7 +621,7 @@ function sayHelloToServer() {
 
 function setChromeAuthenticated(active: boolean) {
   searchWrap.hidden = !active;
-  titlebarBrandBtn.hidden = !active;
+  titlebarBrandActions.hidden = !active;
   profileBtn.hidden = !active;
   alertsBtn.hidden = !active;
   if (!active) {
@@ -946,7 +963,7 @@ document.querySelector("#nav-forward")!.addEventListener("click", () => {
   void invoke("server_history_forward").catch(() => null);
 });
 
-titlebarBrandBtn.addEventListener("click", (event) => {
+titlebarHomeBtn.addEventListener("click", (event) => {
   event.preventDefault();
   event.stopPropagation();
   void closeChromeMenu();

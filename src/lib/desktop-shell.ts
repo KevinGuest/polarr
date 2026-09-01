@@ -243,7 +243,7 @@ export function isPolarrDesktop(): boolean {
   return false;
 }
 
-/** Capture ?desktop=1 (and macOS overlay titlebar) into sessionStorage and strip them. */
+/** Capture desktop flags into sessionStorage and strip them from the visible URL. */
 export function captureDesktopQueryParam(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -264,6 +264,7 @@ export function captureDesktopQueryParam(): boolean {
     if (desktop || overlay) markPolarrDesktop();
     url.searchParams.delete(DESKTOP_QUERY_PARAM);
     url.searchParams.delete(OVERLAY_TITLEBAR_QUERY_PARAM);
+    url.searchParams.delete("desktop-version");
     const next = `${url.pathname}${url.search}${url.hash}`;
     window.history.replaceState(window.history.state, "", next);
     return true;

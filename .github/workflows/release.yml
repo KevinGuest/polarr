@@ -114,10 +114,12 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
           releaseBody: |
-            ## What's changed
-
-            - **Windows Home button** — adds a dedicated Home icon beside the logo and search bar
-            - **Fresh server UI** — reloads updated Settings and shared interface files after a desktop update
+            - **Music settings** — Playlists and Playback now live together under Music
+            - **Equalizer** — turn it on or off, adjust six bands, or choose a sound preset
+            - **Playback options** — Crossfade, Gapless, volume levels, and Mono Audio
+            - **Audio output** — choose a connected speaker or headphones in the desktop app
+            - **Account menu** — the Windows avatar now opens the shared profile drawer
+            - **Desktop header** — removes the extra Polarr logo and keeps Home beside search
 
             ## Downloads
 

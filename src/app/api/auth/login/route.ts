@@ -47,6 +47,7 @@ export async function POST(req: Request) {
   const result = authenticate(parsed.data.username, parsed.data.password, {
     ip,
     hwid,
+    userAgent: req.headers.get("user-agent"),
   });
   if (!result) {
     recordLoginFailure(ip, parsed.data.username);

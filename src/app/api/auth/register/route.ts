@@ -63,7 +63,11 @@ export async function POST(req: Request) {
     const user = createAdminUser(username, password, email);
     const ip = getRequestIpFromRequest(req);
     const hwid = normalizeHwid(parsed.data.hwid);
-    const session = authenticate(username, password, { ip, hwid });
+    const session = authenticate(username, password, {
+      ip,
+      hwid,
+      userAgent: req.headers.get("user-agent"),
+    });
     if (!session || "banned" in session) {
       recordAuthRateFailure(req, "register");
       return json(

@@ -107,6 +107,10 @@ fn clear_opening(app: &AppHandle) {
     }
 }
 
+pub(crate) fn clear_opening_marker(app: &AppHandle) {
+    clear_opening(app);
+}
+
 pub const SERVER_WEBVIEW_LABEL: &str = "server";
 /// Must match `--titlebar-h` in apps/desktop/src/styles.css
 pub const TITLEBAR_HEIGHT: f64 = 48.0;

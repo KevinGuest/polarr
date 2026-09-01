@@ -710,6 +710,17 @@ function migrate(database: Database.Database) {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS email_changes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      email TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS listen_daily (
       user_id TEXT NOT NULL,
       day TEXT NOT NULL,
@@ -865,6 +876,8 @@ function migrate(database: Database.Database) {
   );
   ensureColumn(database, "sessions", "ip", "ip TEXT");
   ensureColumn(database, "sessions", "hwid", "hwid TEXT");
+  ensureColumn(database, "sessions", "user_agent", "user_agent TEXT");
+  ensureColumn(database, "sessions", "last_seen_at", "last_seen_at TEXT");
   ensureColumn(database, "tracks", "file_size", "file_size INTEGER NOT NULL DEFAULT 0");
   ensureColumn(database, "tracks", "mtime_ms", "mtime_ms REAL NOT NULL DEFAULT 0");
   ensureColumn(database, "tracks", "updated_at", "updated_at TEXT NOT NULL DEFAULT ''");
@@ -1589,6 +1602,77 @@ export function updateUserEmail(
   return { ok: true, email: next };
 }
 
+export function createEmailChangeToken(
+  userId: string,
+  email: string,
+): { ok: true; token: string; email: string } | { ok: false; error: string } {
+  const next = email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next) || next.length > 255) {
+    return { ok: false, error: "Enter a valid email address" };
+  }
+  const current = getUserEmail(userId);
+  if (current?.toLowerCase() === next) {
+    return { ok: false, error: "That is already your account email" };
+  }
+  const taken = getDb()
+    .prepare(`SELECT id FROM users WHERE lower(email) = ? AND id != ? LIMIT 1`)
+    .get(next, userId) as { id: string } | undefined;
+  if (taken) return { ok: false, error: "That email is already in use" };
+
+  const token = randomBytes(32).toString("hex");
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const now = new Date();
+  const expires = new Date(now.getTime() + 60 * 60 * 1000);
+  const db = getDb();
+  db.prepare(
+    `UPDATE email_changes SET used_at = ? WHERE user_id = ? AND used_at IS NULL`,
+  ).run(now.toISOString(), userId);
+  db.prepare(
+    `INSERT INTO email_changes(
+       id, user_id, email, token_hash, created_at, expires_at, used_at
+     ) VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+  ).run(
+    randomBytes(16).toString("hex"),
+    userId,
+    next,
+    tokenHash,
+    now.toISOString(),
+    expires.toISOString(),
+  );
+  return { ok: true, token, email: next };
+}
+
+export function confirmEmailChange(
+  token: string,
+): { ok: true; email: string } | { ok: false; error: string } {
+  const tokenHash = createHash("sha256").update(token.trim()).digest("hex");
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT id, user_id as userId, email, expires_at as expiresAt, used_at as usedAt
+       FROM email_changes WHERE token_hash = ? LIMIT 1`,
+    )
+    .get(tokenHash) as
+    | {
+        id: string;
+        userId: string;
+        email: string;
+        expiresAt: string;
+        usedAt: string | null;
+      }
+    | undefined;
+  if (!row || row.usedAt || Date.parse(row.expiresAt) <= Date.now()) {
+    return { ok: false, error: "This email confirmation link is invalid or expired" };
+  }
+  const result = updateUserEmail(row.userId, row.email);
+  if (!result.ok) return result;
+  db.prepare(`UPDATE email_changes SET used_at = ? WHERE id = ?`).run(
+    nowIso(),
+    row.id,
+  );
+  return result;
+}
+
 export function updateUsername(
   userId: string,
   username: string,
@@ -1920,7 +2004,11 @@ export function getUserIdByDiscordId(discordId: string): string | null {
  */
 export function createSessionForUser(
   userId: string,
-  client?: { ip?: string | null; hwid?: string | null },
+  client?: {
+    ip?: string | null;
+    hwid?: string | null;
+    userAgent?: string | null;
+  },
 ) {
   const row = getDb()
     .prepare(
@@ -1961,12 +2049,23 @@ export function createSessionForUser(
   const expires = new Date(now.getTime() + 1000 * 60 * 60 * 24 * 30);
   const ip = (client?.ip || "").trim().slice(0, 64) || null;
   const hwid = (client?.hwid || "").trim().slice(0, 128) || null;
+  const userAgent = (client?.userAgent || "").trim().slice(0, 500) || null;
   getDb()
     .prepare(
-      `INSERT INTO sessions(token, user_id, created_at, expires_at, ip, hwid)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO sessions(
+         token, user_id, created_at, expires_at, ip, hwid, user_agent, last_seen_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(token, row.id, now.toISOString(), expires.toISOString(), ip, hwid);
+    .run(
+      token,
+      row.id,
+      now.toISOString(),
+      expires.toISOString(),
+      ip,
+      hwid,
+      userAgent,
+      now.toISOString(),
+    );
   recordUserClientInfo(row.id, { ip, hwid }, token);
   return {
     token,
@@ -2271,7 +2370,11 @@ export function redeemInvite(
 export function authenticate(
   username: string,
   password: string,
-  client?: { ip?: string | null; hwid?: string | null },
+  client?: {
+    ip?: string | null;
+    hwid?: string | null;
+    userAgent?: string | null;
+  },
 ) {
   const row = getDb()
     .prepare(
@@ -2307,11 +2410,24 @@ const tokenUserCache = new Map<
   { at: number; user: AuthUser | null }
 >();
 const TOKEN_USER_TTL_MS = 5_000;
+const tokenLastSeenWrite = new Map<string, number>();
+const SESSION_LAST_SEEN_WRITE_MS = 60_000;
+
+function touchSession(token: string) {
+  const now = Date.now();
+  const previous = tokenLastSeenWrite.get(token) ?? 0;
+  if (now - previous < SESSION_LAST_SEEN_WRITE_MS) return;
+  tokenLastSeenWrite.set(token, now);
+  getDb()
+    .prepare(`UPDATE sessions SET last_seen_at = ? WHERE token = ?`)
+    .run(new Date(now).toISOString(), token);
+}
 
 export function getUserByToken(token: string | null | undefined) {
   if (!token) return null;
   const cached = tokenUserCache.get(token);
   if (cached && Date.now() - cached.at < TOKEN_USER_TTL_MS) {
+    if (cached.user) touchSession(token);
     return cached.user;
   }
   const row = getDb()
@@ -2363,7 +2479,61 @@ export function getUserByToken(token: string | null | undefined) {
     role,
   };
   tokenUserCache.set(token, { at: Date.now(), user });
+  touchSession(token);
   return user;
+}
+
+function sessionPublicId(token: string): string {
+  return createHash("sha256").update(token).digest("hex").slice(0, 24);
+}
+
+function sessionDeviceName(userAgent: string | null): string {
+  const ua = userAgent || "";
+  if (/Edg\//i.test(ua)) return "Web Player (Edge)";
+  if (/Chrome\//i.test(ua) && !/Edg\//i.test(ua)) return "Web Player (Chrome)";
+  if (/Safari\//i.test(ua) && !/Chrome\//i.test(ua)) return "Web Player (Safari)";
+  if (/Firefox\//i.test(ua)) return "Web Player (Firefox)";
+  return "Polarr session";
+}
+
+export function getAdminUserSessions(userId: string, currentToken?: string | null) {
+  const rows = getDb()
+    .prepare(
+      `SELECT token, created_at as createdAt, expires_at as expiresAt,
+              last_seen_at as lastSeenAt, ip, hwid, user_agent as userAgent
+       FROM sessions WHERE user_id = ? ORDER BY COALESCE(last_seen_at, created_at) DESC`,
+    )
+    .all(userId) as {
+      token: string;
+      createdAt: string;
+      expiresAt: string;
+      lastSeenAt: string | null;
+      ip: string | null;
+      hwid: string | null;
+      userAgent: string | null;
+    }[];
+  return rows.map((row) => ({
+    id: sessionPublicId(row.token),
+    device: sessionDeviceName(row.userAgent),
+    createdAt: row.createdAt,
+    expiresAt: row.expiresAt,
+    lastSeenAt: row.lastSeenAt || row.createdAt,
+    ip: (row.ip || "").trim() || null,
+    deviceId: (row.hwid || "").trim() || null,
+    current: Boolean(currentToken && row.token === currentToken),
+  }));
+}
+
+export function revokeAdminUserSession(userId: string, publicSessionId: string): boolean {
+  const rows = getDb()
+    .prepare(`SELECT token FROM sessions WHERE user_id = ?`)
+    .all(userId) as { token: string }[];
+  const match = rows.find((row) => sessionPublicId(row.token) === publicSessionId);
+  if (!match) return false;
+  getDb().prepare(`DELETE FROM sessions WHERE token = ? AND user_id = ?`).run(match.token, userId);
+  tokenUserCache.delete(match.token);
+  tokenLastSeenWrite.delete(match.token);
+  return true;
 }
 
 function resolveRole(
@@ -6607,5 +6777,3 @@ export function listenHoursChart(dayCount = 14) {
     series: byUser.series,
   };
 }
-
-

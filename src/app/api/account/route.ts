@@ -3,17 +3,20 @@ import { getAuthUser, json } from "@/lib/api";
 import {
   discordOAuthConfigured,
   discordPresenceAppConfigured,
+  createEmailChangeToken,
   getDiscordLink,
   getDiscordPresenceEnabled,
   getSettings,
   getUserEmail,
   setDiscordLoginEnabled,
   setDiscordPresenceEnabled,
-  updateUserEmail,
+  smtpConfigured,
   updateUsername,
   updateUserPassword,
 } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH } from "@/lib/auth-password";
+import { resolvePublicBaseUrl } from "@/lib/public-url";
+import { sendEmailChangeConfirmation } from "@/lib/email-change-email";
 
 export const dynamic = "force-dynamic";
 
@@ -87,7 +90,9 @@ export async function PATCH(req: Request) {
   const body = parsed.data;
 
   let username = user.username;
-  let email = getUserEmail(user.id);
+  const email = getUserEmail(user.id);
+  let emailConfirmationSent = false;
+  let pendingEmail: string | null = null;
 
   if (body.username !== undefined) {
     const result = updateUsername(user.id, body.username);
@@ -96,9 +101,35 @@ export async function PATCH(req: Request) {
   }
 
   if (body.email !== undefined) {
-    const result = updateUserEmail(user.id, body.email);
+    const settings = getSettings();
+    if (!smtpConfigured(settings)) {
+      return json(
+        { error: "Email changes require SMTP to be configured by an admin" },
+        { status: 503 },
+      );
+    }
+    const result = createEmailChangeToken(user.id, body.email);
     if (!result.ok) return json({ error: result.error }, { status: 400 });
-    email = result.email;
+    const base = resolvePublicBaseUrl(settings, req) || "http://localhost:3000";
+    try {
+      await sendEmailChangeConfirmation({
+        to: result.email,
+        username,
+        confirmUrl: `${base}/api/account/confirm-email?token=${encodeURIComponent(result.token)}`,
+      });
+    } catch (error) {
+      return json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Could not send the confirmation email",
+        },
+        { status: 502 },
+      );
+    }
+    emailConfirmationSent = true;
+    pendingEmail = result.email;
   }
 
   if (body.newPassword !== undefined) {
@@ -147,6 +178,8 @@ export async function PATCH(req: Request) {
     ok: true,
     username,
     email,
+    emailConfirmationSent,
+    pendingEmail,
     discord: discordPayload(user.id),
     discordOAuthReady: discordOAuthConfigured(settings),
     discordPresenceReady: discordPresenceAppConfigured(settings),

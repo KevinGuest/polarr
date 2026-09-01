@@ -139,7 +139,10 @@ export async function GET(req: Request) {
       expiresAt,
     });
 
-    const result = createSessionForUser(userId, { ip });
+    const result = createSessionForUser(userId, {
+      ip,
+      userAgent: req.headers.get("user-agent"),
+    });
     if (!result) {
       recordLoginFailure(ip, "discord");
       return goLogin("discord=auth");

@@ -11,6 +11,7 @@ import {
 } from "@/lib/db";
 import { LidarrClient } from "@/lib/lidarr";
 import { ffmpegAvailable, ytDlpAvailable } from "@/lib/tools";
+import { POLARR_APP_VERSION } from "@/lib/app-version";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +46,7 @@ export async function GET() {
   const listening = listenDashboard(14);
 
   return json({
-    version: "0.1.0",
+    version: POLARR_APP_VERSION,
     uptimeSec,
     users: countUsers(),
     tracks: lib.tracks,

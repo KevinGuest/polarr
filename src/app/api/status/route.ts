@@ -3,6 +3,7 @@ import { getSettings, hasUsers } from "@/lib/db";
 import { LidarrClient } from "@/lib/lidarr";
 import { ffmpegAvailable, ytDlpAvailable } from "@/lib/tools";
 import { TtlCache } from "@/lib/ttl-cache";
+import { POLARR_APP_VERSION } from "@/lib/app-version";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,7 @@ export async function GET(req: Request) {
 
     return {
       app: "polarr",
-      version: process.env.POLARR_APP_VERSION || "0.6.21",
+      version: POLARR_APP_VERSION,
       setupComplete: settings.setupComplete,
       hasUsers: hasUsers(),
       serverName: settings.serverName,

@@ -48,7 +48,11 @@ export async function POST(req: Request) {
     const ip = getRequestIpFromRequest(req);
     const hwid = normalizeHwid(parsed.data.hwid);
     const user = redeemInvite(code, username, password, { ip, hwid });
-    const session = authenticate(username, password, { ip, hwid });
+    const session = authenticate(username, password, {
+      ip,
+      hwid,
+      userAgent: req.headers.get("user-agent"),
+    });
     if (!session || "banned" in session) {
       recordAuthRateFailure(req, "join");
       return json(

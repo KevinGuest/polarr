@@ -170,10 +170,7 @@ function DrawerRow({
   );
 }
 
-/**
- * Mobile account side menu — slides in from the same side as the avatar.
- * Home: avatar left → drawer left. Other screens: avatar right → drawer right.
- */
+/** Account side menu shared by mobile and desktop web headers. */
 export function ProfileDrawer({
   side = "left",
   className,
@@ -223,11 +220,11 @@ export function ProfileDrawer({
       </button>
 
       <DialogPortal>
-        <DialogOverlay className="z-[70] bg-black/55 lg:hidden" />
+        <DialogOverlay className="z-[70] bg-black/55" />
         <DialogPrimitive.Content
           aria-describedby={undefined}
           className={cn(
-            "fixed inset-y-0 z-[70] flex w-[min(22rem,88vw)] flex-col bg-background text-foreground shadow-2xl outline-none lg:hidden",
+            "fixed inset-y-0 z-[70] flex w-[min(24rem,88vw)] flex-col bg-background text-foreground shadow-2xl outline-none",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
             "duration-300",

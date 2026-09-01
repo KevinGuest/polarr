@@ -21,6 +21,8 @@ import {
   Radio,
   Users,
   Bell,
+  ChevronLeft,
+  ChevronRight,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -416,18 +418,36 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                   gridTemplateColumns: `${libraryCollapsed ? "72px" : "18rem"} minmax(0, 1fr) ${queueRailOpen ? "24rem" : "0px"}`,
                 }}
               >
+                <div className="absolute left-[5.5rem] top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => window.history.back()}
+                    className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label="Go back"
+                    title="Back"
+                  >
+                    <ChevronLeft className="size-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.history.forward()}
+                    className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label="Go forward"
+                    title="Forward"
+                  >
+                    <ChevronRight className="size-5" />
+                  </button>
+                </div>
                 <div />
                 <div className="flex min-w-0 justify-center px-3">
                   <div className="relative w-full max-w-[28rem]">
                     <div className="absolute right-[calc(100%+8px)] top-1/2 flex -translate-y-1/2 items-center gap-1">
-                      <Link
-                        href="/"
-                        onClick={dismissOverlays}
+                      <span
                         className="inline-flex text-foreground"
-                        aria-label="Polarr home"
+                        aria-label="Polarr"
                       >
                         <PolarrMark className="size-8" />
-                      </Link>
+                      </span>
                       <Link
                         href="/"
                         onClick={dismissOverlays}
@@ -451,7 +471,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                 <div />
                 <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center justify-end gap-1">
                   <NotificationsBell />
-                  <UserMenu />
+                  <ProfileDrawer side="right" />
                 </div>
               </div>
             ) : (
@@ -477,7 +497,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                 </div>
                 <div className="flex items-center justify-end gap-1">
                   <NotificationsBell />
-                  <UserMenu />
+                  <ProfileDrawer side="right" />
                 </div>
               </>
             )}

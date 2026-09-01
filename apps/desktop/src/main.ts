@@ -5,10 +5,8 @@ import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./styles.css";
-import { getAppVersion } from "./updater";
 import {
   probePolarrServer,
-  type DesktopServerManifest,
 } from "./server-api";
 
 const appWindow = getCurrentWindow();
@@ -46,7 +44,6 @@ let authState: AuthState = {
 };
 
 let serverOpen = false;
-let activeServerManifest: DesktopServerManifest | null = null;
 
 if (isMacPlatform()) {
   document.documentElement.classList.add("mac");
@@ -70,15 +67,6 @@ app.innerHTML = `
         <button type="button" class="traffic-btn traffic-zoom" id="mac-zoom" title="Maximize" aria-label="Maximize">
           <svg class="traffic-glyph" viewBox="0 0 12 12" aria-hidden="true">
             <path d="M2.8 6h6.4M6 2.8v6.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-          </svg>
-        </button>
-      </div>
-      <div class="menu-wrap">
-        <button type="button" class="tb-btn" id="menu-btn" title="Menu" aria-label="Menu" aria-haspopup="menu" aria-expanded="false">
-          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-            <circle cx="3" cy="8" r="1.35" fill="currentColor"/>
-            <circle cx="8" cy="8" r="1.35" fill="currentColor"/>
-            <circle cx="13" cy="8" r="1.35" fill="currentColor"/>
           </svg>
         </button>
       </div>
@@ -217,7 +205,6 @@ const button = document.querySelector<HTMLButtonElement>("#connect")!;
 const buttonLabel = document.querySelector<HTMLSpanElement>("#connect-label")!;
 const buttonSpinner = button.querySelector<HTMLSpanElement>(".connect-spinner")!;
 const titlebar = document.querySelector<HTMLElement>("#titlebar")!;
-const menuBtn = document.querySelector<HTMLButtonElement>("#menu-btn")!;
 const maxBtn = document.querySelector<HTMLButtonElement>("#win-max")!;
 const iconMax = maxBtn.querySelector<SVGElement>(".icon-max")!;
 const iconRestore = maxBtn.querySelector<SVGElement>(".icon-restore")!;
@@ -572,45 +559,6 @@ function openUpdaterWindow(): Promise<void> {
   });
 }
 
-async function changeServer() {
-  try {
-    await invoke("discord_clear_presence");
-  } catch {
-    // Best-effort.
-  }
-  try {
-    await invoke("clear_server_url");
-  } catch {
-    // Still return to setup UI.
-  }
-  try {
-    await invoke("desktop_api_reset_session");
-  } catch {
-    // Best-effort; cookies are scoped to their original server regardless.
-  }
-  await showSetup(input.value);
-}
-
-async function openAppMenu(anchor: HTMLElement) {
-  const version = await getAppVersion();
-  const items: ChromeMenuItem[] = [
-    { kind: "label", text: `Polarr ${version}` },
-    ...(activeServerManifest
-      ? ([
-          {
-            kind: "label",
-            text: `Server ${activeServerManifest.serverVersion}`,
-          },
-        ] as ChromeMenuItem[])
-      : []),
-    { kind: "separator" },
-    { kind: "action", id: "change-server", text: "Change Server…" },
-    { kind: "separator" },
-    { kind: "action", id: "quit", text: "Quit Polarr", danger: true },
-  ];
-  await toggleChromeMenu(anchor, items, isMac ? "end" : "start");
-}
-
 async function openAccountMenu(anchor: HTMLElement) {
   const name = authState.username || "Account";
   const items: ChromeMenuItem[] = [
@@ -815,7 +763,6 @@ function stopChromeUrlPoll() {
 
 async function showSetup(prefill?: string) {
   serverOpen = false;
-  activeServerManifest = null;
   setServerOpenClass(false);
   stopChromeUrlPoll();
   setupView.hidden = false;
@@ -895,7 +842,6 @@ form.addEventListener("submit", async (event) => {
   try {
     const probe = await probePolarrServer(raw);
     const url = probe.url;
-    activeServerManifest = probe.manifest;
     await invoke<string>("set_server_url", { url });
     setConnectButton("Connecting…", true);
     await showServer(url);
@@ -1007,12 +953,6 @@ titlebarBrandBtn.addEventListener("click", (event) => {
   postToServer({ type: "navigate", path: "/" });
 });
 
-menuBtn.addEventListener("click", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  void openAppMenu(menuBtn);
-});
-
 alertsBtn.addEventListener("click", (event) => {
   event.stopPropagation();
   void closeChromeMenu();
@@ -1029,12 +969,6 @@ void listen<{ id?: string }>("polarr-chrome-menu-action", (event) => {
   const id = event.payload?.id;
   if (!id) return;
   switch (id) {
-    case "change-server":
-      void changeServer();
-      break;
-    case "quit":
-      void appWindow.close();
-      break;
     case "profile":
       postToServer({ type: "navigate", path: "/profile" });
       break;
@@ -1115,7 +1049,6 @@ async function bootstrap() {
       setConnectButton("Connecting…", true);
       try {
         const probe = await probePolarrServer(existing);
-        activeServerManifest = probe.manifest;
         await showServer(probe.url);
       } catch (error) {
         await showSetup(existing);
@@ -1123,8 +1056,8 @@ async function bootstrap() {
       }
     } else {
       await showSetup(existing ?? undefined);
-      if (skipAuto) {
-        showToast("URL not valid");
+      if (skipAuto && existing) {
+        showToast("Polarr could not reconnect. Check the server address and try again.");
       }
     }
   } catch {

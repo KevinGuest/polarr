@@ -11,6 +11,7 @@ const PUBLIC_API_ROUTES: PublicRoute[] = [
   { path: "/api/auth/join", methods: ["POST"] },
   { path: "/api/auth/forgot-password", methods: ["POST"] },
   { path: "/api/auth/reset-password", methods: ["GET", "POST"] },
+  { path: "/api/account/confirm-email", methods: ["GET"] },
   { path: "/api/discord/login", methods: ["GET"] },
   { path: "/api/discord/callback", methods: ["GET"] },
   { path: "/api/v1/desktop", methods: ["GET"] },

@@ -1,11 +1,31 @@
-import { json, getStaffUser } from "@/lib/api";
-import { getAdminUserDetail, getUserActivityStats } from "@/lib/db";
+import { z } from "zod";
+import { json, getAdminUser, getStaffUser } from "@/lib/api";
+import {
+  getAdminUserDetail,
+  getAdminUserSessions,
+  getUserActivityStats,
+  revokeAdminUserSession,
+} from "@/lib/db";
 import { unscrambleUserId } from "@/lib/user-id";
 
 export const dynamic = "force-dynamic";
 
+function tokenFromRequest(req: Request): string | null {
+  const auth = req.headers.get("authorization");
+  if (auth?.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
+  const match = /(?:^|;\s*)polarr_token=([^;]+)/.exec(
+    req.headers.get("cookie") || "",
+  );
+  if (!match?.[1]) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ userId: string }> },
 ) {
   const staff = await getStaffUser();
@@ -37,6 +57,7 @@ export async function GET(
       lastHwid: detail.lastHwid,
       accessRevokedAt: detail.accessRevokedAt,
       invite: detail.invite,
+      sessions: getAdminUserSessions(userId, tokenFromRequest(req)),
     },
     requestsTotal: stats?.requestsTotal ?? 0,
     requestsByStatus: stats?.requestsByStatus ?? {},
@@ -47,4 +68,27 @@ export async function GET(
     plays: stats?.plays ?? 0,
     recentRequests: stats?.recentRequests ?? [],
   });
+}
+
+const revokeSessionSchema = z.object({ sessionId: z.string().min(1).max(64) });
+
+export async function DELETE(
+  req: Request,
+  ctx: { params: Promise<{ userId: string }> },
+) {
+  const admin = await getAdminUser();
+  if (!admin) return json({ error: "Admin only" }, { status: 403 });
+  const { userId: token } = await ctx.params;
+  const userId = unscrambleUserId(decodeURIComponent(token || ""));
+  if (!userId) return json({ error: "Not found" }, { status: 404 });
+  const parsed = revokeSessionSchema.safeParse(
+    await req.json().catch(() => null),
+  );
+  if (!parsed.success) {
+    return json({ error: "Invalid session" }, { status: 400 });
+  }
+  if (!revokeAdminUserSession(userId, parsed.data.sessionId)) {
+    return json({ error: "Session not found" }, { status: 404 });
+  }
+  return json({ ok: true });
 }

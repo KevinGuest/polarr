@@ -25,7 +25,12 @@ import {
 } from "@/lib/auth-password";
 import { invalidateDiscordPresenceCache } from "@/components/player-provider";
 import { toastError, toastSaved, toastSuccess } from "@/lib/toast";
-import { MoreHorizontal } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  Info,
+  MoreHorizontal,
+} from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,7 +39,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-type SettingsTab = "profile" | "playlists" | "discord";
+type SettingsTab = "home" | "server" | "account" | "playlists" | "discord";
+type AccountEdit = "username" | "email" | "password" | null;
 
 type ImportSummary = {
   playlistId: string;
@@ -45,12 +51,6 @@ type ImportSummary = {
 };
 
 type ServiceId = "spotify" | "youtube" | "deezer" | "apple";
-
-const TABS: { id: SettingsTab; label: string }[] = [
-  { id: "profile", label: "Profile" },
-  { id: "playlists", label: "Playlists" },
-  { id: "discord", label: "Discord" },
-];
 
 const SERVICES: {
   id: ServiceId;
@@ -84,18 +84,56 @@ const SERVICES: {
   },
 ];
 
+function SettingsRow({
+  title,
+  detail,
+  onClick,
+}: {
+  title: string;
+  detail?: string | null;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex min-h-16 w-full items-center gap-3 border-b border-border/70 px-4 py-3 text-left last:border-b-0 hover:bg-muted/40"
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block text-[16px] font-medium text-foreground">
+          {title}
+        </span>
+        {detail ? (
+          <span className="mt-0.5 block truncate text-sm text-muted-foreground">
+            {detail}
+          </span>
+        ) : null}
+      </span>
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+    </button>
+  );
+}
+
 export function SettingsClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
   const tab: SettingsTab =
-    tabParam === "playlists" || tabParam === "discord" ? tabParam : "profile";
+    tabParam === "server" ||
+    tabParam === "account" ||
+    tabParam === "playlists" ||
+    tabParam === "discord"
+      ? tabParam
+      : "home";
 
   const [loading, setLoading] = useState(true);
 
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
+  const [accountEdit, setAccountEdit] = useState<AccountEdit>(null);
+  const [editValue, setEditValue] = useState("");
+  const [serverVersion, setServerVersion] = useState<string | null>(null);
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -195,6 +233,14 @@ export function SettingsClient() {
         const data = await servicesRes.json();
         if (data.services) setServiceReady(data.services);
       }
+      void fetch("/api/v1/status", { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => {
+          if (!cancelled && typeof data.version === "string") {
+            setServerVersion(data.version);
+          }
+        })
+        .catch(() => null);
       setLoading(false);
     })();
     return () => {
@@ -218,7 +264,6 @@ export function SettingsClient() {
     const text = messages[flag];
     if (flag === "linked") {
       toastSuccess(text || "Discord linked");
-      setTab("discord");
       void fetch("/api/account")
         .then((r) => r.json())
         .then((data) => {
@@ -231,13 +276,30 @@ export function SettingsClient() {
     router.replace("/settings?tab=discord", { scroll: false });
   }, [searchParams, router]);
 
-  async function saveProfile() {
+  useEffect(() => {
+    const flag = searchParams.get("email");
+    if (!flag) return;
+    if (flag === "confirmed") {
+      toastSuccess("Email address confirmed");
+      void fetch("/api/account", { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => {
+          if (typeof data.email === "string") setEmail(data.email);
+        })
+        .catch(() => null);
+    } else {
+      toastError("That email confirmation link is invalid or expired");
+    }
+    router.replace("/settings?tab=account", { scroll: false });
+  }, [searchParams, router]);
+
+  async function saveUsername() {
     setSavingProfile(true);
     try {
       const res = await fetch("/api/account", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, email }),
+        body: JSON.stringify({ username: editValue }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -246,9 +308,36 @@ export function SettingsClient() {
         );
         return;
       }
-      setUsername(data.username || username);
-      setEmail(data.email || email);
-      toastSaved();
+      setUsername(data.username || editValue);
+      setAccountEdit(null);
+      toastSaved("Username updated");
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
+  async function requestEmailChange() {
+    setSavingProfile(true);
+    try {
+      const res = await fetch("/api/account", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: editValue }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toastError(
+          typeof data.error === "string"
+            ? data.error
+            : "Could not request email change",
+        );
+        return;
+      }
+      setAccountEdit(null);
+      toastSuccess(
+        "Confirmation email sent",
+        `Check ${data.pendingEmail || editValue}`,
+      );
     } finally {
       setSavingProfile(false);
     }
@@ -290,6 +379,7 @@ export function SettingsClient() {
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
+      setAccountEdit(null);
       toastSaved("Password updated");
     } finally {
       setSavingPassword(false);
@@ -483,125 +573,117 @@ export function SettingsClient() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className="flex items-start gap-3">
+        {tab !== "home" ? (
+          <button
+            type="button"
+            onClick={() => setTab("home")}
+            className="mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-full hover:bg-muted"
+            aria-label="Back to settings"
+          >
+            <ArrowLeft className="size-5" />
+          </button>
+        ) : null}
         <div className="space-y-1">
-          <h1 className="text-[2rem] font-semibold tracking-tight">Settings</h1>
+          <h1 className="text-[2rem] font-semibold tracking-tight">
+            {tab === "home"
+              ? "Settings"
+              : tab === "server"
+                ? "Server Info"
+                : tab === "account"
+                  ? "Account"
+                  : tab === "playlists"
+                    ? "Playlists"
+                    : "Discord"}
+          </h1>
           <p className="text-[15px] text-muted-foreground">
-            Profile, playlists, and Discord.
+            {tab === "home"
+              ? "Manage Polarr and your connections."
+              : tab === "account"
+                ? "Account information and sign-in security."
+                : tab === "server"
+                  ? "Information about this Polarr server."
+                  : tab === "playlists"
+                    ? "Bring playlists into your library."
+                    : "Discord account and listening presence."}
           </p>
         </div>
-        <nav className="flex flex-wrap gap-2">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              className={cn(
-                "rounded-full px-3.5 py-2 text-sm font-medium transition-colors",
-                tab === t.id
-                  ? "bg-foreground text-background"
-                  : "bg-muted/60 text-foreground hover:bg-muted",
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
       </div>
 
-      {tab === "profile" ? (
+      {tab === "home" ? (
         <>
-          <section className="space-y-3">
-            <h2 className="text-[1.375rem] font-semibold tracking-tight">
-              Profile
-            </h2>
-            <p className="text-[15px] text-muted-foreground">
-              Username and email for this account.
-            </p>
-            <AuthFieldGroup>
-              <Input
-                id="account-username"
-                autoComplete="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                maxLength={40}
-                placeholder="Username"
-                className={AUTH_CONTROL}
+          <section className="space-y-2">
+            <InsetGroup>
+              <SettingsRow
+                title="Server Info"
+                detail={serverVersion ? `Polarr ${serverVersion}` : "This Polarr server"}
+                onClick={() => setTab("server")}
               />
-              <Input
-                id="account-email"
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Email"
-                className={AUTH_CONTROL}
+              <SettingsRow
+                title="Account"
+                detail={username}
+                onClick={() => setTab("account")}
               />
-            </AuthFieldGroup>
-            <Button
-              type="button"
-              className={AUTH_SUBMIT}
-              disabled={savingProfile || !username.trim() || !email.trim()}
-              onClick={() => void saveProfile()}
-            >
-              {savingProfile ? "Saving…" : "Save profile"}
-            </Button>
+              <SettingsRow
+                title="Playlists"
+                detail="Import and manage playlist connections"
+                onClick={() => setTab("playlists")}
+              />
+            </InsetGroup>
           </section>
-
-          <section className="space-y-3">
-            <h2 className="text-[1.375rem] font-semibold tracking-tight">
-              Password
+          <section className="space-y-2">
+            <h2 className="px-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Connections
             </h2>
-            <p className="text-[15px] text-muted-foreground">
-              Change the password you sign in with.
-            </p>
-            <AuthFieldGroup>
-              <PasswordInput
-                id="current-password"
-                autoComplete="current-password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                placeholder="Current password"
-                className={AUTH_CONTROL}
+            <InsetGroup>
+              <SettingsRow
+                title="Discord"
+                detail={discordLinked ? discordDisplayName || discordUsername : "Not linked"}
+                onClick={() => setTab("discord")}
               />
-              <PasswordInput
-                id="new-password"
-                autoComplete="new-password"
-                minLength={MIN_PASSWORD_LENGTH}
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="New password"
-                className={AUTH_CONTROL}
-              />
-              <PasswordInput
-                id="confirm-password"
-                autoComplete="new-password"
-                minLength={MIN_PASSWORD_LENGTH}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Confirm new password"
-                className={AUTH_CONTROL}
-              />
-            </AuthFieldGroup>
-            <p className="text-[13px] text-muted-foreground">
-              At least {MIN_PASSWORD_LENGTH} characters
-            </p>
-            <Button
-              type="button"
-              className={cn(AUTH_SUBMIT, "mt-2")}
-              disabled={
-                savingPassword ||
-                !currentPassword ||
-                newPassword.length < MIN_PASSWORD_LENGTH ||
-                !confirmPassword
-              }
-              onClick={() => void savePassword()}
-            >
-              {savingPassword ? "Updating…" : "Update password"}
-            </Button>
+            </InsetGroup>
           </section>
         </>
+      ) : null}
+
+      {tab === "server" ? (
+        <InsetGroup>
+          <div className="flex min-h-16 items-center gap-3 px-4 py-3">
+            <Info className="size-5 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[16px] font-medium">Polarr version</p>
+              <p className="text-sm text-muted-foreground">
+                {serverVersion || "Loading…"}
+              </p>
+            </div>
+          </div>
+        </InsetGroup>
+      ) : null}
+
+      {tab === "account" ? (
+        <InsetGroup>
+          <SettingsRow
+            title="Username"
+            detail={username}
+            onClick={() => {
+              setEditValue(username);
+              setAccountEdit("username");
+            }}
+          />
+          <SettingsRow
+            title="Email"
+            detail={email}
+            onClick={() => {
+              setEditValue(email);
+              setAccountEdit("email");
+            }}
+          />
+          <SettingsRow
+            title="Password"
+            detail="Change your sign-in password"
+            onClick={() => setAccountEdit("password")}
+          />
+        </InsetGroup>
       ) : null}
 
       {tab === "playlists" ? (
@@ -754,6 +836,105 @@ export function SettingsClient() {
           )}
         </section>
       ) : null}
+
+      <Dialog
+        open={accountEdit !== null}
+        onOpenChange={(open) => {
+          if (!open) setAccountEdit(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {accountEdit === "username"
+                ? "Edit username"
+                : accountEdit === "email"
+                  ? "Change email"
+                  : "Change password"}
+            </DialogTitle>
+            <DialogDescription>
+              {accountEdit === "email"
+                ? "We’ll send a confirmation link to the new address before changing it."
+                : accountEdit === "password"
+                  ? `Use at least ${MIN_PASSWORD_LENGTH} characters.`
+                  : "This is how your name appears across Polarr."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {accountEdit === "username" ? (
+            <Input
+              autoComplete="username"
+              value={editValue}
+              onChange={(event) => setEditValue(event.target.value)}
+              maxLength={40}
+              placeholder="Username"
+              className={AUTH_CONTROL}
+            />
+          ) : accountEdit === "email" ? (
+            <Input
+              type="email"
+              autoComplete="email"
+              value={editValue}
+              onChange={(event) => setEditValue(event.target.value)}
+              placeholder="New email address"
+              className={AUTH_CONTROL}
+            />
+          ) : (
+            <AuthFieldGroup>
+              <PasswordInput
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                placeholder="Current password"
+                className={AUTH_CONTROL}
+              />
+              <PasswordInput
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                placeholder="New password"
+                className={AUTH_CONTROL}
+              />
+              <PasswordInput
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                placeholder="Confirm new password"
+                className={AUTH_CONTROL}
+              />
+            </AuthFieldGroup>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setAccountEdit(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={
+                accountEdit === "password"
+                  ? savingPassword || !currentPassword || !newPassword || !confirmPassword
+                  : savingProfile || !editValue.trim()
+              }
+              onClick={() => {
+                if (accountEdit === "username") void saveUsername();
+                else if (accountEdit === "email") void requestEmailChange();
+                else void savePassword();
+              }}
+            >
+              {savingProfile || savingPassword
+                ? "Saving…"
+                : accountEdit === "email"
+                  ? "Send confirmation"
+                  : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={importOpen}

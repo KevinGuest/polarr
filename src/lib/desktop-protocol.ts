@@ -1,3 +1,5 @@
+import { POLARR_APP_VERSION } from "@/lib/app-version";
+
 /**
  * Compatibility contract between independently released Polarr servers and
  * desktop clients. Increment only when the desktop-facing contract makes a
@@ -36,7 +38,7 @@ export type DesktopServerManifest = {
 export function desktopServerManifest(): DesktopServerManifest {
   return {
     app: "polarr",
-    serverVersion: process.env.POLARR_APP_VERSION || "0.6.21",
+    serverVersion: POLARR_APP_VERSION,
     protocol: {
       min: DESKTOP_PROTOCOL_MIN,
       max: DESKTOP_PROTOCOL_MAX,

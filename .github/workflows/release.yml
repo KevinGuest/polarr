@@ -116,10 +116,13 @@ jobs:
           releaseBody: |
             ## What's changed
 
-            - **macOS startup** — fixes the instant crash after opening or reconnecting
-            - **Desktop header** — aligns the logo, Home button, and search with the main view
-            - **Player restore** — keeps the last track visible after reopening Polarr
-            - **Queue panel** — show or hide Queue and Recently Played from the player bar
+            - **macOS navigation** — restores Back and Forward beside the traffic lights
+            - **Single app window** — reopening Polarr focuses the app already running
+            - **First launch** — removes the incorrect invalid URL message on a clean install
+            - **Discord presence** — connects earlier and retries automatically when Discord starts slowly
+            - **Connect** — selecting the current device no longer changes the queue
+            - **Browser devices** — labels Chrome, Safari, Edge, and Firefox as web players
+            - **Windows header** — removes the extra three-dot desktop menu
 
             ## Downloads
 

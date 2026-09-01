@@ -51,6 +51,16 @@ type UserApiUser = UserRow & {
     usedAt: string | null;
     createdAt: string;
   } | null;
+  sessions: {
+    id: string;
+    device: string;
+    createdAt: string;
+    expiresAt: string;
+    lastSeenAt: string;
+    ip: string | null;
+    deviceId: string | null;
+    current: boolean;
+  }[];
 };
 
 type UserDetailPayload = {
@@ -221,6 +231,7 @@ export function AdminUsersClient() {
   const [details, setDetails] = useState<UserApiUser | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [sessionBusy, setSessionBusy] = useState<string | null>(null);
 
   const [revokeTarget, setRevokeTarget] = useState<UserRow | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<UserRow | null>(null);
@@ -493,6 +504,42 @@ export function AdminUsersClient() {
       }
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function invalidateSession(sessionId: string, device: string) {
+    if (!detailsUser || !canManage) return;
+    if (!window.confirm(`Sign ${device} out of Polarr?`)) return;
+    setSessionBusy(sessionId);
+    try {
+      const res = await fetch(
+        `/api/admin/users/${encodeURIComponent(detailsUser.publicId)}`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toastError(
+          typeof data.error === "string"
+            ? data.error
+            : "Could not invalidate session",
+        );
+        return;
+      }
+      setDetails((current) =>
+        current
+          ? {
+              ...current,
+              sessions: current.sessions.filter((session) => session.id !== sessionId),
+            }
+          : current,
+      );
+      toastSuccess(`${device} signed out`);
+    } finally {
+      setSessionBusy(null);
     }
   }
 
@@ -920,6 +967,14 @@ export function AdminUsersClient() {
                     label="Device ID"
                     value={details.lastHwid || "—"}
                   />
+                  <DetailRow
+                    label="Last seen"
+                    value={
+                      details.sessions[0]?.lastSeenAt
+                        ? new Date(details.sessions[0].lastSeenAt).toLocaleString()
+                        : "—"
+                    }
+                  />
                   {details.accessRevokedAt ? (
                     <DetailRow
                       label="Revoked"
@@ -929,6 +984,59 @@ export function AdminUsersClient() {
                     />
                   ) : null}
                 </dl>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                      Sessions
+                    </p>
+                    <span className="text-xs text-muted-foreground">
+                      {details.sessions.length} active
+                    </span>
+                  </div>
+                  {details.sessions.length === 0 ? (
+                    <p className="rounded-lg border border-border px-3 py-3 text-sm text-muted-foreground">
+                      No active sessions.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {details.sessions.map((session) => (
+                        <li
+                          key={session.id}
+                          className="flex items-center gap-3 rounded-lg border border-border px-3 py-3"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="truncate text-sm font-medium">
+                                {session.device}
+                              </p>
+                              {session.current ? (
+                                <Badge variant="secondary">Current</Badge>
+                              ) : null}
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Last seen {new Date(session.lastSeenAt).toLocaleString()}
+                              {session.ip ? ` · ${maskIp(session.ip)}` : ""}
+                            </p>
+                          </div>
+                          {canManage && !session.current ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={sessionBusy === session.id}
+                              onClick={() =>
+                                void invalidateSession(session.id, session.device)
+                              }
+                            >
+                              {sessionBusy === session.id ? "Signing out…" : "Sign out"}
+                            </Button>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
 
                 {details.accessRevokedAt && canManage ? (
                   <div className="space-y-2">

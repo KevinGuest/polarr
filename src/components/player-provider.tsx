@@ -2097,6 +2097,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     void pushPresence();
 
+    // The remote webview and native IPC bridge become ready independently.
+    // Retry promptly during startup instead of making Discord wait for the
+    // regular heartbeat after an early bridge or client race.
+    const startupRetries = track
+      ? [
+          window.setTimeout(() => void pushPresence(), 1_500),
+          window.setTimeout(() => void pushPresence(), 6_000),
+        ]
+      : [];
+
     const interval = track
       ? window.setInterval(() => {
           void pushPresence();
@@ -2105,6 +2115,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       cancelled = true;
+      startupRetries.forEach((timer) => window.clearTimeout(timer));
       if (interval) window.clearInterval(interval);
     };
   }, [
@@ -2853,6 +2864,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const transferPlayback = useCallback((deviceId: string) => {
     const self = localDeviceRef.current;
     if (!deviceId) return;
+    // Selecting the device that already owns playback is informational only.
+    // Re-sending a transfer reapplies remote state and can replace the queue.
+    if (activeConnectDevice?.id === deviceId) return;
     sendConnectCommandRef.current({
       id: newCommandId(),
       type: "transfer",
@@ -2917,7 +2931,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         deviceId,
       );
     }
-  }, [applyConnectDevices, applyRemote, connectDevices, playBoth, publish]);
+  }, [activeConnectDevice?.id, applyConnectDevices, applyRemote, connectDevices, playBoth, publish]);
 
   const panel: PlayerPanel = openPanels.nowPlaying
     ? "nowPlaying"

@@ -309,9 +309,17 @@ async fn probe_server(url: String) -> Result<ServerProbeResult, String> {
 
 #[tauri::command]
 fn get_server_url(app: AppHandle) -> Result<ServerLaunchState, String> {
-    let skip_auto_connect = server_webview::take_opening_crashed(&app);
+    let url = read_config(&app)?;
+    // A stale opening lock can survive an interrupted install or an older
+    // crashing build. It is meaningful only when there is a URL to reopen.
+    let skip_auto_connect = if url.is_some() {
+        server_webview::take_opening_crashed(&app)
+    } else {
+        server_webview::clear_opening_marker(&app);
+        false
+    };
     Ok(ServerLaunchState {
-        url: read_config(&app)?,
+        url,
         skip_auto_connect,
     })
 }
@@ -350,6 +358,20 @@ pub fn run() {
     let offline_state = offline::OfflineState::default();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(updater) = app.get_webview_window("updater") {
+                if updater.is_visible().unwrap_or(false) {
+                    let _ = updater.show();
+                    let _ = updater.set_focus();
+                    return;
+                }
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(presence)

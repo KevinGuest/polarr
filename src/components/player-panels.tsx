@@ -545,29 +545,30 @@ function ConnectBody() {
   const self = connectDevices.find((d) => d.self);
   const active = activeConnectDevice ?? self;
   const others = connectDevices.filter((d) => d.id !== active?.id);
+  const activeIsWebPlayer = Boolean(
+    active?.self && active.name.startsWith("Web Player"),
+  );
 
   return (
     <div className="px-4 pb-6">
       {active ? (
         <div className="rounded-xl bg-muted/50 px-4 py-3.5">
-          <button
-            type="button"
-            onClick={() => transferPlayback(active.id)}
-            className="flex w-full items-center gap-3 text-left"
-          >
+          <div className="flex w-full items-center gap-3 text-left">
             <ConnectKindIcon
               kind={active.kind}
               className="text-foreground"
             />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-foreground">
-                {active.name}
+                {activeIsWebPlayer ? "This web browser" : active.name}
               </div>
-              <div className="mt-0.5 text-xs text-muted-foreground">
-                {connectDeviceSubtitle(active)}
-              </div>
+              {!activeIsWebPlayer ? (
+                <div className="mt-0.5 text-xs text-muted-foreground">
+                  {connectDeviceSubtitle(active)}
+                </div>
+              ) : null}
             </div>
-          </button>
+          </div>
           <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
             <p className="text-xs text-muted-foreground">
               Listen with friends anywhere

@@ -31,7 +31,6 @@ type TauriInvoke = (
 let lastSentKey: string | null = null;
 let lastSentAt = 0;
 const RESEND_SAME_MS = 45_000;
-let unloadHooked = false;
 let lastError: string | null = null;
 
 function activityKey(appId: string, fields: ReturnType<typeof activityFields>) {
@@ -127,14 +126,6 @@ function buildTimestamps(progressSec?: number, durationSec?: number) {
   return { start: now - progress };
 }
 
-function ensureUnloadHook() {
-  if (typeof window === "undefined" || unloadHooked) return;
-  unloadHooked = true;
-  window.addEventListener("pagehide", () => {
-    void clearDiscordActivity();
-  });
-}
-
 function getTauriInvoke(): TauriInvoke | null {
   if (typeof window === "undefined") return null;
   const w = window as Window & {
@@ -142,11 +133,14 @@ function getTauriInvoke(): TauriInvoke | null {
     __TAURI__?: { core?: { invoke?: TauriInvoke } };
     __TAURI_INTERNALS__?: { invoke?: TauriInvoke };
   };
-  if (!w.__POLARR_DESKTOP__?.discordRpc) return null;
-  const invoke =
-    w.__TAURI__?.core?.invoke ?? w.__TAURI_INTERNALS__?.invoke ?? null;
+  const invokeOwner = w.__TAURI__?.core ?? w.__TAURI_INTERNALS__;
+  const invoke = invokeOwner?.invoke ?? null;
   if (typeof invoke !== "function") return null;
-  return invoke.bind(w.__TAURI__?.core ?? w);
+  // Tauri internals are authoritative. The injected desktop marker can land a
+  // frame later than the player, which previously made the first presence push
+  // look like a browser and disappear until the 45-second retry.
+  if (!w.__POLARR_DESKTOP__?.discordRpc && !w.__TAURI_INTERNALS__) return null;
+  return invoke.bind(invokeOwner);
 }
 
 /** True when running inside Polarr desktop with Discord IPC available. */
@@ -212,8 +206,6 @@ export async function setDiscordListeningActivity(
   appId: string,
   track: DiscordActivityPayload | null,
 ): Promise<DiscordPresenceResult> {
-  ensureUnloadHook();
-
   if (!track) {
     return clearDiscordActivity();
   }

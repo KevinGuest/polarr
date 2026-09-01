@@ -42,19 +42,22 @@ export function detectConnectDevice(): LocalConnectDevice {
   if (/Android/i.test(agent)) {
     return { id, name: "Android tablet", kind: "tablet" };
   }
-  if (/Macintosh|Mac OS X/i.test(agent)) {
-    return { id, name: "This Mac", kind: "computer" };
-  }
-  if (/Windows/i.test(agent)) {
-    return { id, name: "This computer", kind: "computer" };
-  }
   if (/CrOS/i.test(agent)) {
     return { id, name: "Chromebook", kind: "computer" };
   }
-  if (/Linux/i.test(agent)) {
-    return { id, name: "This computer", kind: "computer" };
+  if (/Edg\//i.test(agent)) {
+    return { id, name: "Web Player (Edge)", kind: "computer" };
   }
-  return { id, name: "This web browser", kind: "computer" };
+  if (/Chrome\//i.test(agent)) {
+    return { id, name: "Web Player (Chrome)", kind: "computer" };
+  }
+  if (/Safari\//i.test(agent) && !/Chrome\//i.test(agent)) {
+    return { id, name: "Web Player (Safari)", kind: "computer" };
+  }
+  if (/Firefox\//i.test(agent)) {
+    return { id, name: "Web Player (Firefox)", kind: "computer" };
+  }
+  return { id, name: "Web Player", kind: "computer" };
 }
 
 export async function resolveConnectDevice(): Promise<LocalConnectDevice> {

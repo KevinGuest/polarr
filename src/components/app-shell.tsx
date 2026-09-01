@@ -218,14 +218,11 @@ function mobilePageTitle(pathname: string): string | null {
 }
 
 function useDesktopShellMode() {
-  const [desktopShell, setDesktopShell] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return isPolarrDesktop();
-  });
-  const [overlayTitlebar, setOverlayTitlebar] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return isOverlayTitlebar();
-  });
+  // The server cannot know whether the request belongs to the Tauri shell.
+  // Keep the first client render identical to SSR, then synchronize after
+  // hydration. The early layout script/CSS prevents a visible web-header flash.
+  const [desktopShell, setDesktopShell] = useState(false);
+  const [overlayTitlebar, setOverlayTitlebar] = useState(false);
   useEffect(() => {
     captureDesktopQueryParam();
     const sync = () => {

@@ -1,5 +1,10 @@
 export const PLAYBACK_SETTINGS_KEY = "polarr-playback-settings-v1";
 export const PLAYBACK_SETTINGS_EVENT = "polarr-playback-settings-changed";
+export const PLAYBACK_OUTPUT_EVENT = "polarr-playback-output-result";
+
+export type PlaybackOutputResult =
+  | { ok: true; deviceId: string }
+  | { ok: false; deviceId: string; error: string };
 
 export const EQ_FREQUENCIES = [60, 150, 400, 1000, 2400, 15000] as const;
 

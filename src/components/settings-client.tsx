@@ -29,8 +29,10 @@ import {
   DEFAULT_PLAYBACK_SETTINGS,
   EQ_FREQUENCIES,
   EQ_PRESETS,
+  PLAYBACK_OUTPUT_EVENT,
   readPlaybackSettings,
   writePlaybackSettings,
+  type PlaybackOutputResult,
   type EqPreset,
   type PlaybackSettings,
   type VolumeLevel,
@@ -416,6 +418,13 @@ export function SettingsClient() {
   }
 
   const refreshAudioOutputs = useCallback(async () => {
+    if (!window.isSecureContext) {
+      setAudioOutputs([]);
+      setAudioOutputMessage(
+        "Individual outputs require an HTTPS server. Polarr will follow your system output for this connection.",
+      );
+      return;
+    }
     if (!navigator.mediaDevices?.enumerateDevices) {
       setAudioOutputMessage(
         "This desktop webview uses your system audio output.",
@@ -482,7 +491,8 @@ export function SettingsClient() {
     const mediaDevices = navigator.mediaDevices as AudioOutputMediaDevices;
     queueMicrotask(() =>
       setAudioOutputPickerAvailable(
-        typeof mediaDevices?.selectAudioOutput === "function",
+        window.isSecureContext &&
+          typeof mediaDevices?.selectAudioOutput === "function",
       ),
     );
     queueMicrotask(() => void refreshAudioOutputs());
@@ -494,6 +504,29 @@ export function SettingsClient() {
       window.removeEventListener("focus", refresh);
     };
   }, [refreshAudioOutputs]);
+
+  useEffect(() => {
+    const onOutputResult = (event: Event) => {
+      const result = (event as CustomEvent<PlaybackOutputResult>).detail;
+      if (!result) return;
+      if (!result.ok && result.deviceId !== "default") {
+        setPlayback((current) => ({
+          ...current,
+          outputDeviceId: "default",
+        }));
+      }
+      if (result.ok) {
+        if (result.deviceId !== "default") setAudioOutputMessage(null);
+        return;
+      }
+      setAudioOutputMessage(
+        `${result.error} Polarr is using the system output instead.`,
+      );
+    };
+    window.addEventListener(PLAYBACK_OUTPUT_EVENT, onOutputResult);
+    return () =>
+      window.removeEventListener(PLAYBACK_OUTPUT_EVENT, onOutputResult);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1115,7 +1148,7 @@ export function SettingsClient() {
                   <p className="text-[16px] font-medium">Crossfade songs</p>
                   <p className="text-sm text-muted-foreground">Blend the end of one song into the next.</p>
                 </div>
-                <Switch checked={playback.crossfadeEnabled} onCheckedChange={(crossfadeEnabled) => updatePlayback({ crossfadeEnabled })} />
+                <Switch aria-label="Crossfade songs" checked={playback.crossfadeEnabled} onCheckedChange={(crossfadeEnabled) => updatePlayback({ crossfadeEnabled })} />
               </div>
               {playback.crossfadeEnabled ? (
                 <div className="border-t border-border/70 px-4 py-3">
@@ -1128,7 +1161,7 @@ export function SettingsClient() {
                   <p className="text-[16px] font-medium">Gapless playback</p>
                   <p className="text-sm text-muted-foreground">Remove silence between consecutive tracks.</p>
                 </div>
-                <Switch checked={playback.gaplessEnabled} onCheckedChange={(gaplessEnabled) => updatePlayback({ gaplessEnabled })} />
+                <Switch aria-label="Gapless playback" checked={playback.gaplessEnabled} onCheckedChange={(gaplessEnabled) => updatePlayback({ gaplessEnabled })} />
               </div>
             </InsetGroup>
           </section>
@@ -1149,7 +1182,7 @@ export function SettingsClient() {
               </div>
               <div className="flex min-h-16 items-center justify-between gap-4 border-t border-border/70 px-4 py-3">
                 <div><p className="text-[16px] font-medium">Mono audio</p><p className="text-sm text-muted-foreground">Play the same sound through both channels.</p></div>
-                <Switch checked={playback.monoAudio} onCheckedChange={(monoAudio) => updatePlayback({ monoAudio })} />
+                <Switch aria-label="Mono audio" checked={playback.monoAudio} onCheckedChange={(monoAudio) => updatePlayback({ monoAudio })} />
               </div>
             </InsetGroup>
           </section>

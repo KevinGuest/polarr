@@ -1,5 +1,3 @@
-import desktopPackageJson from "../../apps/desktop/package.json";
-
 export type DesktopRelease = {
   version: string;
   publishedAt: string | null;
@@ -8,8 +6,10 @@ export type DesktopRelease = {
   windowsUrl: string;
 };
 
+const FALLBACK_DESKTOP_VERSION = "0.2.14";
+
 export function desktopReleaseForVersion(
-  version = desktopPackageJson.version,
+  version = FALLBACK_DESKTOP_VERSION,
 ): DesktopRelease {
   const tag = `desktop-v${version}`;
   const base = `https://github.com/KevinGuest/polarr/releases/download/${tag}`;

@@ -458,9 +458,82 @@ export function ArtistClient() {
               </section>
             ) : null}
 
+            {singles.length > 0 ? (
+              <MediaShelfRow title="Singles" itemCount={singles.length}>
+                {(visible) =>
+                  singles.slice(0, visible).map((item) => {
+                    if (item.kind === "album") {
+                      const href = albumHref({
+                        title: item.album,
+                        artist: item.artist,
+                        foreignAlbumId: item.foreignAlbumId,
+                        lidarrAlbumId:
+                          item.lidarrAlbumId != null && item.lidarrAlbumId > 0
+                            ? item.lidarrAlbumId
+                            : undefined,
+                      });
+                      return (
+                        <MediaTileShell
+                          key={item.id}
+                          title={item.title}
+                          subtitle={item.subtitle}
+                          ariaLabel={`Open ${item.title}`}
+                          onOpen={() => router.push(href)}
+                          cover={
+                            <CoverArt
+                              seed={item.title}
+                              image={item.image || undefined}
+                              className="size-full"
+                            />
+                          }
+                        />
+                      );
+                    }
+                    if (item.kind !== "single") return null;
+                    const track: PlayerTrack = {
+                      id: item.trackId,
+                      title: item.title,
+                      artist: item.subtitle || item.artist,
+                      album: item.album || "",
+                      coverPath: item.coverPath || item.image || null,
+                    };
+                    return (
+                      <TrackContextMenu key={item.id} track={track}>
+                        <div className="min-w-0">
+                          <MediaTileShell
+                            title={item.title}
+                            subtitle={item.subtitle}
+                            ariaLabel={`Play ${item.title}`}
+                            onOpen={() => playTile(item)}
+                            cover={
+                              <CoverArt
+                                seed={item.title}
+                                image={item.image || undefined}
+                                className="size-full"
+                              />
+                            }
+                            playButton={
+                              <button
+                                type="button"
+                                aria-label={`Play ${item.title}`}
+                                onClick={() => playTile(item)}
+                                className="absolute bottom-2 right-2 flex size-9 items-center justify-center rounded-full border border-border bg-background/95 shadow-md transition-transform hover:scale-105"
+                              >
+                                <Play className="size-3.5" fill="currentColor" />
+                              </button>
+                            }
+                          />
+                        </div>
+                      </TrackContextMenu>
+                    );
+                  })
+                }
+              </MediaShelfRow>
+            ) : null}
+
             {features.length > 0 ? (
               <MediaShelfRow
-                title={`Featuring ${name}`}
+                title="Appears on"
                 itemCount={features.length}
                 fillRow={false}
               >

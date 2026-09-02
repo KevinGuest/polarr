@@ -54,6 +54,17 @@ type DownloadRow = {
   coverPath?: string | null;
 };
 
+type LibraryActivityRow = {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  source: string;
+  coverPath?: string | null;
+  addedAt: string;
+  available: boolean;
+};
+
 type Stats = {
   total: number;
   byStatus: Record<string, number>;
@@ -65,6 +76,7 @@ type FilterId =
   | "streamed"
   | "downloading"
   | "downloaded"
+  | "missing"
   | "failed";
 
 type ActivityKind =
@@ -72,6 +84,7 @@ type ActivityKind =
   | "downloading"
   | "streamed"
   | "catalog"
+  | "missing"
   | "failed"
   | "cancelled";
 
@@ -105,6 +118,7 @@ const FILTERS: { id: FilterId; label: string }[] = [
   { id: "downloading", label: "In Progress" },
   { id: "streamed", label: "Streamed" },
   { id: "downloaded", label: "Downloaded" },
+  { id: "missing", label: "Missing" },
   { id: "failed", label: "Failed" },
 ];
 
@@ -114,6 +128,7 @@ export function RequestsClient() {
   const [requests, setRequests] = useState<RequestRow[]>([]);
   const [streams, setStreams] = useState<StreamRow[]>([]);
   const [downloads, setDownloads] = useState<DownloadRow[]>([]);
+  const [library, setLibrary] = useState<LibraryActivityRow[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [filter, setFilter] = useState<FilterId>("all");
   const [page, setPage] = useState(1);
@@ -147,6 +162,7 @@ export function RequestsClient() {
     const dj = await d.json();
     setRequests(rj.requests || []);
     setStreams(rj.streams || []);
+    setLibrary(rj.library || []);
     setStats(rj.stats || null);
     setDownloads(dj.downloads || []);
   }
@@ -264,6 +280,13 @@ export function RequestsClient() {
         type: "job";
         job: DownloadRow;
         progress: number;
+      }
+    | {
+        key: string;
+        sortAt: string;
+        kind: "downloaded" | "missing";
+        type: "library";
+        track: LibraryActivityRow;
       };
 
   const items = useMemo(() => {
@@ -272,6 +295,14 @@ export function RequestsClient() {
       requests.map((r) => r.downloadJobId).filter(Boolean) as string[],
     );
     const out: ActivityItem[] = [];
+    const requestedTracks = new Set(
+      requests
+        .filter((request) => (request.mediaType || "album") === "track")
+        .map(
+          (request) =>
+            `${request.artist.trim().toLowerCase()}|${request.title.trim().toLowerCase()}`,
+        ),
+    );
 
     for (const r of requests) {
       const job = r.downloadJobId
@@ -324,6 +355,18 @@ export function RequestsClient() {
       });
     }
 
+    for (const track of library) {
+      const key = `${track.artist.trim().toLowerCase()}|${track.title.trim().toLowerCase()}`;
+      if (requestedTracks.has(key)) continue;
+      out.push({
+        key: `library:${track.id}`,
+        sortAt: track.addedAt,
+        kind: track.available ? "downloaded" : "missing",
+        type: "library",
+        track,
+      });
+    }
+
     // Active downloads pin to the top; everything else newest-first.
     out.sort((a, b) => {
       const aActive = a.kind === "downloading" ? 1 : 0;
@@ -332,7 +375,7 @@ export function RequestsClient() {
       return Date.parse(b.sortAt) - Date.parse(a.sortAt);
     });
     return out;
-  }, [requests, streams, downloads]);
+  }, [requests, streams, downloads, library]);
 
   const filtered = useMemo(() => {
     return items.filter((item) => {
@@ -342,6 +385,7 @@ export function RequestsClient() {
       if (filter === "downloaded") {
         return item.kind === "downloaded" || item.kind === "catalog";
       }
+      if (filter === "missing") return item.kind === "missing";
       if (filter === "failed") return item.kind === "failed";
       return true;
     });
@@ -506,6 +550,39 @@ export function RequestsClient() {
         ) : (
           <ul className="divide-y divide-border/70 rounded-xl border border-border">
             {pageItems.map((item) => {
+              if (item.type === "library") {
+                const track = item.track;
+                return (
+                  <li key={item.key} className="px-3 py-2.5 sm:px-4">
+                    <div className="flex items-center gap-3">
+                      <CoverArt
+                        seed={`${track.artist}-${track.album || track.title}`}
+                        image={track.coverPath}
+                        className="size-10 shrink-0 rounded-md"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">
+                          {track.artist} — {track.title}
+                        </div>
+                        <div className="truncate text-[11px] text-muted-foreground">
+                          {track.album ? `${track.album} · ` : ""}
+                          library scan · {new Date(track.addedAt).toLocaleString()}
+                        </div>
+                      </div>
+                      {track.available ? (
+                        <StatusIcon label="Downloaded" className="text-emerald-400">
+                          <Check className="size-3.5" strokeWidth={2.5} />
+                        </StatusIcon>
+                      ) : (
+                        <StatusIcon label="File missing" className="text-destructive">
+                          <X className="size-3.5" strokeWidth={2.5} />
+                        </StatusIcon>
+                      )}
+                    </div>
+                  </li>
+                );
+              }
+
               if (item.type === "stream") {
                 const s = item.stream;
                 return (

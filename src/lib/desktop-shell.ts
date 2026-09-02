@@ -14,6 +14,7 @@ export const DESKTOP_QUERY_PARAM = "desktop";
 export const OVERLAY_TITLEBAR_QUERY_PARAM = "titlebar";
 export const OVERLAY_TITLEBAR_QUERY_VALUE = "overlay";
 const STORAGE_KEY = "polarr-desktop";
+const VERSION_STORAGE_KEY = "polarr-desktop-version";
 const OVERLAY_STORAGE_KEY = "polarr-desktop-overlay";
 const HIDE_STYLE_ID = "polarr-desktop-hide-header";
 const DESKTOP_PLATFORM_COOKIE = "polarr_desktop_platform";
@@ -115,6 +116,33 @@ export function hasPolarrDesktopGlobal(): boolean {
   if (typeof window === "undefined") return false;
   const w = window as Window & { __POLARR_DESKTOP__?: Record<string, unknown> };
   return Boolean(w.__POLARR_DESKTOP__);
+}
+
+/** Installed shell version, when the web app is running inside Polarr Desktop. */
+export function getPolarrDesktopVersion(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const value = new URLSearchParams(window.location.search).get(
+      "desktop-version",
+    );
+    if (value?.trim()) return value.trim();
+  } catch {
+    /* malformed location */
+  }
+  try {
+    const stored = sessionStorage.getItem(VERSION_STORAGE_KEY);
+    if (stored?.trim()) return stored.trim();
+  } catch {
+    /* private mode */
+  }
+  const w = window as Window & {
+    __POLARR_DESKTOP__?: { version?: unknown };
+  };
+  const globalVersion = w.__POLARR_DESKTOP__?.version;
+  if (typeof globalVersion === "string" && globalVersion.trim()) {
+    return globalVersion.trim();
+  }
+  return null;
 }
 
 function applyOverlayTitlebarAttr(on: boolean) {
@@ -254,6 +282,7 @@ export function captureDesktopQueryParam(): boolean {
   try {
     const url = new URL(window.location.href);
     const desktop = url.searchParams.get(DESKTOP_QUERY_PARAM) === "1";
+    const desktopVersion = url.searchParams.get("desktop-version")?.trim();
     const overlay =
       url.searchParams.get(OVERLAY_TITLEBAR_QUERY_PARAM) ===
       OVERLAY_TITLEBAR_QUERY_VALUE;
@@ -267,6 +296,13 @@ export function captureDesktopQueryParam(): boolean {
       applyOverlayTitlebarAttr(true);
     }
     if (desktop || overlay) markPolarrDesktop();
+    if (desktopVersion) {
+      try {
+        sessionStorage.setItem(VERSION_STORAGE_KEY, desktopVersion);
+      } catch {
+        /* private mode */
+      }
+    }
     url.searchParams.delete(DESKTOP_QUERY_PARAM);
     url.searchParams.delete(OVERLAY_TITLEBAR_QUERY_PARAM);
     url.searchParams.delete("desktop-version");

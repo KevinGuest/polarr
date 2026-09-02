@@ -214,7 +214,27 @@ function mobilePageTitle(pathname: string): string | null {
   if (pathname === "/search") return "Search";
   if (pathname === "/library") return "Library";
   if (pathname === "/notifications") return "Notifications";
+  if (pathname === "/downloads") return "Downloads";
   return null;
+}
+
+function DownloadsLink({ compact = false }: { compact?: boolean }) {
+  return (
+    <Link
+      href="/downloads"
+      aria-label="Download Polarr desktop"
+      title="Download Polarr desktop"
+      className={cn(
+        "flex shrink-0 items-center justify-center text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground",
+        compact ? "size-8 rounded-md" : "size-9 rounded-full",
+      )}
+    >
+      <Download
+        className={compact ? "size-[1.15rem]" : "size-5"}
+        strokeWidth={1.75}
+      />
+    </Link>
+  );
 }
 
 function useDesktopShellMode() {
@@ -258,6 +278,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
   const isProfilePage =
     pathname === "/profile" || pathname.startsWith("/u/");
   const isNotificationsPage = pathname === "/notifications";
+  const isDownloadsPage = pathname === "/downloads";
   const isHomePage = pathname === "/";
   const isBrowsePage = pathname.startsWith("/browse/");
   const mobileTitle =
@@ -461,6 +482,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                 </div>
                 <div />
                 <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center justify-end gap-1">
+                  {!desktopShell ? <DownloadsLink compact /> : null}
                   <NotificationsBell />
                   <ProfileDrawer side="right" />
                 </div>
@@ -487,6 +509,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                   </Suspense>
                 </div>
                 <div className="flex items-center justify-end gap-1">
+                  <DownloadsLink compact />
                   <NotificationsBell />
                   <ProfileDrawer side="right" />
                 </div>
@@ -518,6 +541,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                 </Link>
                 <div className="min-w-0 flex-1" />
                 <div className="flex shrink-0 items-center gap-1">
+                  {!isDownloadsPage ? <DownloadsLink /> : null}
                   {!isNotificationsPage ? (
                     <NotificationsLink unread={notificationUnread} />
                   ) : null}
@@ -534,6 +558,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
                   <div className="min-w-0 flex-1" />
                 )}
                 <div className="flex shrink-0 items-center gap-1">
+                  {!isDownloadsPage ? <DownloadsLink /> : null}
                   {!isSearchPage && !isNotificationsPage ? (
                     <NotificationsLink unread={notificationUnread} />
                   ) : null}

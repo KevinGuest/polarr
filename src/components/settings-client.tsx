@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
@@ -24,7 +25,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { isPolarrDesktop } from "@/lib/desktop-shell";
+import {
+  getPolarrDesktopVersion,
+  isPolarrDesktop,
+} from "@/lib/desktop-shell";
 import {
   DEFAULT_PLAYBACK_SETTINGS,
   EQ_FREQUENCIES,
@@ -48,6 +52,7 @@ import {
   ArrowLeft,
   ChevronRight,
   Info,
+  Monitor,
   MoreHorizontal,
 } from "lucide-react";
 import {
@@ -163,6 +168,7 @@ function EqualizerChart({
   enabled: boolean;
   onChange: (index: number, value: number) => void;
 }) {
+  const activeBandRef = useRef<number | null>(null);
   const width = 720;
   const height = 280;
   const left = 62;
@@ -180,14 +186,25 @@ function EqualizerChart({
   const line = points.map((point) => `${point.x},${point.y}`).join(" ");
   const area = `M ${left} ${bottom} L ${line.replaceAll(" ", " L ")} L ${right} ${bottom} Z`;
 
-  function valueFromPointer(event: ReactPointerEvent<SVGCircleElement>) {
-    const svg = event.currentTarget.ownerSVGElement;
-    if (!svg) return;
+  function updateFromPointer(
+    event: ReactPointerEvent<SVGSVGElement>,
+    index: number,
+  ) {
+    const svg = event.currentTarget;
     const rect = svg.getBoundingClientRect();
     const y = ((event.clientY - rect.top) / rect.height) * height;
     const value = Math.round(((middle - y) / range) * 12);
-    const index = Number(event.currentTarget.dataset.index);
     onChange(index, Math.max(-12, Math.min(12, value)));
+  }
+
+  function nearestBand(event: ReactPointerEvent<SVGSVGElement>): number {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * width;
+    return points.reduce(
+      (best, point, index) =>
+        Math.abs(point.x - x) < Math.abs(points[best].x - x) ? index : best,
+      0,
+    );
   }
 
   function moveWithKeyboard(
@@ -208,8 +225,31 @@ function EqualizerChart({
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}
-      className="block h-auto w-full overflow-visible text-foreground"
+      className={cn(
+        "block h-auto w-full select-none overflow-visible text-foreground touch-none",
+        enabled ? "cursor-ns-resize" : "cursor-not-allowed",
+      )}
       aria-label="Six-band equalizer"
+      onPointerDown={(event) => {
+        if (!enabled) return;
+        const index = nearestBand(event);
+        activeBandRef.current = index;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        updateFromPointer(event, index);
+      }}
+      onPointerMove={(event) => {
+        if (!enabled || activeBandRef.current == null) return;
+        updateFromPointer(event, activeBandRef.current);
+      }}
+      onPointerUp={(event) => {
+        activeBandRef.current = null;
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+      }}
+      onPointerCancel={() => {
+        activeBandRef.current = null;
+      }}
     >
       <defs>
         <linearGradient id="equalizer-fill" x1="0" y1="0" x2="0" y2="1">
@@ -250,18 +290,7 @@ function EqualizerChart({
             cy={point.y}
             r="12"
             fill="transparent"
-            className={enabled ? "cursor-ns-resize" : "cursor-not-allowed"}
-            data-index={index}
-            onPointerDown={(event) => {
-              if (!enabled) return;
-              event.currentTarget.setPointerCapture(event.pointerId);
-              valueFromPointer(event);
-            }}
-            onPointerMove={(event) => {
-              if (enabled && event.currentTarget.hasPointerCapture(event.pointerId)) {
-                valueFromPointer(event);
-              }
-            }}
+            className="cursor-inherit"
             onKeyDown={(event) => enabled && moveWithKeyboard(event, index)}
             tabIndex={enabled ? 0 : -1}
             role="slider"
@@ -324,6 +353,9 @@ export function SettingsClient() {
   const [accountEdit, setAccountEdit] = useState<AccountEdit>(null);
   const [editValue, setEditValue] = useState("");
   const [serverVersion, setServerVersion] = useState<string | null>(null);
+  const [desktopAppVersion, setDesktopAppVersion] = useState<string | null>(
+    null,
+  );
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -487,6 +519,7 @@ export function SettingsClient() {
   useEffect(() => {
     const desktop = isPolarrDesktop();
     queueMicrotask(() => setDesktopApp(desktop));
+    queueMicrotask(() => setDesktopAppVersion(getPolarrDesktopVersion()));
     if (!desktop) return;
     const mediaDevices = navigator.mediaDevices as AudioOutputMediaDevices;
     queueMicrotask(() =>
@@ -993,9 +1026,22 @@ export function SettingsClient() {
           <div className="flex min-h-16 items-center gap-3 px-4 py-3">
             <Info className="size-5 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <p className="text-[16px] font-medium">Polarr version</p>
+              <p className="text-[16px] font-medium">Server version</p>
               <p className="text-sm text-muted-foreground">
                 {serverVersion || "Loading…"}
+              </p>
+            </div>
+          </div>
+          <div className="flex min-h-16 items-center gap-3 border-t border-border/70 px-4 py-3">
+            <Monitor className="size-5 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[16px] font-medium">App version</p>
+              <p className="text-sm text-muted-foreground">
+                {desktopAppVersion
+                  ? `${desktopAppVersion} · Desktop`
+                  : serverVersion
+                    ? `${serverVersion} · Web Player`
+                    : "Loading…"}
               </p>
             </div>
           </div>

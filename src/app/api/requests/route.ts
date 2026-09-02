@@ -1,4 +1,5 @@
 import { z } from "zod";
+import fs from "node:fs";
 import { json, getAuthUser, getStaffUser, requireAuth } from "@/lib/api";
 import {
   createRequest,
@@ -6,6 +7,7 @@ import {
   getSettings,
   listRequestEvents,
   listRequests,
+  listTracks,
   listStreamedTrackActivity,
   activityUserForUsername,
   requestStats,
@@ -14,6 +16,7 @@ import {
 import { coverFromRequestMaps } from "@/lib/request-cover";
 import {
   coverFrom,
+  coverFromMap,
   getAlbumCoverMap,
   getArtistCoverMap,
   LidarrClient,
@@ -59,8 +62,40 @@ export async function GET(req: Request) {
       streamers: requester ? [requester] : [],
     };
   });
+  const library = listTracks(200).map((track) => {
+    let available = false;
+    const filePath = (track.path || "").trim();
+    if (
+      filePath &&
+      !filePath.startsWith("stream:") &&
+      !filePath.startsWith("stream://")
+    ) {
+      try {
+        available = fs.existsSync(filePath) && fs.statSync(filePath).isFile();
+      } catch {
+        available = false;
+      }
+    }
+    return {
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      source: track.source,
+      coverPath:
+        coverFromMap(
+          albumCovers,
+          track.artist,
+          track.album,
+          track.title,
+          track.coverPath,
+        ) || track.coverPath,
+      addedAt: track.addedAt,
+      available,
+    };
+  });
   const streams = listStreamedTrackActivity(100);
-  return json({ requests, streams, stats: requestStats() });
+  return json({ requests, streams, library, stats: requestStats() });
 }
 
 const stopSchema = z.object({

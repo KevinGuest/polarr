@@ -21,6 +21,7 @@ import {
 } from "@/lib/auth-password";
 import { getOrCreateDeviceId } from "@/lib/device-id";
 import { toastError, toastSuccess, toastSaved } from "@/lib/toast";
+import { persistNativeSessionToken } from "@/lib/native-client";
 
 type Step = "account" | "lidarr" | "email";
 
@@ -103,6 +104,7 @@ export function SetupWizard() {
         return;
       }
 
+      await persistNativeSessionToken(data.token);
       toastSuccess("Admin account created");
       setStep("lidarr");
     } catch {

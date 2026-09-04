@@ -1,4 +1,4 @@
-import { getAuthUser, json } from "@/lib/api";
+import { getAuthUserFromRequest, json } from "@/lib/api";
 import { getSettings } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +14,7 @@ function toLidarrApiPath(src: string): string | null {
 }
 
 export async function GET(req: Request) {
-  const user = await getAuthUser();
+  const user = getAuthUserFromRequest(req);
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
 
   const src = (new URL(req.url).searchParams.get("src") || "").trim();

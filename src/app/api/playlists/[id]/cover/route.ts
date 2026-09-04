@@ -2,7 +2,7 @@ import { mkdir, writeFile, unlink } from "node:fs/promises";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { NextRequest } from "next/server";
-import { getAuthUser, json } from "@/lib/api";
+import { getAuthUser, getAuthUserFromRequest, json } from "@/lib/api";
 import {
   getPlaylistCoverPath,
   getPlaylistCoverPathById,
@@ -32,10 +32,10 @@ const MIME: Record<string, string> = {
 };
 
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
-  const me = await getAuthUser();
+  const me = getAuthUserFromRequest(req);
   if (!me) return json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await ctx.params;

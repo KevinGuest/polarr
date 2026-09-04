@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { usePathname } from "next/navigation";
+import { nativeAssetUrl } from "@/lib/native-client";
 import { primaryArtistName } from "@/lib/track-match";
 import { pushRecentPlayedTrack } from "@/lib/recent-searches";
 import { formatDuration, titleLooksExplicit } from "@/lib/utils";
@@ -438,8 +439,8 @@ async function postConnectSync(body: {
 function audioSrcFor(track: PlayerTrack): string {
   const offline = offlineStreamUrl(track.id);
   if (offline) return offline;
-  if (track.streamUrl) return track.streamUrl;
-  return `/api/stream/${track.id}`;
+  if (track.streamUrl) return nativeAssetUrl(track.streamUrl) || track.streamUrl;
+  return nativeAssetUrl(`/api/stream/${track.id}`) || `/api/stream/${track.id}`;
 }
 
 /** Browser throws this when play() is raced by pause/src change — not a real failure. */

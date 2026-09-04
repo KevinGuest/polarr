@@ -1,10 +1,24 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
+import tailwindcss from "@tailwindcss/postcss";
 
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
   clearScreen: false,
+  resolve: {
+    alias: {
+      "@": resolve(__dirname, "../../src"),
+      "next/link": resolve(__dirname, "../client/navigation.tsx"),
+      "next/navigation": resolve(__dirname, "../client/navigation.tsx"),
+    },
+    dedupe: ["react", "react-dom"],
+  },
+  css: {
+    postcss: {
+      plugins: [tailwindcss()],
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,
@@ -21,13 +35,6 @@ export default defineConfig({
     },
   },
   envPrefix: ["VITE_", "TAURI_"],
-  // Inline PostCSS so Vite does not walk up to the Next.js
-  // `postcss.config.mjs` (Tailwind) at the repo root.
-  css: {
-    postcss: {
-      plugins: [],
-    },
-  },
   build: {
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
     minify: !process.env.TAURI_DEBUG ? "esbuild" : false,

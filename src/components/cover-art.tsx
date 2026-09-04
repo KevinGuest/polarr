@@ -2,6 +2,7 @@
 
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { nativeAssetUrl } from "@/lib/native-client";
 
 export function CoverArt({
   seed,
@@ -20,9 +21,10 @@ export function CoverArt({
   const hue = h % 360;
   const hue2 = (hue + 40 + (h % 50)) % 360;
 
-  const style = image
+  const resolvedImage = nativeAssetUrl(image);
+  const style = resolvedImage
     ? {
-        backgroundImage: `url(${JSON.stringify(image)})`,
+        backgroundImage: `url(${JSON.stringify(resolvedImage)})`,
         backgroundSize: "cover" as const,
         backgroundPosition: "center" as const,
       }

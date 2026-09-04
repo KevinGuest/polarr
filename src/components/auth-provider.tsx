@@ -17,6 +17,7 @@ import {
   setDesktopOfflineSession,
   startDesktopOfflineSync,
 } from "@/lib/desktop-offline";
+import { clearNativeSessionToken } from "@/lib/native-client";
 
 export type BanStatus = {
   stream: boolean;
@@ -86,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setBan(null);
     setLoading(false);
     void clearDesktopOfflineSession();
+    clearNativeSessionToken();
   }, []);
 
   useEffect(() => {

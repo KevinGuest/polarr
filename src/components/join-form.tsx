@@ -19,6 +19,7 @@ import {
 } from "@/lib/auth-password";
 import { getOrCreateDeviceId } from "@/lib/device-id";
 import { toastError, toastSuccess } from "@/lib/toast";
+import { persistNativeSessionToken } from "@/lib/native-client";
 
 export function JoinForm({ initialCode = "" }: { initialCode?: string }) {
   const router = useRouter();
@@ -72,6 +73,7 @@ export function JoinForm({ initialCode = "" }: { initialCode?: string }) {
         );
         return;
       }
+      await persistNativeSessionToken(data.token);
       toastSuccess("Welcome to Polarr");
       router.replace("/");
       router.refresh();

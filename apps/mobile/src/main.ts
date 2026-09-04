@@ -1,6 +1,8 @@
 import { Preferences } from "@capacitor/preferences";
 import { StatusBar, Style } from "@capacitor/status-bar";
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
+import { mountPolarrClient, unmountPolarrClient } from "../../client/app";
+import packageJson from "../package.json";
 import "./styles.css";
 
 const SERVER_KEY = "polarr_server_url";
@@ -8,7 +10,7 @@ const SERVER_KEY = "polarr_server_url";
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
 const SETUP_HTML = `
-  <main class="shell" id="setup">
+  <main class="native-setup-shell" id="setup">
     <div class="setup">
       <img class="logo" src="/polarr-icon.png" alt="" width="72" height="72" />
       <h1>Polarr</h1>
@@ -47,6 +49,7 @@ function showBoot() {
 }
 
 function showSetup() {
+  unmountPolarrClient(app);
   app.innerHTML = SETUP_HTML;
   wireSetup();
 }
@@ -156,9 +159,16 @@ async function clearUrl() {
   localStorage.removeItem(SERVER_KEY);
 }
 
-function goToServer(url: string) {
-  // Full navigation keeps cookies/session on the Polarr origin (httpOnly polarr_token).
-  window.location.replace(url);
+async function openClient(url: string) {
+  await mountPolarrClient(app, {
+    serverUrl: url,
+    platform: "ios",
+    version: packageJson.version,
+    changeServer: async () => {
+      await clearUrl();
+      showSetup();
+    },
+  });
 }
 
 async function bootstrapNativeChrome() {
@@ -191,7 +201,7 @@ function wireSetup() {
       await probePolarr(url);
       await saveUrl(url);
       showBoot();
-      goToServer(url);
+      await openClient(url);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       showToast("URL not valid");
@@ -217,12 +227,10 @@ async function bootstrap() {
     return;
   }
 
-  showBoot();
   try {
     const url = normalizeUrl(existing);
-    await probePolarr(url);
     if (url !== existing) await saveUrl(url);
-    goToServer(url);
+    await openClient(url);
   } catch {
     showSetup();
     showToast("URL not valid");

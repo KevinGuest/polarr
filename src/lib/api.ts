@@ -1,5 +1,6 @@
 import { cookies, headers } from "next/headers";
 import { getUserByToken } from "./db";
+import { getUserByNativeMediaTicket } from "./native-media-ticket";
 import { roleIsAdmin, roleIsStaff } from "./roles";
 
 function tokenFromCookieHeader(cookieHeader: string | null): string | null {
@@ -23,6 +24,8 @@ export function getAuthUserFromRequest(req: Request) {
   if (auth?.toLowerCase().startsWith("bearer ")) {
     return getUserByToken(auth.slice(7).trim());
   }
+  const mediaTicket = new URL(req.url).searchParams.get("mediaTicket");
+  if (mediaTicket) return getUserByNativeMediaTicket(mediaTicket);
   return getUserByToken(tokenFromCookieHeader(req.headers.get("cookie")));
 }
 

@@ -1,6 +1,6 @@
 import { readFileSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
-import { getAuthUser, json } from "@/lib/api";
+import { getAuthUserFromRequest, json } from "@/lib/api";
 import { getUserAvatarPath } from "@/lib/db";
 import { avatarsDir } from "@/lib/paths";
 import { unscrambleUserId } from "@/lib/user-id";
@@ -17,10 +17,10 @@ const MIME: Record<string, string> = {
 };
 
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ userId: string }> },
 ) {
-  const me = await getAuthUser();
+  const me = getAuthUserFromRequest(req);
   if (!me) return json({ error: "Unauthorized" }, { status: 401 });
 
   const { userId: token } = await ctx.params;

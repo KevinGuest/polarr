@@ -14,6 +14,7 @@ import {
 } from "@/lib/auth-password";
 import { getOrCreateDeviceId } from "@/lib/device-id";
 import { toastError } from "@/lib/toast";
+import { persistNativeSessionToken } from "@/lib/native-client";
 
 /**
  * Login fields mount after hydration so password managers (e.g. Proton Pass)
@@ -99,6 +100,7 @@ export function LoginForm({
         );
         return;
       }
+      await persistNativeSessionToken(data.token);
       router.replace("/");
       router.refresh();
     } catch {
@@ -176,7 +178,7 @@ export function LoginForm({
             </Button>
           ) : null}
           <div className="mt-8 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 text-[15px] text-muted-foreground">
-            <a href="/join">Join with a code</a>
+            <Link href="/join">Join with a code</Link>
             <Link href="/forgot-password">Forgot password?</Link>
           </div>
         </form>

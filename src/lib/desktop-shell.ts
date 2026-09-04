@@ -157,6 +157,10 @@ function applyOverlayTitlebarAttr(on: boolean) {
 
 export function isOverlayTitlebar(): boolean {
   if (typeof window === "undefined") return false;
+  // The bundled desktop client owns its title bar in the local shell. The
+  // legacy remote-webview build was the only macOS mode that needed the web
+  // header to double as window chrome.
+  if (window.__POLARR_NATIVE_CLIENT__?.platform === "desktop") return false;
   if (document.documentElement.dataset.polarrOverlayTitlebar === "1") return true;
   if (
     document.documentElement.getAttribute("data-polarr-overlay-titlebar") === "1"

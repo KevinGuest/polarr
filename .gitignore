@@ -46,6 +46,7 @@ yarn-debug.log*
 # Native client deps / build output (source under apps/ is tracked)
 apps/**/node_modules/
 apps/**/dist/
+apps/mobile/build/
 apps/desktop/src-tauri/target/
 apps/desktop/.tauri/
 

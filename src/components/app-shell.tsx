@@ -54,6 +54,7 @@ import {
   markPolarrDesktop,
 } from "@/lib/desktop-shell";
 import { roleIsStaff } from "@/lib/roles";
+import { isNativeClient } from "@/lib/native-client";
 
 const adminNavGroups = [
   {
@@ -219,6 +220,7 @@ function mobilePageTitle(pathname: string): string | null {
 }
 
 function DownloadsLink({ compact = false }: { compact?: boolean }) {
+  if (isNativeClient()) return null;
   return (
     <Link
       href="/downloads"

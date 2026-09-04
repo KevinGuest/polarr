@@ -5,6 +5,7 @@ import { Menu, MenuItem, PredefinedMenuItem } from "@tauri-apps/api/menu";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import packageJson from "../package.json";
+import { mountPolarrClient } from "../../client/app";
 import "./styles.css";
 import {
   probePolarrServer,
@@ -185,6 +186,7 @@ app.innerHTML = `
           </form>
         </div>
       </div>
+      <div class="client-root" id="client-root" hidden></div>
     </main>
     <div id="toast" class="toast" hidden role="status">
       <svg class="toast-icon" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
@@ -205,6 +207,7 @@ app.innerHTML = `
 };
 
 const setupView = document.querySelector<HTMLDivElement>("#setup-view")!;
+const clientRoot = document.querySelector<HTMLDivElement>("#client-root")!;
 const form = document.querySelector<HTMLFormElement>("#server-form")!;
 const input = document.querySelector<HTMLInputElement>("#server-url")!;
 const toastEl = document.querySelector<HTMLDivElement>("#toast")!;
@@ -574,24 +577,6 @@ function openUpdaterWindow(): Promise<void> {
   });
 }
 
-/** Append desktop flags so the web app can match native chrome. */
-function withDesktopParam(serverUrl: string): string {
-  try {
-    const u = new URL(serverUrl);
-    u.searchParams.set("desktop", "1");
-    // A versioned document URL prevents WebView2 from reopening an HTML shell
-    // cached by an older desktop release after the server UI has updated.
-    u.searchParams.set("desktop-version", DESKTOP_VERSION);
-    if (isMacPlatform()) u.searchParams.set("titlebar", "overlay");
-    return u.toString();
-  } catch {
-    const base = serverUrl.replace(/\/$/, "");
-    const join = serverUrl.includes("?") ? "&" : "?";
-    const overlay = isMacPlatform() ? "&titlebar=overlay" : "";
-    return `${base}${join}desktop=1&desktop-version=${encodeURIComponent(DESKTOP_VERSION)}${overlay}`;
-  }
-}
-
 function postToServer(message: Record<string, unknown>) {
   void emit(CHROME_DOWN_EVENT, { channel: CHROME_CHANNEL, ...message }).catch(
     () => null,
@@ -709,18 +694,12 @@ function applyAuthState(
   applyProfileAvatar(name);
 }
 
-/** Infer chrome from server webview URL — works without web DesktopChromeBridge. */
+/** Keep shell chrome synchronized with the bundled client's local route. */
 async function syncChromeFromWebviewUrl() {
   if (!serverOpen || !setupView.hidden) return;
   try {
-    const href = await invoke<string | null>("get_server_webview_href");
-    if (!href) return;
-    let path = "/";
-    try {
-      path = new URL(href).pathname || "/";
-    } catch {
-      return;
-    }
+    const route = window.location.hash.replace(/^#/, "") || "/";
+    const path = route.split("?")[0] || "/";
     const authRoute = isAuthRoute(path);
     // Don't invent auth from the URL when the bridge already told us we're signed in —
     // path-only polling was flipping chrome and causing title-bar blink.
@@ -766,6 +745,7 @@ async function showSetup(prefill?: string) {
   setServerOpenClass(false);
   stopChromeUrlPoll();
   setupView.hidden = false;
+  clientRoot.hidden = true;
   if (prefill) input.value = prefill;
   setConnectButton("Connect", false);
   authState = {
@@ -792,9 +772,13 @@ async function showSetup(prefill?: string) {
 
 async function showServer(url: string) {
   setChromeAuthenticated(false);
-  const target = withDesktopParam(url);
   try {
-    await invoke("open_server_webview", { url: target });
+    await mountPolarrClient(clientRoot, {
+      serverUrl: url,
+      platform: "desktop",
+      version: DESKTOP_VERSION,
+      changeServer: () => showSetup(url),
+    });
   } catch (err) {
     showToast(err instanceof Error ? err.message : String(err));
     serverOpen = false;
@@ -806,6 +790,7 @@ async function showServer(url: string) {
   // Do not remove the only visible/recoverable UI until native child-webview
   // creation succeeds. The child covers this area once it is ready.
   setupView.hidden = true;
+  clientRoot.hidden = false;
   setServerOpenClass(true);
   serverOpen = true;
   startChromeUrlPoll();
@@ -939,11 +924,11 @@ titlebar.addEventListener("dblclick", (event) => {
 });
 
 document.querySelector("#nav-back")!.addEventListener("click", () => {
-  void invoke("server_history_back").catch(() => null);
+  window.history.back();
 });
 
 document.querySelector("#nav-forward")!.addEventListener("click", () => {
-  void invoke("server_history_forward").catch(() => null);
+  window.history.forward();
 });
 
 titlebarHomeBtn.addEventListener("click", (event) => {
@@ -1049,8 +1034,7 @@ async function bootstrap() {
     if (existing && !skipAuto) {
       setConnectButton("Connecting…", true);
       try {
-        const probe = await probePolarrServer(existing);
-        await showServer(probe.url);
+        await showServer(existing);
       } catch (error) {
         await showSetup(existing);
         showToast(typeof error === "string" ? error : "URL not valid");

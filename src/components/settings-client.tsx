@@ -30,6 +30,12 @@ import {
   isPolarrDesktop,
 } from "@/lib/desktop-shell";
 import {
+  nativeClientPlatform,
+  nativeClientVersion,
+  nativeServerUrl,
+  requestNativeServerChange,
+} from "@/lib/native-client";
+import {
   DEFAULT_PLAYBACK_SETTINGS,
   EQ_FREQUENCIES,
   EQ_PRESETS,
@@ -356,6 +362,7 @@ export function SettingsClient() {
   const [desktopAppVersion, setDesktopAppVersion] = useState<string | null>(
     null,
   );
+  const [nativePlatform, setNativePlatform] = useState<"ios" | "desktop" | null>(null);
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -519,7 +526,10 @@ export function SettingsClient() {
   useEffect(() => {
     const desktop = isPolarrDesktop();
     queueMicrotask(() => setDesktopApp(desktop));
-    queueMicrotask(() => setDesktopAppVersion(getPolarrDesktopVersion()));
+    queueMicrotask(() => {
+      setDesktopAppVersion(nativeClientVersion() || getPolarrDesktopVersion());
+      setNativePlatform(nativeClientPlatform());
+    });
     if (!desktop) return;
     const mediaDevices = navigator.mediaDevices as AudioOutputMediaDevices;
     queueMicrotask(() =>
@@ -1038,13 +1048,20 @@ export function SettingsClient() {
               <p className="text-[16px] font-medium">App version</p>
               <p className="text-sm text-muted-foreground">
                 {desktopAppVersion
-                  ? `${desktopAppVersion} · Desktop`
+                  ? `${desktopAppVersion} · ${nativePlatform === "ios" ? "iOS" : "Desktop"}`
                   : serverVersion
                     ? `${serverVersion} · Web Player`
                     : "Loading…"}
               </p>
             </div>
           </div>
+          {nativePlatform ? (
+            <SettingsRow
+              title="Server address"
+              detail={nativeServerUrl() || "Not connected"}
+              onClick={requestNativeServerChange}
+            />
+          ) : null}
         </InsetGroup>
       ) : null}
 

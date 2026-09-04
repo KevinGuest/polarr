@@ -1,3 +1,7 @@
+@import "../../../src/app/globals.css";
+@source "../../../src";
+@source "../../client";
+
 :root {
   /* Match Polarr web .dark tokens (globals.css) — hsl(240 10% 3.9%) etc. */
   color-scheme: dark;
@@ -591,6 +595,23 @@ html.mac .titlebar-center {
   min-height: 0;
   position: relative;
   background: var(--bg);
+}
+
+.client-root {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.client-root[hidden] {
+  display: none !important;
+}
+
+html[data-polarr-native="desktop"] .client-root .h-dvh,
+html[data-polarr-native="desktop"] .client-root .min-h-dvh {
+  height: 100%;
+  min-height: 100%;
 }
 
 .content-shade {

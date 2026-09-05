@@ -102,7 +102,7 @@ export async function GET(
         filePath,
         ext,
         quality,
-        req.signal,
+        req,
       );
       if (compat) return compat;
     }

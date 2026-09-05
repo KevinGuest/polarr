@@ -506,7 +506,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
       try {
         const res = await fetch(
           `/api/playlists/${encodeURIComponent(playlistId)}/recommend?limit=12`,
-          { cache: "no-store", credentials: "same-origin" },
+          { credentials: "same-origin" },
         );
         const data = await res.json().catch(() => null);
         if (cancelled) return;

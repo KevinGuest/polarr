@@ -13,6 +13,8 @@ type PlayerSliderProps = {
   variant?: "progress" | "volume";
   /** White track for expanded mobile player; default for dock / desktop */
   tone?: "on-dark" | "default";
+  /** When false, progress scrub is visual-only (non-seekable stream). */
+  seekable?: boolean;
 };
 
 export function PlayerSlider({
@@ -22,6 +24,7 @@ export function PlayerSlider({
   className,
   variant = "progress",
   tone = "on-dark",
+  seekable = true,
 }: PlayerSliderProps) {
   const [active, setActive] = useState(false);
   /** Hold the scrub value so live timeupdate doesn't yank the thumb mid-drag. */
@@ -33,6 +36,7 @@ export function PlayerSlider({
       : Math.round(clamped * 100);
 
   const onDark = tone === "on-dark";
+  const disabled = variant === "progress" && !seekable;
 
   useEffect(() => {
     if (!active) return;
@@ -55,14 +59,23 @@ export function PlayerSlider({
   return (
     <SliderPrimitive.Root
       value={[sliderValue]}
+      disabled={disabled}
       onValueChange={(vals) => {
+        if (disabled) return;
         const next = vals[0];
         if (typeof next !== "number") return;
         const ratio = next / 100;
         setScrub(ratio);
-        onChange(ratio);
+        // Volume updates live; progress commits on release to avoid reload races.
+        if (variant === "volume") onChange(ratio);
       }}
-      onValueCommit={() => {
+      onValueCommit={(vals) => {
+        if (disabled) return;
+        const next = vals[0];
+        if (typeof next === "number") {
+          const ratio = next / 100;
+          if (variant === "progress") onChange(ratio);
+        }
         setActive(false);
         setScrub(null);
       }}
@@ -70,16 +83,16 @@ export function PlayerSlider({
       step={variant === "progress" ? 0.1 : 1}
       aria-label={ariaLabel}
       onPointerDown={(event) => {
-        // Keep sheet dismiss / scroll gestures from stealing the scrub.
         event.stopPropagation();
-        setActive(true);
+        if (!disabled) setActive(true);
       }}
       onTouchStart={(event) => {
         event.stopPropagation();
-        setActive(true);
+        if (!disabled) setActive(true);
       }}
       className={cn(
         "relative flex w-full touch-none select-none items-center py-3",
+        disabled && "opacity-50",
         className,
       )}
     >
@@ -103,7 +116,6 @@ export function PlayerSlider({
           )}
         />
       </SliderPrimitive.Track>
-      {/* Large invisible thumb — Radix hit target; must be big enough for thumbs */}
       <SliderPrimitive.Thumb className="block size-11 opacity-0" />
     </SliderPrimitive.Root>
   );

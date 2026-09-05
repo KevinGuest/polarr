@@ -39,6 +39,7 @@ class BridgeViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
         bridge?.registerPluginInstance(PolarrOfflinePlugin())
+        bridge?.registerPluginInstance(PolarrVolumePlugin())
         let script = WKUserScript(
             source: Self.lockScript,
             injectionTime: .atDocumentStart,

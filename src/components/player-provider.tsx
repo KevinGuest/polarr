@@ -17,6 +17,12 @@ import {
   setMediaSessionPositionState,
   updateMediaSessionMetadata,
 } from "@/lib/media-session";
+import {
+  readSystemVolume,
+  subscribeSystemVolume,
+  usesSystemVolume,
+  writeSystemVolume,
+} from "@/lib/ios-system-volume";
 import { primaryArtistName } from "@/lib/track-match";
 import { pushRecentPlayedTrack } from "@/lib/recent-searches";
 import { formatDuration, titleLooksExplicit } from "@/lib/utils";
@@ -524,6 +530,44 @@ function sameStreamUrl(a: string, b: string): boolean {
   return Boolean(a) && Boolean(b) && streamUrlKey(a) === streamUrlKey(b);
 }
 
+/** Swap mediaTicket on an existing element without treating it as a new track. */
+function restampAudioTicket(audio: HTMLAudioElement): boolean {
+  if (!isNativeClient() || !audio.src) return false;
+  const ticket = window.__POLARR_NATIVE_CLIENT__?.mediaTicket;
+  if (!ticket) return false;
+  try {
+    const url = new URL(audio.src);
+    if (!/\/api\/(stream|live)\//.test(url.pathname)) return false;
+    if (url.searchParams.get("mediaTicket") === ticket) return false;
+    const resumeAt = audio.currentTime || 0;
+    const wasPlaying = !audio.paused;
+    url.searchParams.set("mediaTicket", ticket);
+    audio.src = url.toString();
+    const seekTo = () => {
+      try {
+        if (resumeAt > 0.25) audio.currentTime = resumeAt;
+      } catch {
+        /* ignore */
+      }
+    };
+    audio.addEventListener("loadedmetadata", seekTo, { once: true });
+    audio.addEventListener("canplay", seekTo, { once: true });
+    if (wasPlaying) void safePlay(audio).then(() => seekTo());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function finiteDuration(...values: Array<number | null | undefined>): number {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+  return 0;
+}
+
 /** Apply a new media URL; no-op if the element already has the same stream. */
 function setAudioSrc(audio: HTMLAudioElement, src: string, force = false) {
   if (!force && audio.src && sameStreamUrl(audio.src, src)) return false;
@@ -806,7 +850,13 @@ function prefetchStream(track: PlayerTrack | null | undefined) {
   }
 
   const src = audioSrcFor(track);
-  if (!src.startsWith("/api/stream/")) return;
+  let pathname = src;
+  try {
+    pathname = new URL(src, window.location.origin).pathname;
+  } catch {
+    /* keep */
+  }
+  if (!pathname.includes("/api/stream/")) return;
   void fetch(src, {
     headers: { Range: "bytes=0-262143" },
     credentials: "same-origin",
@@ -1036,7 +1086,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const mix = audioRef.current;
     const inst = instAudioRef.current;
     if (!mix) return;
-    const vol = volumeRef.current;
+    // On iOS, hardware volume is separate — keep element gain full.
+    const vol = usesSystemVolume() ? 1 : volumeRef.current;
     const level = vocalLevelRef.current;
     const settingsGain = volumeLevelGain(
       playbackSettingsRef.current.volumeLevel,
@@ -1919,8 +1970,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const onMeta = () => {
       const audio = audioRef.current;
       if (!audio || !isOwner()) return;
-      setDuration(audio.duration || 0);
-      durationRef.current = audio.duration || 0;
+      const next = finiteDuration(
+        audio.duration,
+        trackRef.current?.duration,
+        durationRef.current,
+      );
+      durationRef.current = next;
+      setDuration(next);
     };
     const onEnded = () => {
       const audio = audioRef.current;
@@ -1998,48 +2054,76 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       })();
     };
 
-    /** 410 Gone / stale live URL / ban rewrite — re-mint session and continue. */
+    /** Stale ticket / live URL / ban rewrite — recover without always reminting. */
     let liveRecovering = false;
+    let lastErrorAt = 0;
     const onMediaError = () => {
       const audio = audioRef.current;
       if (!audio || !isOwner() || liveRecovering) return;
       const current = trackRef.current;
       if (!current) return;
+      const now = Date.now();
+      if (now - lastErrorAt < 1500) return;
+      lastErrorAt = now;
       liveRecovering = true;
-      const resumeAt = audio.currentTime || progressRef.current || 0;
+      const resumeAt = Math.max(progressRef.current || 0, audio.currentTime || 0);
       const wantPlay = playingRef.current || !audio.paused;
       void (async () => {
         try {
+          // Most common iOS failure: mediaTicket expired while src stayed put.
+          if (isNativeClient()) {
+            await ensureNativeMediaTicket();
+            if (restampAudioTicket(audio)) {
+              const seekTo = () => {
+                try {
+                  if (resumeAt > 0.25) audio.currentTime = resumeAt;
+                } catch {
+                  /* ignore */
+                }
+              };
+              seekTo();
+              audio.addEventListener("loadedmetadata", seekTo, { once: true });
+              if (wantPlay) {
+                await waitForCanPlay(audio, () => trackRef.current?.id === current.id, 8_000);
+                await safePlay(audio);
+                seekTo();
+              }
+              progressRef.current = resumeAt;
+              setProgress(resumeAt);
+              return;
+            }
+          }
+
           const fromId = current.id;
           const ready = await resolveIfNeeded(
             {
               ...current,
               streamUrl: null,
             },
-            { force: true },
+            { force: isEphemeralTrack(current) },
           );
           if (trackRef.current?.id !== fromId && trackRef.current?.id !== ready.id) {
             return;
           }
-          // Nothing usable changed (missing file / ban) — don't loop
-          if (
-            sameStreamUrl(audioSrcFor(ready), audioSrcFor(current)) &&
-            ready.id === fromId
-          ) {
-            return;
+          const nextSrc = audioSrcFor(ready);
+          // Same stream key — restamp/force only if the element is dead.
+          if (sameStreamUrl(audio.src, nextSrc) && ready.id === fromId) {
+            if (!audio.error) return;
+            setAudioSrc(audio, nextSrc, true);
+          } else {
+            if (!ready.streamUrl && isEphemeralTrack(ready)) return;
+            const nextQ = replaceInQueue(queueRef.current, fromId, ready);
+            queueRef.current = nextQ;
+            setQueue(nextQ);
+            trackRef.current = ready;
+            setTrack(ready);
+            setAudioSrc(audio, nextSrc, true);
           }
-          if (!ready.streamUrl && isEphemeralTrack(ready)) return;
-          const nextQ = replaceInQueue(queueRef.current, fromId, ready);
-          queueRef.current = nextQ;
-          setQueue(nextQ);
-          trackRef.current = ready;
-          setTrack(ready);
           const el = audioRef.current;
           if (!el) return;
-          setAudioSrc(el, audioSrcFor(ready));
           const seekTo = () => {
             try {
-              if (resumeAt > 0) el.currentTime = resumeAt;
+              if (resumeAt > 0.25) el.currentTime = resumeAt;
             } catch {
               /* ignore */
             }
@@ -2060,9 +2144,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
               setPlaying(true);
             }
           }
+          progressRef.current = resumeAt;
+          setProgress(resumeAt);
           publishRef.current({
-            track: ready,
-            queue: nextQ,
+            track: trackRef.current,
+            queue: queueRef.current,
             playing: wantPlay,
             progress: resumeAt,
             ownerId: tabIdRef.current,
@@ -2190,20 +2276,42 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setQueue(nextQ);
         trackRef.current = ready;
         setTrack(ready);
+        const catalogDuration = finiteDuration(
+          ready.duration,
+          stored.duration,
+          durationRef.current,
+        );
+        if (catalogDuration > 0) {
+          durationRef.current = catalogDuration;
+          setDuration(catalogDuration);
+        }
         // Only prime local audio when no other tab is already playing.
         if (!remoteOwner) {
-          audio.src = audioSrcFor(ready);
-          const seekTo = () => {
-            try {
-              if (Number.isFinite(savedProgress) && savedProgress > 0) {
-                audio.currentTime = savedProgress;
-              }
-            } catch {
-              /* not seekable yet */
+          void (async () => {
+            if (isNativeClient()) {
+              await ensureNativeMediaTicket().catch(() => null);
             }
-          };
-          seekTo();
-          audio.addEventListener("loadedmetadata", seekTo, { once: true });
+            if (
+              trackRef.current &&
+              trackRef.current.id !== hydrateId &&
+              trackRef.current.title !== stored.track!.title
+            ) {
+              return;
+            }
+            setAudioSrc(audio, audioSrcFor(ready));
+            const seekTo = () => {
+              try {
+                if (Number.isFinite(savedProgress) && savedProgress > 0) {
+                  audio.currentTime = savedProgress;
+                }
+              } catch {
+                /* not seekable yet */
+              }
+            };
+            seekTo();
+            audio.addEventListener("loadedmetadata", seekTo, { once: true });
+            audio.addEventListener("canplay", seekTo, { once: true });
+          })();
         }
         // Do not writeStored({ playing: false }) — that used to race the owner.
       };
@@ -3024,18 +3132,41 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (!currentGen()) return;
-      setAudioSrc(audio, audioSrcFor(ready));
-      const seekTo = () => {
-        try {
-          if (Number.isFinite(resumeAt) && resumeAt > 0) {
-            audio.currentTime = resumeAt;
+      const nextSrc = audioSrcFor(ready);
+      const alreadyReady =
+        Boolean(audio.src) &&
+        sameStreamUrl(audio.src, nextSrc) &&
+        !audio.error &&
+        audioLooksPlayable(audio);
+
+      if (!alreadyReady) {
+        if (isNativeClient() && !window.__POLARR_NATIVE_CLIENT__?.mediaTicket) {
+          await ensureNativeMediaTicket().catch(() => null);
+          if (!currentGen()) return;
+        }
+        setAudioSrc(audio, audioSrcFor(ready));
+        const seekTo = () => {
+          try {
+            if (Number.isFinite(resumeAt) && resumeAt > 0) {
+              audio.currentTime = resumeAt;
+            }
+          } catch {
+            /* ignore */
           }
+        };
+        seekTo();
+        audio.addEventListener("loadedmetadata", seekTo, { once: true });
+      } else if (
+        Number.isFinite(resumeAt) &&
+        resumeAt > 0.5 &&
+        Math.abs(audio.currentTime - resumeAt) > 1.25
+      ) {
+        try {
+          audio.currentTime = resumeAt;
         } catch {
           /* ignore */
         }
-      };
-      seekTo();
-      audio.addEventListener("loadedmetadata", seekTo, { once: true });
+      }
 
       let ok = await playBoth();
       if (!ok && currentGen()) {
@@ -3058,8 +3189,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setQueue(nextQ);
         trackRef.current = refreshed;
         setTrack(refreshed);
-        setAudioSrc(audio, audioSrcFor(refreshed));
-        seekTo();
+        setAudioSrc(audio, audioSrcFor(refreshed), true);
+        try {
+          if (resumeAt > 0) audio.currentTime = resumeAt;
+        } catch {
+          /* ignore */
+        }
         ok = await playBoth();
         if (!ok && currentGen()) {
           await waitForCanPlay(audio, currentGen, 8_000);
@@ -3083,8 +3218,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const seek = useCallback(
     (ratio: number) => {
-      if (!duration) return;
-      const next = Math.max(0, Math.min(1, ratio)) * duration;
+      const audio = audioRef.current;
+      const total = finiteDuration(
+        duration,
+        audio?.duration,
+        trackRef.current?.duration,
+        durationRef.current,
+      );
+      if (!total) return;
+      const next = Math.max(0, Math.min(1, ratio)) * total;
       if (followingRemoteRef.current) {
         sendConnectCommandRef.current({
           id: newCommandId(),
@@ -3095,7 +3237,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         progressRef.current = next;
         return;
       }
-      const audio = audioRef.current;
       if (!audio) return;
       const wasPlaying = playingRef.current;
       ownerIdRef.current = tabIdRef.current;
@@ -3119,6 +3260,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
       setProgress(next);
       progressRef.current = next;
+      if (total > 0 && durationRef.current !== total) {
+        durationRef.current = total;
+        setDuration(total);
+      }
       setPresenceRev((n) => n + 1);
       if (wasPlaying && audio.paused) {
         void playBoth().then((ok) => {
@@ -3146,7 +3291,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const next = Math.max(0, Math.min(1, v));
       setVolumeState(next);
       volumeRef.current = next;
-      applyMixVolumes();
+      if (usesSystemVolume()) {
+        // Keep element gain full; hardware/Control Center owns loudness.
+        if (audioRef.current) audioRef.current.volume = 1;
+        if (instAudioRef.current) {
+          /* mix volumes still apply relative karaoke gains against ref */
+        }
+        applyMixVolumes();
+        void writeSystemVolume(next);
+      } else {
+        applyMixVolumes();
+      }
       if (followingRemoteRef.current) {
         sendConnectCommandRef.current({
           id: newCommandId(),
@@ -3531,6 +3686,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!track || isRemotePlayback) return;
     const onTicket = () => {
+      const audio = audioRef.current;
+      if (audio && isOwner()) restampAudioTicket(audio);
       void updateMediaSessionMetadata({
         title: track.title,
         artist:
@@ -3541,7 +3698,29 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener(MEDIA_TICKET_UPDATED_EVENT, onTicket);
     return () => window.removeEventListener(MEDIA_TICKET_UPDATED_EVENT, onTicket);
-  }, [track, isRemotePlayback]);
+  }, [track, isRemotePlayback, isOwner]);
+
+  useEffect(() => {
+    if (!usesSystemVolume()) return;
+    let cancelled = false;
+    void readSystemVolume().then((v) => {
+      if (cancelled || v == null) return;
+      volumeRef.current = v;
+      setVolumeState(v);
+      if (audioRef.current) audioRef.current.volume = 1;
+      applyMixVolumes();
+    });
+    const unsub = subscribeSystemVolume((v) => {
+      volumeRef.current = v;
+      setVolumeState(v);
+      if (audioRef.current) audioRef.current.volume = 1;
+      applyMixVolumes();
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [applyMixVolumes]);
 
   useEffect(() => {
     if (!track || isRemotePlayback) {

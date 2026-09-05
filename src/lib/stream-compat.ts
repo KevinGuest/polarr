@@ -13,6 +13,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -85,7 +86,8 @@ function attachAbort(signal: AbortSignal | null | undefined, kill: () => void) {
 }
 
 /**
- * Live AAC ADTS pipe for progressive playback (lossy qualities).
+ * Live AAC ADTS pipe — fallback only when a seekable M4A encode fails.
+ * Progressive ADTS cannot scrub (Accept-Ranges: none).
  */
 export function startCompatAacStream(
   filePath: string,
@@ -143,6 +145,121 @@ export function startCompatAacStream(
       "Content-Type": "audio/aac",
       "Cache-Control": "private, no-store",
       "Accept-Ranges": "none",
+      "X-Polarr-Stream-Quality": quality,
+    },
+  });
+}
+
+function compatCachePath(filePath: string, quality: StreamQuality): string | null {
+  try {
+    const st = fs.statSync(filePath);
+    const key = createHash("sha1")
+      .update(
+        `${filePath}\0${quality}\0${st.mtimeMs}\0${st.size}\0m4a-v2`,
+      )
+      .digest("hex")
+      .slice(0, 20);
+    return path.join(os.tmpdir(), `polarr-compat-${key}.m4a`);
+  } catch {
+    return null;
+  }
+}
+
+/** Encode (or reuse) a seekable AAC/ALAC M4A for iOS HTMLAudio scrubbing. */
+async function ensureCompatM4a(
+  filePath: string,
+  quality: StreamQuality,
+  signal?: AbortSignal | null,
+): Promise<{ path: string; size: number } | null> {
+  const out = compatCachePath(filePath, quality);
+  if (!out) return null;
+  try {
+    if (fs.existsSync(out)) {
+      const st = fs.statSync(out);
+      if (st.isFile() && st.size > 1024) return { path: out, size: st.size };
+    }
+  } catch {
+    /* re-encode */
+  }
+
+  const argsTail =
+    quality === "lossless"
+      ? ["-c:a", "alac", "-movflags", "+faststart", "-f", "ipod"]
+      : [
+          "-c:a",
+          "aac",
+          "-b:a",
+          aacBitrate(quality),
+          "-movflags",
+          "+faststart",
+          "-f",
+          "ipod",
+        ];
+
+  const encoded = await encodeTempFile(filePath, argsTail, "m4a", signal);
+  if (!encoded) return null;
+  try {
+    fs.renameSync(encoded.path, out);
+    const st = fs.statSync(out);
+    return { path: out, size: st.size };
+  } catch {
+    return encoded;
+  }
+}
+
+/** Byte-range response so HTMLMediaElement can seek. */
+export function serveCompatRangedFile(
+  req: Request,
+  filePath: string,
+  size: number,
+  contentType: string,
+  quality: StreamQuality,
+): Response {
+  const cacheControl = "private, max-age=3600";
+  const range = req.headers.get("range");
+  if (range) {
+    const match = /bytes=(\d+)-(\d*)/.exec(range);
+    if (!match) {
+      return new Response("Invalid range", { status: 416 });
+    }
+    const start = Number(match[1]);
+    const end = match[2] ? Number(match[2]) : size - 1;
+    if (
+      !Number.isFinite(start) ||
+      !Number.isFinite(end) ||
+      start < 0 ||
+      start >= size ||
+      end >= size ||
+      end < start
+    ) {
+      return new Response("Range not satisfiable", {
+        status: 416,
+        headers: { "Content-Range": `bytes */${size}` },
+      });
+    }
+    const chunk = end - start + 1;
+    const stream = fs.createReadStream(filePath, { start, end });
+    return new Response(stream as unknown as BodyInit, {
+      status: 206,
+      headers: {
+        "Content-Range": `bytes ${start}-${end}/${size}`,
+        "Accept-Ranges": "bytes",
+        "Content-Length": String(chunk),
+        "Content-Type": contentType,
+        "Cache-Control": cacheControl,
+        "X-Polarr-Stream-Quality": quality,
+      },
+    });
+  }
+
+  const stream = fs.createReadStream(filePath);
+  return new Response(stream as unknown as BodyInit, {
+    status: 200,
+    headers: {
+      "Content-Length": String(size),
+      "Content-Type": contentType,
+      "Accept-Ranges": "bytes",
+      "Cache-Control": cacheControl,
       "X-Polarr-Stream-Quality": quality,
     },
   });
@@ -259,40 +376,60 @@ export async function startCompatEncodedDownload(
 ): Promise<Response | null> {
   if (!IOS_TRANSCODE_EXTS.has(ext.toLowerCase())) return null;
 
-  if (quality === "lossless") {
-    // ALAC in M4A — true lossless that iOS can play.
-    const tmp = await encodeTempFile(
-      filePath,
-      ["-c:a", "alac", "-f", "ipod"],
-      "m4a",
+  const cached = await ensureCompatM4a(filePath, quality, signal);
+  if (!cached) return null;
+  // Copy to a disposable temp so download cleanup can unlink freely.
+  const tmp = path.join(
+    os.tmpdir(),
+    `polarr-dl-${process.pid}-${Date.now()}.m4a`,
+  );
+  try {
+    fs.copyFileSync(cached.path, tmp);
+  } catch {
+    return serveTempFile(
+      cached,
+      "audio/mp4",
+      quality,
+      "track.m4a",
       signal,
     );
-    if (!tmp) return null;
-    return serveTempFile(tmp, "audio/mp4", quality, "track.m4a", signal);
   }
-
-  const tmp = await encodeTempFile(
-    filePath,
-    ["-c:a", "aac", "-b:a", aacBitrate(quality), "-f", "adts"],
-    "aac",
+  let size = 0;
+  try {
+    size = fs.statSync(tmp).size;
+  } catch {
+    return null;
+  }
+  return serveTempFile(
+    { path: tmp, size },
+    "audio/mp4",
+    quality,
+    "track.m4a",
     signal,
   );
-  if (!tmp) return null;
-  return serveTempFile(tmp, "audio/aac", quality, "track.aac", signal);
 }
 
 /**
- * Progressive play: AAC pipe for lossy; ALAC temp file for lossless.
+ * Progressive play: seekable AAC/ALAC M4A (byte ranges). Falls back to ADTS
+ * pipe only if encode fails — that path cannot scrub.
  */
 export async function startCompatPlayback(
   filePath: string,
   ext: string,
   quality: StreamQuality,
-  signal?: AbortSignal | null,
+  req: Request,
 ): Promise<Response | null> {
   if (!IOS_TRANSCODE_EXTS.has(ext.toLowerCase())) return null;
-  if (quality === "lossless") {
-    return startCompatEncodedDownload(filePath, ext, quality, signal);
+  const cached = await ensureCompatM4a(filePath, quality, req.signal);
+  if (cached) {
+    return serveCompatRangedFile(
+      req,
+      cached.path,
+      cached.size,
+      "audio/mp4",
+      quality,
+    );
   }
-  return startCompatAacStream(filePath, ext, quality, signal);
+  if (quality === "lossless") return null;
+  return startCompatAacStream(filePath, ext, quality, req.signal);
 }

@@ -97,9 +97,7 @@ export function ArtistClient() {
     const qs = new URLSearchParams({ name });
     if (foreignArtistId) qs.set("foreignArtistId", foreignArtistId);
     if (imageParam) qs.set("image", imageParam);
-    void fetch(`/api/artist?${qs.toString()}`, {
-      cache: "no-store",
-    })
+    void fetch(`/api/artist?${qs.toString()}`)
       .then((r) => r.json())
       .then((data) => {
         setTracks(data.tracks || []);

@@ -213,7 +213,8 @@ function wireSetup() {
 }
 
 async function bootstrap() {
-  await bootstrapNativeChrome();
+  // Don't block the splash→UI handoff on status bar chrome.
+  void bootstrapNativeChrome();
 
   const params = new URLSearchParams(window.location.search);
   if (params.get("reset") === "1" || window.location.hash === "#reset") {

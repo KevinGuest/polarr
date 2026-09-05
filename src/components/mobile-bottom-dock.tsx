@@ -171,10 +171,11 @@ export function MobileBottomDock() {
               <Link
                 key={tab.href}
                 href={tab.href}
+                aria-label={tab.label}
                 aria-current={active ? "page" : undefined}
                 onClick={dismiss}
                 className={cn(
-                  "flex min-h-[44px] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-0.5 py-1 text-[11px] font-medium transition-colors",
+                  "flex min-h-[44px] min-w-[44px] flex-1 items-center justify-center px-0.5 py-1 transition-colors",
                   active
                     ? "text-foreground"
                     : "text-muted-foreground hover:text-foreground",
@@ -184,7 +185,6 @@ export function MobileBottomDock() {
                   className="size-5"
                   strokeWidth={active ? 2.25 : 1.75}
                 />
-                <span className="max-w-full truncate">{tab.label}</span>
               </Link>
             );
           })}

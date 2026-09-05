@@ -125,9 +125,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
     if (foreignAlbumId) qs.set("foreignAlbumId", foreignAlbumId);
     if (lidarrAlbumId) qs.set("lidarrAlbumId", lidarrAlbumId);
 
-    const res = await fetch(`/api/album?${qs.toString()}`, {
-      cache: "no-store",
-    });
+    const res = await fetch(`/api/album?${qs.toString()}`);
     const data = await res.json();
     if (!res.ok) {
       setError(data.error || "Failed to load album");

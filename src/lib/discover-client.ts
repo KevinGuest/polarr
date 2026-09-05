@@ -32,7 +32,11 @@ export async function fetchDiscoverFeed(opts?: {
 
   inflight = (async () => {
     try {
-      const res = await fetch("/api/discover");
+      const res = await fetch("/api/discover", {
+        headers: opts?.force
+          ? { "x-polarr-cache": "bypass" }
+          : undefined,
+      });
       if (!res.ok) {
         throw new Error(`discover ${res.status}`);
       }

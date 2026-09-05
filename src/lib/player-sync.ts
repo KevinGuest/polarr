@@ -63,6 +63,8 @@ type UserSession = {
   devices: Map<string, ConnectDevice>;
   state: ConnectPlaybackState | null;
   commands: Map<string, ConnectCommand[]>;
+  /** Remote volume tweak awaiting owner apply — shields against stale heartbeats. */
+  pendingVolume: { volume: number; at: number } | null;
 };
 
 const g = globalThis as typeof globalThis & {
@@ -82,6 +84,7 @@ function sessionFor(userId: string): UserSession {
       devices: new Map(),
       state: null,
       commands: new Map(),
+      pendingVolume: null,
     };
     sessions.set(userId, session);
   }
@@ -145,13 +148,25 @@ export function publishConnectState(
   const session = sessionFor(userId);
   const now = Date.now();
   prune(session, now);
+
+  let volume = Number.isFinite(state.volume) ? state.volume : 0.8;
+  const pending = session.pendingVolume;
+  if (pending && now - pending.at < 8_000) {
+    if (Math.abs(volume - pending.volume) < 0.02) {
+      session.pendingVolume = null;
+    } else {
+      // Owner heartbeat still has pre-command volume — keep the remote tweak.
+      volume = pending.volume;
+    }
+  }
+
   const next: ConnectPlaybackState = {
     track: state.track,
     queue: Array.isArray(state.queue) ? state.queue.slice(0, 80) : [],
     playing: Boolean(state.playing),
     progress: Number.isFinite(state.progress) ? state.progress : 0,
     duration: Number.isFinite(state.duration) ? state.duration : 0,
-    volume: Number.isFinite(state.volume) ? state.volume : 0.8,
+    volume,
     shuffle: Boolean(state.shuffle),
     ownerId: deviceId,
     updatedAt: now,
@@ -169,6 +184,19 @@ export function enqueueConnectCommand(
   prune(session);
   if (command.type === "become-owner" || command.type === "release") {
     return;
+  }
+
+  if (command.type === "volume") {
+    const volume = Math.max(0, Math.min(1, command.volume));
+    const now = Date.now();
+    if (session.state) {
+      session.state = {
+        ...session.state,
+        volume,
+        updatedAt: now,
+      };
+    }
+    session.pendingVolume = { volume, at: now };
   }
 
   if (command.type === "play-track") {

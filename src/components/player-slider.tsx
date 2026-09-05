@@ -24,7 +24,9 @@ export function PlayerSlider({
   tone = "on-dark",
 }: PlayerSliderProps) {
   const [active, setActive] = useState(false);
-  const clamped = Math.min(1, Math.max(0, value));
+  /** Hold the scrub value so live timeupdate doesn't yank the thumb mid-drag. */
+  const [scrub, setScrub] = useState<number | null>(null);
+  const clamped = Math.min(1, Math.max(0, scrub ?? value));
   const sliderValue =
     variant === "progress"
       ? Math.round(clamped * 1000) / 10
@@ -34,12 +36,19 @@ export function PlayerSlider({
 
   useEffect(() => {
     if (!active) return;
-    const end = () => setActive(false);
+    const end = () => {
+      setActive(false);
+      setScrub(null);
+    };
     window.addEventListener("pointerup", end);
     window.addEventListener("pointercancel", end);
+    window.addEventListener("touchend", end);
+    window.addEventListener("touchcancel", end);
     return () => {
       window.removeEventListener("pointerup", end);
       window.removeEventListener("pointercancel", end);
+      window.removeEventListener("touchend", end);
+      window.removeEventListener("touchcancel", end);
     };
   }, [active]);
 
@@ -49,12 +58,26 @@ export function PlayerSlider({
       onValueChange={(vals) => {
         const next = vals[0];
         if (typeof next !== "number") return;
-        onChange(next / 100);
+        const ratio = next / 100;
+        setScrub(ratio);
+        onChange(ratio);
+      }}
+      onValueCommit={() => {
+        setActive(false);
+        setScrub(null);
       }}
       max={100}
       step={variant === "progress" ? 0.1 : 1}
       aria-label={ariaLabel}
-      onPointerDown={() => setActive(true)}
+      onPointerDown={(event) => {
+        // Keep sheet dismiss / scroll gestures from stealing the scrub.
+        event.stopPropagation();
+        setActive(true);
+      }}
+      onTouchStart={(event) => {
+        event.stopPropagation();
+        setActive(true);
+      }}
       className={cn(
         "relative flex w-full touch-none select-none items-center py-3",
         className,
@@ -80,8 +103,8 @@ export function PlayerSlider({
           )}
         />
       </SliderPrimitive.Track>
-      {/* Invisible thumb — required by Radix for drag hit-testing; never shown */}
-      <SliderPrimitive.Thumb className="block size-5 opacity-0" />
+      {/* Large invisible thumb — Radix hit target; must be big enough for thumbs */}
+      <SliderPrimitive.Thumb className="block size-11 opacity-0" />
     </SliderPrimitive.Root>
   );
 }

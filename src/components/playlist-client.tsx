@@ -405,7 +405,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
     try {
       const res = await fetch(
         `/api/playlists?id=${encodeURIComponent(playlistId)}`,
-        { cache: "no-store", credentials: "same-origin" },
+        { credentials: "same-origin" },
       );
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.playlist) {

@@ -235,6 +235,54 @@ async function cachedResponse(url: string, token: string | null): Promise<Respon
   });
 }
 
+/** Prefer IndexedDB while online; use `cache: "no-store"` / `reload` or header to force network. */
+function shouldBypassCache(init?: RequestInit, headers?: Headers): boolean {
+  if (init?.cache === "no-store" || init?.cache === "reload") return true;
+  const value = (headers || new Headers(init?.headers)).get("x-polarr-cache");
+  return value === "bypass";
+}
+
+function revalidateInBackground(
+  url: string,
+  token: string | null,
+  init: RequestInit | undefined,
+  headers: Headers,
+  method: string,
+  body: string,
+) {
+  void (async () => {
+    try {
+      const freshHeaders = new Headers(headers);
+      freshHeaders.set("x-polarr-cache", "bypass");
+      const response = await serverFetch(url, {
+        ...init,
+        method,
+        headers: freshHeaders,
+        body: body || undefined,
+      });
+      if (method === "GET") cacheResponse(url, token, response);
+      if (response.status === 401 && token) clearNativeSessionToken();
+      if (response.ok) {
+        // Seed discover module cache so home can apply without another wait.
+        try {
+          const path = new URL(url).pathname;
+          if (path === "/api/discover") {
+            const data = await response.clone().json();
+            const { seedDiscoverCache } = await import("../../src/lib/discover-client");
+            seedDiscoverCache(data);
+          }
+        } catch {
+          /* ignore */
+        }
+        const { emitApiRevalidated } = await import("../../src/lib/ui-events");
+        emitApiRevalidated(url);
+      }
+    } catch {
+      // Stale cache already served; keep it.
+    }
+  })();
+}
+
 function artworkKey(url: string) {
   const parsed = new URL(url);
   parsed.searchParams.delete("mediaTicket");
@@ -665,6 +713,19 @@ export async function installNativeRuntime(serverUrl: string, platform: NativePl
 
       if (method !== "GET" && method !== "HEAD" && navigator.onLine) await flushMutationQueue();
       try {
+        // Spotify-style: paint from IndexedDB immediately, refresh in background.
+        if (method === "GET" && sameServer && !shouldBypassCache(init, headers)) {
+          const stale = await cachedResponse(url, token);
+          if (stale) {
+            const cachedAt = Number(stale.headers.get("X-Polarr-Cached-At") || "0");
+            const ageMs = Date.now() - cachedAt;
+            // Skip revalidate when fresh to avoid refresh→event→refetch loops.
+            if (navigator.onLine && ageMs >= 30_000) {
+              revalidateInBackground(url, token, init, headers, method, body);
+            }
+            return decorateJson(stale, token);
+          }
+        }
         const response = sameServer
           ? await serverFetch(url, { ...init, method, headers, body: body || undefined })
           : await originalFetch(rewritten, { ...init, headers });

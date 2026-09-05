@@ -66,7 +66,7 @@ const albumResponseCache = new Map<
   string,
   { at: number; payload: AlbumPayload }
 >();
-const ALBUM_CACHE_TTL_MS = 2 * 60 * 1000;
+const ALBUM_CACHE_TTL_MS = 30 * 60 * 1000;
 
 function coverFromAlbum(a: LidarrAlbum): string | undefined {
   return coverFrom(a.images);

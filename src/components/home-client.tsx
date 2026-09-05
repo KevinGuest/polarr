@@ -23,7 +23,7 @@ import type {
   DiscoverPayload,
   DiscoverReleaseCard,
 } from "@/lib/discover-types";
-import { LISTEN_CREDITED_EVENT } from "@/lib/ui-events";
+import { LISTEN_CREDITED_EVENT, API_REVALIDATED_EVENT } from "@/lib/ui-events";
 import { OTHERS_LISTENING_POLL_MS } from "@/lib/listen";
 import { formatTrackArtistLine } from "@/lib/utils";
 
@@ -218,11 +218,31 @@ export function HomeClient({
     const onVisible = () => {
       if (document.visibilityState === "visible") void loadOthers();
     };
+    const onApiRevalidated = (event: Event) => {
+      const url = (event as CustomEvent<{ url?: string }>).detail?.url || "";
+      try {
+        if (new URL(url).pathname !== "/api/discover") return;
+      } catch {
+        return;
+      }
+      const fresh = peekDiscoverCache();
+      if (!fresh) return;
+      applyDiscover(fresh, {
+        setCatalog,
+        setMoreFrom,
+        setReleases,
+        setArtists,
+        setLidarrError,
+      });
+      setLoading(false);
+    };
     window.addEventListener(LISTEN_CREDITED_EVENT, onListen);
+    window.addEventListener(API_REVALIDATED_EVENT, onApiRevalidated);
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.clearInterval(t);
       window.removeEventListener(LISTEN_CREDITED_EVENT, onListen);
+      window.removeEventListener(API_REVALIDATED_EVENT, onApiRevalidated);
       document.removeEventListener("visibilitychange", onVisible);
     };
     // intentionally once on mount

@@ -11,6 +11,12 @@ import {
 } from "react";
 import { usePathname } from "next/navigation";
 import { nativeAssetUrl, ensureNativeMediaTicket, isNativeClient, nativeClientPlatform } from "@/lib/native-client";
+import {
+  bindMediaSessionActions,
+  setMediaSessionPlaybackState,
+  setMediaSessionPositionState,
+  updateMediaSessionMetadata,
+} from "@/lib/media-session";
 import { primaryArtistName } from "@/lib/track-match";
 import { pushRecentPlayedTrack } from "@/lib/recent-searches";
 import { formatDuration, titleLooksExplicit } from "@/lib/utils";
@@ -499,10 +505,28 @@ function safePlay(audio: HTMLAudioElement): Promise<boolean> {
   }
 }
 
-/** Apply a new media URL; no-op if the element already has it. */
-function setAudioSrc(audio: HTMLAudioElement, src: string) {
-  const abs = new URL(src, window.location.origin).href;
-  if (audio.src === abs) return false;
+/** Compare stream URLs ignoring volatile auth tickets (mediaTicket rotation). */
+function streamUrlKey(url: string): string {
+  try {
+    const parsed = new URL(
+      url,
+      typeof window !== "undefined" ? window.location.origin : "https://local.invalid",
+    );
+    parsed.searchParams.delete("mediaTicket");
+    parsed.hash = "";
+    return `${parsed.origin}${parsed.pathname}?${parsed.searchParams.toString()}`;
+  } catch {
+    return url;
+  }
+}
+
+function sameStreamUrl(a: string, b: string): boolean {
+  return Boolean(a) && Boolean(b) && streamUrlKey(a) === streamUrlKey(b);
+}
+
+/** Apply a new media URL; no-op if the element already has the same stream. */
+function setAudioSrc(audio: HTMLAudioElement, src: string, force = false) {
+  if (!force && audio.src && sameStreamUrl(audio.src, src)) return false;
   audio.pause();
   audio.src = src;
   // Force the element to abandon any in-flight fetch/play cleanly.
@@ -512,6 +536,50 @@ function setAudioSrc(audio: HTMLAudioElement, src: string) {
     /* ignore */
   }
   return true;
+}
+
+function seekAudioTo(audio: HTMLAudioElement, seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0.25) return;
+  try {
+    if (Math.abs(audio.currentTime - seconds) > 0.35) {
+      audio.currentTime = seconds;
+    }
+  } catch {
+    /* not seekable yet */
+  }
+}
+
+/** Keep retrying seek across load/play races; stop once the playhead lands. */
+function armResumeSeek(audio: HTMLAudioElement, resumeAt: number): () => void {
+  let finished = false;
+  const events = ["loadedmetadata", "loadeddata", "canplay"] as const;
+  const timers: number[] = [];
+
+  const cleanup = () => {
+    if (finished) return;
+    finished = true;
+    for (const ev of events) audio.removeEventListener(ev, seek);
+    for (const timer of timers) window.clearTimeout(timer);
+  };
+
+  const seek = () => {
+    if (finished) return;
+    seekAudioTo(audio, resumeAt);
+    if (
+      audio.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+      Math.abs(audio.currentTime - resumeAt) < 0.85
+    ) {
+      cleanup();
+    }
+  };
+
+  for (const ev of events) audio.addEventListener(ev, seek);
+  seek();
+  for (const ms of [80, 200, 500, 1200]) {
+    timers.push(window.setTimeout(seek, ms));
+  }
+  timers.push(window.setTimeout(cleanup, 2_500));
+  return cleanup;
 }
 
 /** Wait until the element can start playback. Timeout / error → false. */
@@ -846,6 +914,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     () => {},
   );
   const lastPushedStateAtRef = useRef(0);
+  /** Follower UI clock: progress at server `updatedAt`, then extrapolate while playing. */
+  const remoteEpochRef = useRef<{
+    progress: number;
+    at: number;
+    playing: boolean;
+    trackId: string | null;
+  } | null>(null);
+  const lastRemoteUpdatedAtRef = useRef(0);
 
   const [track, setTrack] = useState<PlayerTrack | null>(null);
   const [queue, setQueue] = useState<PlayerTrack[]>([]);
@@ -962,6 +1038,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (!mix) return;
     const vol = volumeRef.current;
     const level = vocalLevelRef.current;
+    const settingsGain = volumeLevelGain(
+      playbackSettingsRef.current.volumeLevel,
+    );
+    const mixGraph =
+      effectsGraphsRef.current.find(
+        (graph) => graph.source.mediaElement === mix,
+      ) || null;
+    const instGraph = inst
+      ? effectsGraphsRef.current.find(
+          (graph) => graph.source.mediaElement === inst,
+        ) || null
+      : null;
+    // createMediaElementSource bypasses element.volume — drive Web Audio gain.
+    const webAudio =
+      Boolean(audioContextRef.current) &&
+      Boolean(mixGraph) &&
+      playbackNeedsWebAudio(playbackSettingsRef.current);
 
     // Full original while stem isn't confirmed playing
     const instUsable =
@@ -971,14 +1064,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       (level > 0.995 || (!inst!.paused && !inst!.ended));
 
     if (!instUsable) {
-      mix.volume = vol;
-      if (inst) inst.volume = 0;
+      if (webAudio && mixGraph) {
+        mix.volume = 1;
+        mixGraph.master.gain.value = vol * settingsGain;
+        if (inst) inst.volume = 1;
+        if (instGraph) instGraph.master.gain.value = 0;
+      } else {
+        mix.volume = vol;
+        if (inst) inst.volume = 0;
+      }
       return;
     }
 
     const theta = (1 - level) * 0.5 * Math.PI;
-    mix.volume = vol * Math.cos(theta);
-    inst!.volume = vol * Math.sin(theta);
+    if (webAudio && mixGraph) {
+      mix.volume = 1;
+      if (inst) inst.volume = 1;
+      mixGraph.master.gain.value = vol * settingsGain * Math.cos(theta);
+      if (instGraph) {
+        instGraph.master.gain.value = vol * settingsGain * Math.sin(theta);
+      }
+    } else {
+      mix.volume = vol * Math.cos(theta);
+      inst!.volume = vol * Math.sin(theta);
+    }
   }, []);
 
   /** Start instrumental bus; returns true only if playback actually started. */
@@ -1244,7 +1353,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (context && spareGraph) {
       spareGraph.master.gain.cancelScheduledValues(context.currentTime);
       spareGraph.master.gain.setValueAtTime(
-        volumeLevelGain(playbackSettingsRef.current.volumeLevel),
+        volumeLevelGain(playbackSettingsRef.current.volumeLevel) *
+          volumeRef.current,
         context.currentTime,
       );
     }
@@ -1259,6 +1369,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         configureEffectsGraph(graph, settings),
       );
       void applyOutputDevice(settings);
+      applyMixVolumes();
     };
     applySettings(readPlaybackSettings());
     const onSettings = (event: Event) => {
@@ -1268,7 +1379,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener(PLAYBACK_SETTINGS_EVENT, onSettings);
     return () =>
       window.removeEventListener(PLAYBACK_SETTINGS_EVENT, onSettings);
-  }, [applyOutputDevice, cancelTransition, configureEffectsGraph, ensureAudioEffects]);
+  }, [applyMixVolumes, applyOutputDevice, cancelTransition, configureEffectsGraph, ensureAudioEffects]);
 
   useEffect(() => {
     shuffleRef.current = shuffle;
@@ -1479,7 +1590,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
       const oldGraph = graphFor(oldAudio);
       const warmGraph = graphFor(warmAudio);
-      const baseGain = volumeLevelGain(settings.volumeLevel);
+      const baseGain =
+        volumeLevelGain(settings.volumeLevel) * volumeRef.current;
       if (context && oldGraph && warmGraph) {
         const now = context.currentTime;
         oldGraph.master.gain.cancelScheduledValues(now);
@@ -1750,14 +1862,29 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     queueRef.current = payload.queue;
     trackRef.current = payload.track;
     playingRef.current = payload.playing;
-    progressRef.current = payload.progress;
     durationRef.current = payload.duration;
     volumeRef.current = payload.volume;
+
+    const epochAt = payload.updatedAt || Date.now();
+    remoteEpochRef.current = {
+      progress: payload.progress,
+      at: epochAt,
+      playing: payload.playing,
+      trackId: payload.track?.id ?? null,
+    };
+    const displayProgress = payload.playing
+      ? payload.progress + Math.max(0, (Date.now() - epochAt) / 1000)
+      : payload.progress;
+    const capped =
+      payload.duration > 0
+        ? Math.min(payload.duration, displayProgress)
+        : displayProgress;
+    progressRef.current = capped;
 
     setQueue(payload.queue);
     setTrack(payload.track);
     setPlaying(payload.playing);
-    setProgress(payload.progress);
+    setProgress(capped);
     setDuration(payload.duration);
     setVolumeState(payload.volume);
     if (typeof payload.shuffle === "boolean") {
@@ -1895,7 +2022,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             return;
           }
           // Nothing usable changed (missing file / ban) — don't loop
-          if (audioSrcFor(ready) === audioSrcFor(current) && ready.id === fromId) {
+          if (
+            sameStreamUrl(audioSrcFor(ready), audioSrcFor(current)) &&
+            ready.id === fromId
+          ) {
             return;
           }
           if (!ready.streamUrl && isEphemeralTrack(ready)) return;
@@ -1962,13 +2092,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const audio = new Audio();
     audio.preload = "auto";
-    // iOS: system volume is the real control; keep element gain full so the
-    // in-app slider isn't fighting Control Center.
+    // iOS WKWebView needs CORS for Web Audio / analysis when enabled.
     const iosNative = nativeClientPlatform() === "ios";
     if (iosNative) {
       audio.crossOrigin = "anonymous";
-      volumeRef.current = 1;
-      setVolumeState(1);
     }
     audio.volume = volumeRef.current;
     audioRef.current = audio;
@@ -2034,7 +2161,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       playingRef.current = uiPlaying;
       progressRef.current = stored.progress ?? 0;
       durationRef.current = stored.duration ?? 0;
-      const restoredVolume = iosNative ? 1 : (stored.volume ?? 0.8);
+      const restoredVolume = stored.volume ?? 0.8;
       volumeRef.current = restoredVolume;
       const storedShuffle = Boolean(stored.shuffle);
       shuffleRef.current = storedShuffle;
@@ -2297,25 +2424,40 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           const current = trackRef.current;
           const audio = audioRef.current;
           if (current && audio) {
-            setAudioSrc(audio, audioSrcFor(current));
-            const resumeAt = progressRef.current;
-            const seekTo = () => {
-              try {
-                if (Number.isFinite(resumeAt) && resumeAt > 0) {
-                  audio.currentTime = resumeAt;
-                }
-              } catch {
-                /* ignore */
-              }
-            };
-            seekTo();
-            audio.addEventListener("loadedmetadata", seekTo, { once: true });
-            if (playingRef.current) {
-              void playBoth();
+            const epoch = remoteEpochRef.current;
+            let resumeAt = progressRef.current;
+            if (epoch?.playing) {
+              resumeAt =
+                epoch.progress + Math.max(0, (Date.now() - epoch.at) / 1000);
+            } else if (epoch && Number.isFinite(epoch.progress)) {
+              resumeAt = epoch.progress;
             }
+            if (durationRef.current > 0) {
+              resumeAt = Math.min(durationRef.current, resumeAt);
+            }
+            remoteEpochRef.current = null;
+            progressRef.current = resumeAt;
+            setProgress(resumeAt);
+            setAudioSrc(audio, audioSrcFor(current));
+            const disarm = armResumeSeek(audio, resumeAt);
+            const shouldPlay = playingRef.current;
+            const trackId = current.id;
+            void (async () => {
+              await waitForCanPlay(
+                audio,
+                () => trackRef.current?.id === trackId,
+                10_000,
+              );
+              seekAudioTo(audio, resumeAt);
+              if (shouldPlay && trackRef.current?.id === trackId) {
+                await playBoth();
+                seekAudioTo(audio, resumeAt);
+              }
+              window.setTimeout(disarm, 2_500);
+            })();
             publishRef.current({
               ownerId: tabIdRef.current,
-              playing: playingRef.current,
+              playing: shouldPlay,
               progress: resumeAt,
             });
           }
@@ -2424,6 +2566,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           volumeRef.current = command.volume;
           setVolumeState(command.volume);
           applyMixVolumes();
+          publishRef.current({ volume: command.volume });
           continue;
         }
         if (command.type === "shuffle") {
@@ -2445,23 +2588,64 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const ownerId = data.state?.ownerId ?? null;
       applyConnectDevices(data.devices ?? [], ownerId);
 
+      const takingOwnership = Boolean(
+        data.commands?.some((command) => command.type === "become-owner"),
+      );
+
       if (
         data.state &&
         data.state.ownerId &&
         data.state.ownerId !== device.id &&
         data.state.updatedAt >= lastPushedStateAtRef.current
       ) {
-        applyRemote({
-          track: data.state.track ? connectToTrack(data.state.track) : null,
-          queue: (data.state.queue ?? []).map(connectToTrack),
-          playing: data.state.playing,
+        // Same snapshot — keep extrapolating; don't freeze the timer.
+        if (data.state.updatedAt !== lastRemoteUpdatedAtRef.current) {
+          lastRemoteUpdatedAtRef.current = data.state.updatedAt;
+          applyRemote({
+            track: data.state.track ? connectToTrack(data.state.track) : null,
+            queue: (data.state.queue ?? []).map(connectToTrack),
+            playing: data.state.playing,
+            progress: data.state.progress,
+            duration: data.state.duration,
+            volume: data.state.volume,
+            shuffle: data.state.shuffle,
+            ownerId: data.state.ownerId,
+            updatedAt: data.state.updatedAt,
+          });
+        }
+      } else if (takingOwnership && data.state) {
+        // Adopt server position before loading audio — skip applyRemote (clears src).
+        lastRemoteUpdatedAtRef.current = data.state.updatedAt;
+        if (data.state.track) {
+          trackRef.current = connectToTrack(data.state.track);
+          setTrack(trackRef.current);
+        }
+        queueRef.current = (data.state.queue ?? []).map(connectToTrack);
+        setQueue(queueRef.current);
+        playingRef.current = data.state.playing;
+        setPlaying(data.state.playing);
+        durationRef.current = data.state.duration;
+        setDuration(data.state.duration);
+        volumeRef.current = data.state.volume;
+        setVolumeState(data.state.volume);
+        if (typeof data.state.shuffle === "boolean") {
+          shuffleRef.current = data.state.shuffle;
+          setShuffle(data.state.shuffle);
+        }
+        remoteEpochRef.current = {
           progress: data.state.progress,
-          duration: data.state.duration,
-          volume: data.state.volume,
-          shuffle: data.state.shuffle,
-          ownerId: data.state.ownerId,
-          updatedAt: data.state.updatedAt,
-        });
+          at: data.state.updatedAt || Date.now(),
+          playing: data.state.playing,
+          trackId: data.state.track?.id ?? null,
+        };
+        const display = data.state.playing
+          ? data.state.progress +
+            Math.max(0, (Date.now() - (data.state.updatedAt || Date.now())) / 1000)
+          : data.state.progress;
+        progressRef.current = display;
+        setProgress(display);
+        followingRemoteRef.current = false;
+        setIsRemotePlayback(false);
       } else if (!data.state?.ownerId || data.state.ownerId === device.id) {
         followingRemoteRef.current = false;
         setIsRemotePlayback(false);
@@ -2480,8 +2664,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (
           data.state &&
           data.state.ownerId &&
-          data.state.ownerId !== device.id
+          data.state.ownerId !== device.id &&
+          data.state.updatedAt !== lastRemoteUpdatedAtRef.current
         ) {
+          lastRemoteUpdatedAtRef.current = data.state.updatedAt;
           applyRemote({
             track: data.state.track ? connectToTrack(data.state.track) : null,
             queue: (data.state.queue ?? []).map(connectToTrack),
@@ -2507,6 +2693,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       window.clearInterval(id);
     };
   }, [applyConnectDevices, applyMixVolumes, applyRemote, pauseBoth, playBoth]);
+
+  // Smooth Connect follower scrubber between ~1.5s owner heartbeats.
+  useEffect(() => {
+    if (!isRemotePlayback) return;
+    const id = window.setInterval(() => {
+      const epoch = remoteEpochRef.current;
+      if (!epoch?.playing) return;
+      let next = epoch.progress + Math.max(0, (Date.now() - epoch.at) / 1000);
+      if (durationRef.current > 0) next = Math.min(durationRef.current, next);
+      progressRef.current = next;
+      setProgress(next);
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [isRemotePlayback, playing, track?.id]);
 
   const flushListenCredit = useCallback(() => {
     if (!isOwner()) return;
@@ -2899,10 +3099,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       if (!audio) return;
       const wasPlaying = playingRef.current;
       ownerIdRef.current = tabIdRef.current;
-      if (track && (!audio.src || audio.src !== new URL(audioSrcFor(track), window.location.origin).href)) {
-        setAudioSrc(audio, audioSrcFor(track));
+      // Never reload the stream on scrub — ticket/query churn looks like a
+      // new URL and was restarting tracks from 0 on every seek.
+      if (track && (!audio.src || audio.error)) {
+        setAudioSrc(audio, audioSrcFor(track), Boolean(audio.error));
       }
-      audio.currentTime = next;
+      try {
+        audio.currentTime = next;
+      } catch {
+        /* not seekable yet */
+      }
       const inst = instAudioRef.current;
       if (inst && instReadyRef.current && inst.src) {
         try {
@@ -2937,14 +3143,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const setVolume = useCallback(
     (v: number) => {
-      // iOS hardware / Control Center owns loudness; keep element gain full.
-      if (nativeClientPlatform() === "ios") {
-        const locked = 1;
-        setVolumeState(locked);
-        volumeRef.current = locked;
-        applyMixVolumes();
-        return;
-      }
       const next = Math.max(0, Math.min(1, v));
       setVolumeState(next);
       volumeRef.current = next;
@@ -3279,6 +3477,85 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (p) play(p);
   }, [play, publish, queue, track]);
 
+  // Lock screen / Dynamic Island / Control Center Now Playing.
+  useEffect(() => {
+    bindMediaSessionActions({
+      play: () => {
+        if (!playingRef.current) toggle();
+      },
+      pause: () => {
+        if (playingRef.current) toggle();
+      },
+      next,
+      prev,
+      seekTo: (seconds) => {
+        const dur = durationRef.current;
+        if (dur > 0) seek(seconds / dur);
+        else {
+          const audio = audioRef.current;
+          if (!audio) return;
+          audio.currentTime = Math.max(0, seconds);
+          progressRef.current = audio.currentTime;
+          setProgress(audio.currentTime);
+        }
+      },
+      getPosition: () =>
+        audioRef.current?.currentTime ?? progressRef.current ?? 0,
+      getDuration: () => durationRef.current || 0,
+    });
+  }, [next, prev, seek, toggle]);
+
+  useEffect(() => {
+    if (!track || isRemotePlayback) {
+      if (!track) void updateMediaSessionMetadata(null);
+      setMediaSessionPlaybackState("none");
+      return;
+    }
+    void updateMediaSessionMetadata({
+      title: track.title,
+      artist:
+        track.resolveArtist || primaryArtistName(track.artist) || track.artist,
+      album: track.album,
+      coverPath: track.coverPath,
+    });
+  }, [
+    track?.id,
+    track?.title,
+    track?.artist,
+    track?.album,
+    track?.coverPath,
+    track?.resolveArtist,
+    isRemotePlayback,
+  ]);
+
+  useEffect(() => {
+    if (!track || isRemotePlayback) return;
+    const onTicket = () => {
+      void updateMediaSessionMetadata({
+        title: track.title,
+        artist:
+          track.resolveArtist || primaryArtistName(track.artist) || track.artist,
+        album: track.album,
+        coverPath: track.coverPath,
+      });
+    };
+    window.addEventListener(MEDIA_TICKET_UPDATED_EVENT, onTicket);
+    return () => window.removeEventListener(MEDIA_TICKET_UPDATED_EVENT, onTicket);
+  }, [track, isRemotePlayback]);
+
+  useEffect(() => {
+    if (!track || isRemotePlayback) {
+      setMediaSessionPlaybackState("none");
+      return;
+    }
+    setMediaSessionPlaybackState(playing ? "playing" : "paused");
+  }, [playing, track, isRemotePlayback]);
+
+  useEffect(() => {
+    if (!track || isRemotePlayback) return;
+    setMediaSessionPositionState(progress, duration, playing ? 1 : 1);
+  }, [progress, duration, playing, track, isRemotePlayback]);
+
   /**
    * Add / drop onto queue: wipe album upcoming on first add (keep now-playing),
    * then append further adds. Snapshot original queue for restore when empty.
@@ -3427,37 +3704,85 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // Selecting the device that already owns playback is informational only.
     // Re-sending a transfer reapplies remote state and can replace the queue.
     if (activeConnectDevice?.id === deviceId) return;
-    sendConnectCommandRef.current({
-      id: newCommandId(),
-      type: "transfer",
-      targetId: deviceId,
-    });
+
+    const audio = audioRef.current;
+    const wasFollowing = followingRemoteRef.current;
+    const epoch = remoteEpochRef.current;
+    let resumeAt = progressRef.current;
+    if (!wasFollowing && audio) {
+      resumeAt = audio.currentTime || progressRef.current;
+    } else if (epoch?.playing) {
+      resumeAt = epoch.progress + Math.max(0, (Date.now() - epoch.at) / 1000);
+    } else if (epoch && Number.isFinite(epoch.progress)) {
+      resumeAt = epoch.progress;
+    }
+    if (durationRef.current > 0) {
+      resumeAt = Math.min(durationRef.current, Math.max(0, resumeAt));
+    }
+    progressRef.current = resumeAt;
+    setProgress(resumeAt);
+
+    // Owner flushes exact position in the same request as transfer.
+    if (!wasFollowing && trackRef.current && self.id) {
+      lastPushedStateAtRef.current = Date.now();
+      void postConnectSync({
+        device: self,
+        state: {
+          track: trackToConnect(trackRef.current),
+          queue: queueRef.current.map(trackToConnect),
+          playing: playingRef.current,
+          progress: resumeAt,
+          duration: durationRef.current,
+          volume: volumeRef.current,
+          shuffle: shuffleRef.current,
+        },
+        command: {
+          id: newCommandId(),
+          type: "transfer",
+          targetId: deviceId,
+        },
+      }).then((data) => {
+        if (!data) return;
+        applyConnectDevices(data.devices ?? [], data.state?.ownerId ?? null);
+        if (data.commands?.length) {
+          // Local command runner lives in the connect effect; nudge via sync tick.
+        }
+      });
+    } else {
+      sendConnectCommandRef.current({
+        id: newCommandId(),
+        type: "transfer",
+        targetId: deviceId,
+      });
+    }
+
     if (deviceId === self.id) {
       followingRemoteRef.current = false;
       setIsRemotePlayback(false);
       ownerIdRef.current = tabIdRef.current;
       const current = trackRef.current;
-      const audio = audioRef.current;
       if (current && audio) {
+        remoteEpochRef.current = null;
         setAudioSrc(audio, audioSrcFor(current));
-        const resumeAt = progressRef.current;
-        const seekTo = () => {
-          try {
-            if (Number.isFinite(resumeAt) && resumeAt > 0) {
-              audio.currentTime = resumeAt;
-            }
-          } catch {
-            /* ignore */
+        const disarm = armResumeSeek(audio, resumeAt);
+        const shouldPlay = playingRef.current;
+        const trackId = current.id;
+        void (async () => {
+          await waitForCanPlay(
+            audio,
+            () => trackRef.current?.id === trackId,
+            10_000,
+          );
+          seekAudioTo(audio, resumeAt);
+          if (shouldPlay && trackRef.current?.id === trackId) {
+            await playBoth();
+            seekAudioTo(audio, resumeAt);
           }
-        };
-        seekTo();
-        audio.addEventListener("loadedmetadata", seekTo, { once: true });
-        if (playingRef.current) {
-          void playBoth();
-        }
+          window.setTimeout(disarm, 2_500);
+        })();
         publish({
           ownerId: tabIdRef.current,
-          playing: playingRef.current,
+          playing: shouldPlay,
           progress: resumeAt,
         });
       }
@@ -3470,11 +3795,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     } else {
       followingRemoteRef.current = true;
       setIsRemotePlayback(true);
+      remoteEpochRef.current = {
+        progress: resumeAt,
+        at: Date.now(),
+        playing: playingRef.current,
+        trackId: trackRef.current?.id ?? null,
+      };
       applyRemote({
         track: trackRef.current,
         queue: queueRef.current,
         playing: playingRef.current,
-        progress: progressRef.current,
+        progress: resumeAt,
         duration: durationRef.current,
         volume: volumeRef.current,
         shuffle: shuffleRef.current,

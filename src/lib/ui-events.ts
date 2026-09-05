@@ -7,10 +7,19 @@ export const LIBRARY_PINS_CHANGED_EVENT = "polarr:library-pins-changed";
 /** Fired after a ≥30s listen heartbeat is credited (recent / others feed). */
 export const LISTEN_CREDITED_EVENT = "polarr:listen-credited";
 export const RECENT_PLAYED_CHANGED_EVENT = "polarr:recent-played-changed";
+/** Native SWR finished a background GET refresh (detail.url = absolute request URL). */
+export const API_REVALIDATED_EVENT = "polarr:api-revalidated";
 
 export function emitMediaTicketUpdated() {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(MEDIA_TICKET_UPDATED_EVENT));
+}
+
+export function emitApiRevalidated(url: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(API_REVALIDATED_EVENT, { detail: { url } }),
+  );
 }
 
 export function emitLikesChanged(detail?: { count?: number; liked?: boolean }) {

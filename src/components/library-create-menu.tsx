@@ -256,14 +256,13 @@ export function LibraryCreateMenu({
             aria-expanded={open}
             onClick={() => setMenuOpen(true)}
             className={cn(
-              "flex min-h-[44px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 py-1 text-[11px] font-medium transition-colors",
+              "flex min-h-[44px] min-w-[44px] flex-1 items-center justify-center py-1 transition-colors",
               open
                 ? "text-foreground"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
             <Plus className="size-5" strokeWidth={open ? 2.25 : 1.75} />
-            Create
           </button>
         )}
         <MobileCreateDrawer

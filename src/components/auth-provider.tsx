@@ -17,7 +17,7 @@ import {
   setDesktopOfflineSession,
   startDesktopOfflineSync,
 } from "@/lib/desktop-offline";
-import { clearNativeSessionToken, nativeAssetUrl } from "@/lib/native-client";
+import { clearNativeSessionToken, nativeAssetUrl, nativeSessionToken } from "@/lib/native-client";
 
 export type BanStatus = {
   stream: boolean;
@@ -69,14 +69,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch("/api/auth/me", { cache: "no-store" });
+      const res = await fetch("/api/auth/me");
       const data = res.ok ? await res.json() : { user: null, ban: null };
       setUser(data.user ?? null);
       setBan(data.ban ?? null);
       if (data.user?.avatarUrl) setAvatarVer(Date.now());
     } catch {
-      setUser(null);
-      setBan(null);
+      // Keep session UI if we still have a native token (offline / flaky network).
+      if (!nativeSessionToken()) {
+        setUser(null);
+        setBan(null);
+      }
     } finally {
       setLoading(false);
     }

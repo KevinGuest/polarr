@@ -3,6 +3,18 @@ import {
   nativeAssetUrl,
   nativeSessionToken,
 } from "../../src/lib/native-client";
+import {
+  deleteMutation,
+  getArtwork,
+  getStoredResponse,
+  listMutations,
+  mutateStoredJson,
+  putArtwork,
+  putMutation,
+  putStoredResponse,
+  updateMutationAttempts,
+  type QueuedMutation,
+} from "./offline-store";
 
 type NativePlatform = "ios" | "desktop";
 type CachedResponse = {
@@ -11,10 +23,16 @@ type CachedResponse = {
   status: number;
   savedAt: number;
 };
+type QueuePlan = { id: string; response: Record<string, unknown> };
 
-const CACHE_PREFIX = "polarr_native_cache:";
+const LEGACY_CACHE_PREFIX = "polarr_native_cache:";
+const MAX_JSON_BYTES = 30_000_000;
+const MAX_ARTWORK_BYTES = 12_000_000;
 const originalFetch = window.fetch.bind(window);
+const artworkUrls = new Map<string, string>();
 let installed = false;
+let flushing = false;
+let warming = false;
 
 function apiUrl(serverUrl: string, input: RequestInfo | URL): RequestInfo | URL {
   if (typeof input === "string" && input.startsWith("/api/")) {
@@ -37,62 +55,354 @@ function credentialScope(token: string | null) {
 }
 
 function cacheKey(url: string, token: string | null) {
-  return `${CACHE_PREFIX}${credentialScope(token)}:${url}`;
+  return `${credentialScope(token)}:${url}`;
+}
+
+function legacyCacheKey(url: string, token: string | null) {
+  return `${LEGACY_CACHE_PREFIX}${credentialScope(token)}:${url}`;
 }
 
 function cacheResponse(url: string, token: string | null, response: Response) {
   if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) return;
-  void response.clone().text().then((body) => {
-    if (body.length > 1_500_000) return;
-    const entry: CachedResponse = {
+  void response.clone().text().then(async (body) => {
+    if (body.length > MAX_JSON_BYTES) return;
+    const entry: CachedResponse & { key: string } = {
+      key: cacheKey(url, token),
       body,
       contentType: response.headers.get("content-type") || "application/json",
       status: response.status,
       savedAt: Date.now(),
     };
     try {
-      localStorage.setItem(cacheKey(url, token), JSON.stringify(entry));
+      await putStoredResponse(entry);
+      localStorage.removeItem(legacyCacheKey(url, token));
     } catch {
-      // Storage may be full; online behavior remains unaffected.
+      if (body.length <= 1_500_000) {
+        try {
+          localStorage.setItem(legacyCacheKey(url, token), JSON.stringify(entry));
+        } catch {
+          // Storage may be full; online behavior remains unaffected.
+        }
+      }
     }
   });
 }
 
-function cachedResponse(url: string, token: string | null): Response | null {
+async function cachedResponse(url: string, token: string | null): Promise<Response | null> {
+  let entry: CachedResponse | null = null;
   try {
-    const raw = localStorage.getItem(cacheKey(url, token));
-    if (!raw) return null;
-    const entry = JSON.parse(raw) as CachedResponse;
-    return new Response(entry.body, {
-      status: entry.status,
-      headers: {
-        "Content-Type": entry.contentType,
-        "X-Polarr-Offline-Cache": "1",
-      },
-    });
+    entry = await getStoredResponse(cacheKey(url, token));
   } catch {
-    return null;
+    // Older WebViews can still use the legacy cache below.
+  }
+  if (!entry) {
+    try {
+      const raw = localStorage.getItem(legacyCacheKey(url, token));
+      entry = raw ? (JSON.parse(raw) as CachedResponse) : null;
+    } catch {
+      entry = null;
+    }
+  }
+  if (!entry) return null;
+  return new Response(entry.body, {
+    status: entry.status,
+    headers: {
+      "Content-Type": entry.contentType,
+      "X-Polarr-Offline-Cache": "1",
+      "X-Polarr-Cached-At": String(entry.savedAt),
+    },
+  });
+}
+
+function artworkKey(url: string) {
+  const parsed = new URL(url);
+  parsed.searchParams.delete("mediaTicket");
+  return parsed.toString();
+}
+
+function isArtworkUrl(url: string) {
+  try {
+    const path = new URL(url).pathname;
+    return path.startsWith("/uploads/") || path.includes("/cover") || path.includes("/avatar") || /\.(avif|gif|jpe?g|png|webp)$/i.test(path);
+  } catch {
+    return false;
   }
 }
 
-function absolutizePayload(value: unknown): unknown {
-  if (typeof value === "string") return nativeAssetUrl(value) || value;
-  if (Array.isArray(value)) return value.map(absolutizePayload);
+async function cacheArtwork(url: string, token: string | null) {
+  if (!isArtworkUrl(url)) return;
+  const key = artworkKey(url);
+  try {
+    if (await getArtwork(key)) return;
+  } catch {
+    return;
+  }
+  try {
+    const headers = new Headers();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await originalFetch(url, { headers });
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok || !contentType.startsWith("image/")) return;
+    const blob = await response.blob();
+    if (blob.size > MAX_ARTWORK_BYTES) return;
+    await putArtwork(key, blob);
+  } catch {
+    // Artwork caching is best-effort and never blocks the live UI.
+  }
+}
+
+async function cachedArtworkUrl(url: string): Promise<string> {
+  const key = artworkKey(url);
+  const existing = artworkUrls.get(key);
+  if (existing) return existing;
+  try {
+    const blob = await getArtwork(key);
+    if (!blob) return url;
+    const objectUrl = URL.createObjectURL(blob);
+    artworkUrls.set(key, objectUrl);
+    return objectUrl;
+  } catch {
+    return url;
+  }
+}
+
+async function absolutizePayload(value: unknown, offline: boolean, token: string | null): Promise<unknown> {
+  if (typeof value === "string") {
+    const absolute = nativeAssetUrl(value) || value;
+    if (!isArtworkUrl(absolute)) return absolute;
+    if (offline) return cachedArtworkUrl(absolute);
+    void cacheArtwork(absolute, token);
+    return absolute;
+  }
+  if (Array.isArray(value)) return Promise.all(value.map((child) => absolutizePayload(child, offline, token)));
   if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+    const entries = await Promise.all(
+      Object.entries(value as Record<string, unknown>).map(async ([key, child]) => [
         key,
-        absolutizePayload(child),
-      ]),
+        await absolutizePayload(child, offline, token),
+      ] as const),
     );
+    return Object.fromEntries(entries);
   }
   return value;
 }
 
-function decorateJson(response: Response) {
+function decorateJson(response: Response, token: string | null) {
   const originalJson = response.json.bind(response);
-  response.json = async () => absolutizePayload(await originalJson());
+  response.json = async () => absolutizePayload(
+    await originalJson(),
+    response.headers.get("X-Polarr-Offline-Cache") === "1",
+    token,
+  );
   return response;
+}
+
+async function requestBody(input: RequestInfo | URL, init?: RequestInit) {
+  if (typeof init?.body === "string") return init.body;
+  if (input instanceof Request) {
+    try {
+      return await input.clone().text();
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function queuePlan(url: string, method: string, body: string): QueuePlan | null {
+  let path: string;
+  let data: Record<string, unknown>;
+  try {
+    path = new URL(url).pathname;
+    data = body ? (JSON.parse(body) as Record<string, unknown>) : {};
+  } catch {
+    return null;
+  }
+  if (path === "/api/likes" && method === "POST") {
+    if (typeof data.trackId !== "string" || typeof data.liked !== "boolean") return null;
+    return { id: `like:${data.trackId}`, response: { ok: true, queued: true, offline: true, trackId: data.trackId, liked: data.liked } };
+  }
+  if (path === "/api/library/pins" && method === "POST") {
+    if (typeof data.itemKey !== "string" || typeof data.pinned !== "boolean") return null;
+    return { id: `pin:${data.itemKey}`, response: { ok: true, queued: true, offline: true, itemKey: data.itemKey, pinned: data.pinned } };
+  }
+  if (path === "/api/playlists" && method === "PATCH") {
+    if (typeof data.playlistId !== "string") return null;
+    return {
+      id: `playlist:details:${data.playlistId}`,
+      response: {
+        queued: true,
+        offline: true,
+        playlist: { id: data.playlistId, name: data.name, description: data.description, isPrivate: data.isPrivate },
+      },
+    };
+  }
+  if (path === "/api/playlists" && method === "POST") {
+    const action = typeof data.action === "string" ? data.action : "add";
+    const allowed = new Set(["add", "remove", "rename", "delete", "move", "reorder", "moveTracks"]);
+    if (!allowed.has(action) || typeof data.playlistId !== "string") return null;
+    if (action === "add" && typeof data.trackId !== "string") return null;
+    const subject = typeof data.trackId === "string" ? data.trackId : Array.isArray(data.trackIds) ? data.trackIds.join(",") : "playlist";
+    const logicalAction = action === "add" || action === "remove" ? "membership" : action;
+    return { id: `playlist:${logicalAction}:${data.playlistId}:${subject}`, response: { ok: true, queued: true, offline: true } };
+  }
+  if (path === "/api/notifications" && method === "POST" && data.action === "mark_read") {
+    return { id: `notifications:read:${JSON.stringify(data.ids || "all")}`, response: { ok: true, queued: true, offline: true, unread: 0 } };
+  }
+  if (path === "/api/taste/exclude" && method === "POST" && typeof data.trackId === "string") {
+    return { id: `taste:exclude:${data.trackId}`, response: { ok: true, queued: true, offline: true, excluded: true } };
+  }
+  return null;
+}
+
+async function queueMutation(plan: QueuePlan, scope: string, serverUrl: string, url: string, method: string, body: string, contentType: string) {
+  const entry: QueuedMutation = {
+    id: `${scope}:${serverUrl}:${plan.id}`,
+    scope,
+    serverUrl,
+    url,
+    method,
+    body,
+    contentType,
+    createdAt: Date.now(),
+    attempts: 0,
+  };
+  await putMutation(entry);
+  await applyOptimisticMutation(scope, serverUrl, url, method, body);
+  window.dispatchEvent(new CustomEvent("polarr-offline-change-queued", { detail: plan.response }));
+  return new Response(JSON.stringify(plan.response), {
+    status: 202,
+    headers: { "Content-Type": "application/json", "X-Polarr-Offline-Queued": "1" },
+  });
+}
+
+async function applyOptimisticMutation(scope: string, serverUrl: string, requestUrl: string, method: string, body: string) {
+  let request: URL;
+  let data: Record<string, unknown>;
+  try {
+    request = new URL(requestUrl);
+    data = JSON.parse(body) as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  await mutateStoredJson(`${scope}:${serverUrl}`, (key, value) => {
+    const cachedUrlStart = key.indexOf("http");
+    if (cachedUrlStart < 0) return null;
+    const cached = new URL(key.slice(cachedUrlStart));
+
+    if (request.pathname === "/api/likes" && cached.pathname === "/api/likes") {
+      const trackId = String(data.trackId || "");
+      const liked = data.liked === true;
+      if (cached.searchParams.has("trackId")) {
+        if (cached.searchParams.get("trackId") !== trackId) return null;
+        return { ...value, trackId, liked };
+      }
+      const tracks = Array.isArray(value.tracks)
+        ? (value.tracks as Record<string, unknown>[]).filter((track) => String(track.id || "") !== trackId)
+        : [];
+      if (liked) {
+        tracks.unshift({
+          id: trackId,
+          title: data.title || "Unknown track",
+          artist: data.artist || "Unknown artist",
+          album: data.album || data.title || "",
+          coverPath: data.coverPath || null,
+          duration: data.duration || 0,
+          path: "",
+          source: "stream",
+          streamOnly: true,
+        });
+      }
+      return { ...value, tracks, count: tracks.length };
+    }
+
+    if (request.pathname === "/api/library/pins" && cached.pathname === "/api/library/pins") {
+      const itemKey = String(data.itemKey || "");
+      const pins = new Set(Array.isArray(value.pins) ? (value.pins as string[]) : []);
+      if (data.pinned === true) pins.add(itemKey);
+      else pins.delete(itemKey);
+      return { ...value, pins: [...pins] };
+    }
+
+    if (request.pathname !== "/api/playlists" || cached.pathname !== "/api/playlists") return null;
+    const playlistId = String(data.playlistId || "");
+    const action = typeof data.action === "string" ? data.action : method === "PATCH" ? "details" : "add";
+    if (cached.searchParams.get("id") === playlistId) {
+      const playlist = value.playlist && typeof value.playlist === "object"
+        ? { ...(value.playlist as Record<string, unknown>) }
+        : null;
+      if (playlist && (action === "rename" || action === "details")) {
+        if (data.name !== undefined) playlist.name = data.name;
+        if (data.description !== undefined) playlist.description = data.description;
+        if (data.isPrivate !== undefined) playlist.isPrivate = data.isPrivate;
+      }
+      let tracks = Array.isArray(value.tracks) ? [...value.tracks] : [];
+      if (action === "remove") tracks = tracks.filter((track) => String((track as Record<string, unknown>).id || "") !== data.trackId);
+      if (action === "reorder" && Array.isArray(data.trackIds)) {
+        const byId = new Map(tracks.map((track) => [String((track as Record<string, unknown>).id || ""), track]));
+        tracks = data.trackIds.map((id) => byId.get(String(id))).filter(Boolean);
+      }
+      return { ...value, playlist, tracks };
+    }
+    if (!cached.search && Array.isArray(value.playlists)) {
+      let playlists = value.playlists as Record<string, unknown>[];
+      if (action === "delete") playlists = playlists.filter((playlist) => String(playlist.id || "") !== playlistId);
+      if (action === "rename" || action === "details" || action === "move") {
+        playlists = playlists.map((playlist) => {
+          if (String(playlist.id || "") !== playlistId) return playlist;
+          return {
+            ...playlist,
+            ...(data.name !== undefined ? { name: data.name } : {}),
+            ...(data.description !== undefined ? { description: data.description } : {}),
+            ...(data.isPrivate !== undefined ? { isPrivate: data.isPrivate } : {}),
+            ...(action === "move" ? { folderId: data.folderId } : {}),
+          };
+        });
+      }
+      return { ...value, playlists };
+    }
+    return null;
+  });
+}
+
+async function flushMutationQueue() {
+  if (flushing || !navigator.onLine) return;
+  const bridge = window.__POLARR_NATIVE_CLIENT__;
+  const token = nativeSessionToken();
+  if (!bridge || !token) return;
+  flushing = true;
+  const scope = credentialScope(token);
+  try {
+    const entries = await listMutations(scope, bridge.serverUrl);
+    for (const entry of entries) {
+      try {
+        const headers = new Headers();
+        headers.set("Authorization", `Bearer ${token}`);
+        if (entry.contentType) headers.set("Content-Type", entry.contentType);
+        const response = await originalFetch(entry.url, { method: entry.method, headers, body: entry.body || undefined });
+        if (response.ok) {
+          await deleteMutation(entry.id);
+          window.dispatchEvent(new CustomEvent("polarr-offline-change-synced", { detail: { id: entry.id } }));
+          continue;
+        }
+        if (response.status === 401) clearNativeSessionToken();
+        if (response.status >= 400 && response.status < 500) {
+          await deleteMutation(entry.id);
+          window.dispatchEvent(new CustomEvent("polarr-offline-change-rejected", { detail: { id: entry.id, status: response.status } }));
+          continue;
+        }
+        await updateMutationAttempts(entry);
+        break;
+      } catch {
+        await updateMutationAttempts(entry);
+        break;
+      }
+    }
+  } catch {
+    // IndexedDB may be unavailable in private browsing; retry on the next online event.
+  } finally {
+    flushing = false;
+  }
 }
 
 async function refreshMediaTicket() {
@@ -114,57 +424,93 @@ async function refreshMediaTicket() {
   }
 }
 
-export async function installNativeRuntime(
-  serverUrl: string,
-  platform: NativePlatform,
-  version?: string,
-  changeServer?: () => void | Promise<void>,
-) {
+async function warmOfflineLibrary() {
+  if (warming || !navigator.onLine) return;
+  const bridge = window.__POLARR_NATIVE_CLIENT__;
+  const token = nativeSessionToken();
+  if (!bridge || !token) return;
+  const warmKey = `polarr_native_warm:${credentialScope(token)}:${bridge.serverUrl}`;
+  const lastWarm = Number(localStorage.getItem(warmKey) || "0");
+  if (Date.now() - lastWarm < 15 * 60 * 1000) return;
+  warming = true;
+  try {
+    const headers = new Headers({ Authorization: `Bearer ${token}` });
+    let successful = 0;
+    const paths = [
+      "/api/auth/me",
+      "/api/discover",
+      "/api/library/nav",
+      "/api/library",
+      "/api/likes",
+      "/api/playlists",
+      "/api/recent?limit=100",
+      "/api/profiles",
+    ];
+    await Promise.allSettled(
+      paths.map(async (path) => {
+        const url = new URL(path, `${bridge.serverUrl}/`).toString();
+        const response = await originalFetch(url, { headers });
+        if (response.ok) successful += 1;
+        cacheResponse(url, token, response);
+      }),
+    );
+    if (successful > 0) localStorage.setItem(warmKey, String(Date.now()));
+  } finally {
+    warming = false;
+  }
+}
+
+export async function installNativeRuntime(serverUrl: string, platform: NativePlatform, version?: string, changeServer?: () => void | Promise<void>) {
   const normalized = serverUrl.replace(/\/+$/, "");
-  window.__POLARR_NATIVE_CLIENT__ = {
-    serverUrl: normalized,
-    platform,
-    version,
-    changeServer,
-    mediaTicket: null,
-    refreshMediaTicket,
-  };
+  window.__POLARR_NATIVE_CLIENT__ = { serverUrl: normalized, platform, version, changeServer, mediaTicket: null, refreshMediaTicket };
   document.documentElement.classList.add("dark", "polarr-ios");
   document.documentElement.dataset.polarrNative = platform;
 
   if (!installed) {
     installed = true;
+    window.addEventListener("online", () => {
+      void flushMutationQueue();
+      void warmOfflineLibrary();
+    });
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const bridge = window.__POLARR_NATIVE_CLIENT__;
       if (!bridge) return originalFetch(input, init);
       const rewritten = apiUrl(bridge.serverUrl, input);
-      const url =
-        typeof rewritten === "string"
-          ? rewritten
-          : rewritten instanceof URL
-            ? rewritten.toString()
-            : rewritten.url;
-      const headers = new Headers(
-        rewritten instanceof Request ? rewritten.headers : init?.headers,
-      );
+      const url = typeof rewritten === "string" ? rewritten : rewritten instanceof URL ? rewritten.toString() : rewritten.url;
+      const headers = new Headers(rewritten instanceof Request ? rewritten.headers : init?.headers);
       const token = nativeSessionToken();
-      if (token && new URL(url).origin === new URL(bridge.serverUrl).origin) {
-        headers.set("Authorization", `Bearer ${token}`);
-      }
+      const scope = credentialScope(token);
+      const sameServer = new URL(url).origin === new URL(bridge.serverUrl).origin;
+      if (token && sameServer) headers.set("Authorization", `Bearer ${token}`);
       const method = (init?.method || (rewritten instanceof Request ? rewritten.method : "GET")).toUpperCase();
+      const body = method === "GET" || method === "HEAD" ? "" : await requestBody(input, init);
+      const plan = sameServer ? queuePlan(url, method, body) : null;
+
+      if (method !== "GET" && method !== "HEAD" && navigator.onLine) await flushMutationQueue();
       try {
         const response = await originalFetch(rewritten, { ...init, headers });
         if (method === "GET") cacheResponse(url, token, response);
         if (response.status === 401 && token) clearNativeSessionToken();
-        return decorateJson(response);
+        if (response.ok) void flushMutationQueue();
+        return decorateJson(response, token);
       } catch (error) {
         if (method === "GET") {
-          const cached = cachedResponse(url, token);
-          if (cached) return decorateJson(cached);
+          const cached = await cachedResponse(url, token);
+          if (cached) return decorateJson(cached, token);
+        }
+        if (plan && token) {
+          try {
+            const queued = await queueMutation(plan, scope, bridge.serverUrl, url, method, body, headers.get("Content-Type") || "application/json");
+            return decorateJson(queued, token);
+          } catch {
+            // Fall through to the original network error if persistence failed.
+          }
         }
         throw error;
       }
     };
   }
   await refreshMediaTicket();
+  void flushMutationQueue();
+  void warmOfflineLibrary();
 }

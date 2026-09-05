@@ -40,8 +40,12 @@ function needsAuthFetch(url: string) {
  */
 export function useNativeMediaDisplaySrc(src: string | null | undefined): string | null {
   const stamped = nativeAssetUrl(src) || src || null;
-  const [blobSrc, setBlobSrc] = useState<string | null>(null);
+  const [blobSrc, setBlobSrc] = useState<string | null>(() => {
+    if (!stamped || !needsAuthFetch(stamped)) return null;
+    return blobCache.get(cacheKeyFor(stamped)) || null;
+  });
   const [epoch, setEpoch] = useState(0);
+  const protectedSrc = Boolean(stamped && needsAuthFetch(stamped));
 
   useEffect(() => {
     const bump = () => setEpoch((n) => n + 1);
@@ -81,7 +85,7 @@ export function useNativeMediaDisplaySrc(src: string | null | undefined): string
         blobCache.set(key, objectUrl);
         if (!cancelled) setBlobSrc(objectUrl);
       } catch {
-        /* Fall back to stamped URL (mediaTicket) when available. */
+        /* Keep prior blob if any; letter fallback otherwise. */
       }
     })();
 
@@ -90,5 +94,8 @@ export function useNativeMediaDisplaySrc(src: string | null | undefined): string
     };
   }, [src, stamped, epoch]);
 
+  // Protected media: never flash the raw ticket URL then swap to a blob —
+  // that remounts <img> and flickers the avatar. Show blob only (or null).
+  if (protectedSrc) return blobSrc;
   return blobSrc || stamped;
 }

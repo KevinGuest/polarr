@@ -17,7 +17,7 @@ import {
   extractBannerColors,
   extractBannerColorsFromUrl,
 } from "@/lib/banner-colors";
-import { AVATAR_UPDATED_EVENT, MEDIA_TICKET_UPDATED_EVENT } from "@/lib/ui-events";
+import { AVATAR_UPDATED_EVENT } from "@/lib/ui-events";
 import { nativeAssetUrl } from "@/lib/native-client";
 import { toastError, toastSaved } from "@/lib/toast";
 
@@ -246,10 +246,22 @@ export function ProfileClient({
     const url = data?.user?.avatarUrl;
     if (!url) return;
     let cancelled = false;
-    const src = cacheBust(url, avatarVer) ?? url;
+    // Don't tie this to avatarVer / mediaTicket — re-sampling the same image
+    // was rewriting bannerColors and flickering the hero gradient.
+    const src = nativeAssetUrl(url) || url;
     void extractBannerColorsFromUrl(src)
       .then((colors) => {
-        if (!cancelled && colors?.length) setLiveBanner(colors);
+        if (cancelled || !colors?.length) return;
+        setLiveBanner((prev) => {
+          if (
+            prev &&
+            prev.length === colors.length &&
+            prev.every((c, i) => c === colors[i])
+          ) {
+            return prev;
+          }
+          return colors;
+        });
       })
       .catch(() => {
         /* keep stored bannerColors */
@@ -257,15 +269,7 @@ export function ProfileClient({
     return () => {
       cancelled = true;
     };
-  }, [data?.user?.publicId, data?.user?.avatarUrl, avatarVer]);
-
-  useEffect(() => {
-    function onMediaTicket() {
-      setAvatarVer(Date.now());
-    }
-    window.addEventListener(MEDIA_TICKET_UPDATED_EVENT, onMediaTicket);
-    return () => window.removeEventListener(MEDIA_TICKET_UPDATED_EVENT, onMediaTicket);
-  }, []);
+  }, [data?.user?.publicId, data?.user?.avatarUrl]);
 
   async function onPickAvatar(file: File | null) {
     if (!file || !data?.isSelf) return;

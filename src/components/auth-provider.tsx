@@ -65,15 +65,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [ban, setBan] = useState<BanStatus>(null);
   const [avatarVer, setAvatarVer] = useState(0);
+  const [ticketRev, setTicketRev] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     try {
       const res = await fetch("/api/auth/me");
       const data = res.ok ? await res.json() : { user: null, ban: null };
-      setUser(data.user ?? null);
+      const nextUser = (data.user ?? null) as AuthUser | null;
+      setUser((prev) => {
+        const prevAvatar = prev?.avatarUrl || null;
+        const nextAvatar = nextUser?.avatarUrl || null;
+        // Only bust avatar cache when the asset itself changes — not on every /me poll.
+        if (nextAvatar && nextAvatar !== prevAvatar) {
+          queueMicrotask(() => setAvatarVer(Date.now()));
+        }
+        return nextUser;
+      });
       setBan(data.ban ?? null);
-      if (data.user?.avatarUrl) setAvatarVer(Date.now());
     } catch {
       // Keep session UI if we still have a native token (offline / flaky network).
       if (!nativeSessionToken()) {
@@ -111,8 +120,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       void refresh();
     }
     function onMediaTicket() {
-      // Re-stamp cache busters so avatar <img> URLs pick up mediaTicket.
-      setAvatarVer(Date.now());
+      // Re-read nativeAssetUrl on next render without changing `v=` (img remount).
+      setTicketRev((n) => n + 1);
     }
     window.addEventListener(AVATAR_UPDATED_EVENT, onAvatarUpdated);
     window.addEventListener(MEDIA_TICKET_UPDATED_EVENT, onMediaTicket);
@@ -124,6 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const role = roleFromUser(user);
   const avatarSrc = (() => {
+    void ticketRev;
     if (!user?.avatarUrl) return null;
     const resolved = nativeAssetUrl(user.avatarUrl) || user.avatarUrl;
     const sep = resolved.includes("?") ? "&" : "?";

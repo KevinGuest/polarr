@@ -23,12 +23,21 @@ export function UserAvatar({
 }) {
   const resolved = useNativeMediaDisplaySrc(avatarUrl);
   const [broken, setBroken] = useState(false);
+  // Keep showing the previous frame while a new blob resolves — avoids
+  // letter → image flicker when the src identity changes.
+  const [stableResolved, setStableResolved] = useState<string | null>(resolved);
   const letter = (username.trim()[0] || "?").toUpperCase();
-  const showImg = Boolean(resolved) && !broken;
 
   useEffect(() => {
     setBroken(false);
   }, [resolved]);
+
+  useEffect(() => {
+    if (resolved) setStableResolved(resolved);
+  }, [resolved]);
+
+  const displaySrc = resolved || stableResolved;
+  const showImg = Boolean(displaySrc) && !broken;
 
   return (
     <span
@@ -41,7 +50,7 @@ export function UserAvatar({
       {showImg ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={resolved!}
+          src={displaySrc!}
           alt=""
           className={cn("absolute inset-0 size-full object-cover", imgClassName)}
           onError={() => setBroken(true)}

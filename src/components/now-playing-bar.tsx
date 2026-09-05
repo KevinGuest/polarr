@@ -151,11 +151,9 @@ export function NowPlayingBar() {
       return;
     }
 
-    const fromTrack =
-      track.coverPath && /^https?:\/\//i.test(track.coverPath)
-        ? track.coverPath
-        : null;
-    setCoverUrl(fromTrack);
+    // Relative server cover paths are valid in bundled/native clients; CoverArt
+    // resolves and authenticates them through the native media bridge.
+    setCoverUrl(track.coverPath || null);
 
     if (track.id.startsWith("live:") || track.id.startsWith("stream:")) {
       return;
@@ -172,9 +170,7 @@ export function NowPlayingBar() {
       .then((data) => {
         if (cancelled || !data?.track) return;
         const cover = data.track.coverUrl || data.track.coverPath;
-        if (cover && /^https?:\/\//i.test(cover)) {
-          setCoverUrl(cover);
-        }
+        if (cover) setCoverUrl(cover);
       })
       .catch(() => null);
 

@@ -311,8 +311,9 @@ async function cacheArtwork(url: string, token: string | null) {
   try {
     const headers = new Headers();
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    // Images stay on browser fetch — CapacitorHttp text mode would corrupt binary.
-    const response = await originalFetch(url, { headers });
+    // Use native HTTP on iOS so protected cross-origin artwork is not blocked
+    // by WKWebView CORS. `serverFetch` decodes Capacitor's base64 blob result.
+    const response = await serverFetch(url, { headers });
     const contentType = response.headers.get("content-type") || "";
     if (!response.ok || !contentType.startsWith("image/")) return;
     const blob = await response.blob();
@@ -581,7 +582,10 @@ async function refreshMediaTicket() {
   const bridge = window.__POLARR_NATIVE_CLIENT__;
   const token = nativeSessionToken();
   if (!bridge || !token) {
-    if (bridge) bridge.mediaTicket = null;
+    if (bridge) {
+      bridge.mediaTicket = null;
+      bridge.mediaTicketExpiresAt = null;
+    }
     return;
   }
   try {
@@ -591,14 +595,17 @@ async function refreshMediaTicket() {
     );
     const data = response.ok ? await response.json() : null;
     const next = typeof data?.ticket === "string" ? data.ticket : null;
+    const expiresAt = Number(data?.expiresAt);
     const changed = bridge.mediaTicket !== next;
     bridge.mediaTicket = next;
+    bridge.mediaTicketExpiresAt = Number.isFinite(expiresAt) ? expiresAt : null;
     if (changed && next) {
       const { emitMediaTicketUpdated } = await import("../../src/lib/ui-events");
       emitMediaTicketUpdated();
     }
   } catch {
     bridge.mediaTicket = null;
+    bridge.mediaTicketExpiresAt = null;
   }
 }
 
@@ -673,6 +680,7 @@ export async function installNativeRuntime(serverUrl: string, platform: NativePl
     version,
     changeServer,
     mediaTicket: null,
+    mediaTicketExpiresAt: null,
     refreshMediaTicket,
   };
   if (platform === "ios") {

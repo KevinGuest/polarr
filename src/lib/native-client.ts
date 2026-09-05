@@ -11,6 +11,7 @@ type NativeClientBridge = {
   version?: string;
   changeServer?: () => void | Promise<void>;
   mediaTicket?: string | null;
+  mediaTicketExpiresAt?: number | null;
   refreshMediaTicket?: () => Promise<void>;
 };
 
@@ -90,6 +91,7 @@ export function clearNativeSessionToken(): void {
   localStorage.removeItem(NATIVE_TOKEN_KEY);
   if (window.__POLARR_NATIVE_CLIENT__) {
     window.__POLARR_NATIVE_CLIENT__.mediaTicket = null;
+    window.__POLARR_NATIVE_CLIENT__.mediaTicketExpiresAt = null;
   }
 }
 
@@ -99,7 +101,9 @@ export function isNativeMediaPath(pathname: string): boolean {
 
 export async function ensureNativeMediaTicket(): Promise<string | null> {
   if (!isNativeClient()) return null;
-  if (!window.__POLARR_NATIVE_CLIENT__?.mediaTicket) {
+  const bridge = window.__POLARR_NATIVE_CLIENT__;
+  const expiresAt = bridge?.mediaTicketExpiresAt || 0;
+  if (!bridge?.mediaTicket || (expiresAt > 0 && expiresAt <= Date.now() + 60_000)) {
     await window.__POLARR_NATIVE_CLIENT__?.refreshMediaTicket?.();
   }
   return window.__POLARR_NATIVE_CLIENT__?.mediaTicket || null;

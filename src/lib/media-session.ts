@@ -33,15 +33,6 @@ export type MediaSessionActions = {
   getDuration: () => number;
 };
 
-const ARTWORK_SIZES = [
-  "96x96",
-  "128x128",
-  "192x192",
-  "256x256",
-  "384x384",
-  "512x512",
-] as const;
-
 let actionsBound = false;
 let actionHandlers: MediaSessionActions | null = null;
 
@@ -93,11 +84,13 @@ export function mediaSessionArtworkUrl(
 function artworkList(coverUrl: string | null): MediaImage[] {
   if (!coverUrl) return [];
   const type = guessImageType(coverUrl);
-  return ARTWORK_SIZES.map((sizes) => ({
+  // Do not claim multiple dimensions for one unresized source. iOS validates
+  // declared artwork sizes and may discard the entire metadata image when the
+  // decoded dimensions do not match.
+  return [{
     src: coverUrl,
-    sizes,
     ...(type ? { type } : {}),
-  }));
+  }];
 }
 
 export async function updateMediaSessionMetadata(

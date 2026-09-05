@@ -1,6 +1,6 @@
 [package]
 name = "polarr-desktop"
-version = "0.2.14"
+version = "0.2.15"
 description = "Polarr desktop shell"
 authors = ["Polarr"]
 edition = "2021"

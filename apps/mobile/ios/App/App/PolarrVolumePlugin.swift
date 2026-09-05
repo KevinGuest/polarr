@@ -48,8 +48,17 @@ public class PolarrVolumePlugin: CAPPlugin, CAPBridgedPlugin {
         volumeObservation?.invalidate()
     }
 
+    private func findVolumeSlider(in view: UIView) -> UISlider? {
+        if let slider = view as? UISlider { return slider }
+        for child in view.subviews {
+            if let slider = findVolumeSlider(in: child) { return slider }
+        }
+        return nil
+    }
+
     private func volumeSlider() -> UISlider? {
-        volumeView.subviews.compactMap { $0 as? UISlider }.first
+        volumeView.layoutIfNeeded()
+        return findVolumeSlider(in: volumeView)
     }
 
     @objc func getVolume(_ call: CAPPluginCall) {
@@ -76,9 +85,12 @@ public class PolarrVolumePlugin: CAPPlugin, CAPBridgedPlugin {
                 host.addSubview(self.volumeView)
             }
             if let slider = self.volumeSlider() {
-                slider.value = Float(clamped)
+                slider.setValue(Float(clamped), animated: false)
+                slider.sendActions(for: .valueChanged)
+                call.resolve(["volume": Double(AVAudioSession.sharedInstance().outputVolume)])
+                return
             }
-            call.resolve(["volume": clamped])
+            call.reject("System volume control unavailable")
         }
     }
 }

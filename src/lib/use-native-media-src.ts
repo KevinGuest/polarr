@@ -94,8 +94,9 @@ export function useNativeMediaDisplaySrc(src: string | null | undefined): string
     };
   }, [src, stamped, epoch]);
 
-  // Protected media: never flash the raw ticket URL then swap to a blob —
-  // that remounts <img> and flickers the avatar. Show blob only (or null).
-  if (protectedSrc) return blobSrc;
+  // Ticketed URLs are directly loadable by native WebViews. Keep that source
+  // stable while the background fetch only warms the offline artwork cache;
+  // returning null hid the image, while swapping to the blob caused flicker.
+  if (protectedSrc) return stamped;
   return blobSrc || stamped;
 }

@@ -114,12 +114,11 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
           releaseBody: |
-            - **Music settings** — Playlists and Playback now live together under Music
-            - **Equalizer** — turn it on or off, adjust six bands, or choose a sound preset
-            - **Playback options** — Crossfade, Gapless, volume levels, and Mono Audio
-            - **Audio output** — choose a connected speaker or headphones in the desktop app
-            - **Account menu** — the Windows avatar now opens the shared profile drawer
-            - **Desktop header** — removes the extra Polarr logo and keeps Home beside search
+            - **Player artwork** — album covers load correctly in the desktop and iOS players
+            - **iOS Now Playing** — cover art appears on the Lock Screen and Dynamic Island
+            - **Profile photos** — avatars load throughout the iOS app
+            - **iPhone volume** — the player slider controls system volume and follows the hardware buttons
+            - **Desktop app** — includes the latest shared player and artwork fixes
 
             ## Downloads
 

@@ -18,9 +18,21 @@ function getVolumePlugin(): VolumePlugin | null {
   if (typeof window === "undefined") return null;
   if (nativeClientPlatform() !== "ios") return null;
   const cap = window as Window & {
-    Capacitor?: { Plugins?: { PolarrVolume?: VolumePlugin } };
+    Capacitor?: {
+      Plugins?: { PolarrVolume?: VolumePlugin };
+      registerPlugin?: (name: string) => VolumePlugin;
+    };
   };
-  return cap.Capacitor?.Plugins?.PolarrVolume || null;
+  const capacitor = cap.Capacitor;
+  if (!capacitor) return null;
+  if (capacitor.Plugins?.PolarrVolume) return capacitor.Plugins.PolarrVolume;
+  // Native instances still need a JS proxy registration. The previous bridge
+  // registered only the Swift instance, so slider writes never reached iOS.
+  try {
+    return capacitor.registerPlugin?.("PolarrVolume") || null;
+  } catch {
+    return null;
+  }
 }
 
 export function usesSystemVolume(): boolean {

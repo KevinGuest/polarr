@@ -3811,9 +3811,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const patchTrackCovers = useCallback(
     (covers: Record<string, string>) => {
-      const entries = Object.entries(covers).filter(
-        ([, url]) => url && /^https?:\/\//i.test(url),
-      );
+      const entries = Object.entries(covers).filter(([, url]) => Boolean(url));
       if (entries.length === 0) return;
       const map = new Map(entries);
 
@@ -3822,7 +3820,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const nextQ = prev.map((t) => {
           const url = map.get(t.id);
           if (!url) return t;
-          if (t.coverPath && /^https?:\/\//i.test(t.coverPath)) return t;
+          if (t.coverPath) return t;
           changed = true;
           return { ...t, coverPath: url };
         });
@@ -3835,7 +3833,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (!prev) return prev;
         const url = map.get(prev.id);
         if (!url) return prev;
-        if (prev.coverPath && /^https?:\/\//i.test(prev.coverPath)) return prev;
+        if (prev.coverPath) return prev;
         return { ...prev, coverPath: url };
       });
     },

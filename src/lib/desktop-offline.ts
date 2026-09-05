@@ -14,6 +14,7 @@ import {
   isPolarrDesktop as isDesktopShell,
 } from "@/lib/desktop-shell";
 import { nativeSessionToken } from "@/lib/native-client";
+import { readPlaybackSettings } from "@/lib/playback-settings";
 
 export type DesktopOfflineTrack = {
   trackId: string;
@@ -446,8 +447,22 @@ export async function downloadTrackOffline(
     const token = nativeSessionToken();
     const serverUrl = window.__POLARR_NATIVE_CLIENT__?.serverUrl;
     if (!token || !serverUrl) throw new Error("Sign in to download offline");
-    const source = new URL(`/api/stream/${encodeURIComponent(track.trackId)}`, `${serverUrl}/`).toString();
-    const started = await ios.download({ ...track, url: source, token });
+    // Same as Spotify-style offline: store a phone-decodable AAC copy, not raw FLAC.
+    const source = new URL(
+      `/api/stream/${encodeURIComponent(track.trackId)}`,
+      `${serverUrl}/`,
+    );
+    // Spotify-style: phone keeps an encode of the chosen quality, not FLAC masters.
+    const quality = readPlaybackSettings().streamQuality || "high";
+    source.searchParams.set("compat", "1");
+    source.searchParams.set("download", "1");
+    source.searchParams.set("quality", quality);
+    const started = await ios.download({
+      ...track,
+      url: source.toString(),
+      token,
+      contentType: quality === "lossless" ? "audio/mp4" : "audio/aac",
+    });
     if (!started.jobId) throw new Error("Couldn’t start offline download");
     activeIOSJobId = started.jobId;
     try {

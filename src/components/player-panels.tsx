@@ -9,6 +9,7 @@ import * as SliderPrimitive from "@radix-ui/react-slider";
 import { PlayerGlassBackdrop } from "@/components/player-glass-backdrop";
 import { PlayerSlider } from "@/components/player-slider";
 import { MobileSaveButton } from "@/components/saved-in-drawer";
+import { nativeClientPlatform } from "@/lib/native-client";
 import {
   Laptop,
   ListMusic,
@@ -1340,18 +1341,20 @@ function MobileTransport({
           <SkipForward className="size-8" fill="currentColor" />
         </button>
       </div>
-      <div className="flex min-h-[44px] items-center gap-3 px-1">
-        <Volume1 className="size-4 shrink-0 text-white/50" aria-hidden />
-        <PlayerSlider
-          value={volume}
-          onChange={onVolume}
-          aria-label="Volume"
-          variant="volume"
-          tone="on-dark"
-          className="-my-2 flex-1"
-        />
-        <Volume2 className="size-5 shrink-0 text-white/50" aria-hidden />
-      </div>
+      {nativeClientPlatform() === "ios" ? null : (
+        <div className="flex min-h-[44px] items-center gap-3 px-1">
+          <Volume1 className="size-4 shrink-0 text-white/50" aria-hidden />
+          <PlayerSlider
+            value={volume}
+            onChange={onVolume}
+            aria-label="Volume"
+            variant="volume"
+            tone="on-dark"
+            className="-my-2 flex-1"
+          />
+          <Volume2 className="size-5 shrink-0 text-white/50" aria-hidden />
+        </div>
+      )}
     </div>
   );
 }

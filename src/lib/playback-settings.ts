@@ -17,6 +17,9 @@ export type EqPreset =
   | "custom";
 export type VolumeLevel = "quiet" | "normal" | "loud";
 
+/** Client stream/download encode preference (used heavily on iOS). */
+export type StreamQuality = "lossless" | "high" | "standard" | "compact";
+
 export type PlaybackSettings = {
   equalizerEnabled: boolean;
   equalizerPreset: EqPreset;
@@ -25,9 +28,43 @@ export type PlaybackSettings = {
   crossfadeSeconds: number;
   gaplessEnabled: boolean;
   volumeLevel: VolumeLevel;
+  /** How aggressively to encode for phones / bandwidth. Default high. */
+  streamQuality: StreamQuality;
   monoAudio: boolean;
   outputDeviceId: string;
 };
+
+export const STREAM_QUALITIES: {
+  id: StreamQuality;
+  label: string;
+  detail: string;
+}[] = [
+  {
+    id: "lossless",
+    label: "Lossless",
+    detail:
+      "Original when the phone can play it; otherwise ALAC from FLAC/WAV",
+  },
+  {
+    id: "high",
+    label: "High",
+    detail: "AAC ~256 kbps — near-transparent, sensible default",
+  },
+  {
+    id: "standard",
+    label: "Standard",
+    detail: "AAC ~160 kbps — good quality, less data",
+  },
+  {
+    id: "compact",
+    label: "Compact",
+    detail: "AAC ~96 kbps — smallest files / weakest networks",
+  },
+];
+
+export function isStreamQuality(v: string): v is StreamQuality {
+  return STREAM_QUALITIES.some((q) => q.id === v);
+}
 
 export const EQ_PRESETS: Record<EqPreset, { label: string; bands: number[] }> = {
   flat: { label: "Flat", bands: [0, 0, 0, 0, 0, 0] },
@@ -46,6 +83,7 @@ export const DEFAULT_PLAYBACK_SETTINGS: PlaybackSettings = {
   crossfadeSeconds: 5,
   gaplessEnabled: true,
   volumeLevel: "normal",
+  streamQuality: "high",
   monoAudio: false,
   outputDeviceId: "default",
 };
@@ -59,6 +97,9 @@ export function readPlaybackSettings(): PlaybackSettings {
     return {
       ...DEFAULT_PLAYBACK_SETTINGS,
       ...parsed,
+      streamQuality: isStreamQuality(String(parsed.streamQuality || ""))
+        ? (parsed.streamQuality as StreamQuality)
+        : DEFAULT_PLAYBACK_SETTINGS.streamQuality,
       equalizerBands:
         Array.isArray(parsed.equalizerBands) &&
         parsed.equalizerBands.length === EQ_FREQUENCIES.length
@@ -85,4 +126,15 @@ export function volumeLevelGain(level: VolumeLevel): number {
   if (level === "quiet") return 0.75;
   if (level === "loud") return 1.2;
   return 1;
+}
+
+/** True when playback must route through Web Audio (EQ / mono / loudness / sink). */
+export function playbackNeedsWebAudio(settings: PlaybackSettings): boolean {
+  if (settings.equalizerEnabled) return true;
+  if (settings.monoAudio) return true;
+  if (settings.volumeLevel !== "normal") return true;
+  if (settings.outputDeviceId && settings.outputDeviceId !== "default") {
+    return true;
+  }
+  return false;
 }

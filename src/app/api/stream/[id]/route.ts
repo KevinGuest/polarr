@@ -4,8 +4,18 @@ import { requireAuthFromRequest, json } from "@/lib/api";
 import { isRickrollTrack, streamPolicy } from "@/lib/bans";
 import { getTrack } from "@/lib/db";
 import { resolvePlayableAudioPath } from "@/lib/audio-path";
+import {
+  IOS_NATIVE_EXTS,
+  IOS_TRANSCODE_EXTS,
+  startCompatEncodedDownload,
+  startCompatPlayback,
+  streamQualityFromRequest,
+  wantsCompatStream,
+  wantsOfflineDownload,
+} from "@/lib/stream-compat";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 const MIME: Record<string, string> = {
   ".mp3": "audio/mpeg",
@@ -76,6 +86,28 @@ export async function GET(
   }
 
   const ext = path.extname(filePath).toLowerCase();
+  // iOS: phone-native files pass through; FLAC/etc encode per quality tier.
+  if (wantsCompatStream(req) && IOS_TRANSCODE_EXTS.has(ext) && !IOS_NATIVE_EXTS.has(ext)) {
+    const quality = streamQualityFromRequest(req);
+    if (wantsOfflineDownload(req)) {
+      const file = await startCompatEncodedDownload(
+        filePath,
+        ext,
+        quality,
+        req.signal,
+      );
+      if (file) return file;
+    } else {
+      const compat = await startCompatPlayback(
+        filePath,
+        ext,
+        quality,
+        req.signal,
+      );
+      if (compat) return compat;
+    }
+  }
+
   const contentType = MIME[ext] || "application/octet-stream";
   const range = req.headers.get("range");
   // Immutable library files — allow browser reuse across seeks / next-track prefetch

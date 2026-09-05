@@ -24,13 +24,12 @@ const DESKTOP_LABELS: Record<string, string> = {
   desktop: "Polarr Desktop",
 };
 
-const MOBILE_LABELS: Record<string, { platform: string; device: string | null }> =
-  {
-    iphone: { platform: "Polarr for iPhone", device: "iPhone" },
-    ipad: { platform: "Polarr for iPad", device: "iPad" },
-    ios: { platform: "Polarr for iOS", device: null },
-    android: { platform: "Polarr for Android", device: null },
-  };
+const MOBILE_LABELS: Record<string, string> = {
+  iphone: "Polarr for iPhone",
+  ipad: "Polarr for iPad",
+  ios: "Polarr for iOS",
+  android: "Polarr for Android",
+};
 
 function cookieValue(cookieHeader: string | null, name: string): string | null {
   if (!cookieHeader) return null;
@@ -114,7 +113,7 @@ export function describeRequestClient(req: Request): ClientDescription {
     .trim()
     .toLowerCase();
   const mobile = MOBILE_LABELS[mobileKey];
-  if (mobile) return mobile;
+  if (mobile) return { platform: mobile, device: null };
 
   return describeUserAgent(req.headers.get("user-agent"));
 }

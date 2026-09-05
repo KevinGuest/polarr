@@ -42,6 +42,8 @@ type CapacitorHttpPlugin = {
     headers?: Record<string, string>;
     data?: string | Record<string, unknown> | null;
     responseType?: "text" | "json" | "arraybuffer" | "blob";
+    connectTimeout?: number;
+    readTimeout?: number;
   }): Promise<{
     status: number;
     data: unknown;
@@ -121,6 +123,9 @@ async function serverFetch(url: string, init?: RequestInit): Promise<Response> {
     headers: headersToRecord(headers),
     data,
     responseType: wantsBinary ? "blob" : "text",
+    // Avoid hung album/Lidarr calls blocking the UI forever on iOS.
+    connectTimeout: 15_000,
+    readTimeout: 60_000,
   });
 
   const responseHeaders = new Headers();

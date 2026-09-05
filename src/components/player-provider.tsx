@@ -10,7 +10,7 @@ import {
   useState,
 } from "react";
 import { usePathname } from "next/navigation";
-import { nativeAssetUrl, ensureNativeMediaTicket, isNativeClient } from "@/lib/native-client";
+import { nativeAssetUrl, ensureNativeMediaTicket, isNativeClient, nativeClientPlatform } from "@/lib/native-client";
 import { primaryArtistName } from "@/lib/track-match";
 import { pushRecentPlayedTrack } from "@/lib/recent-searches";
 import { formatDuration, titleLooksExplicit } from "@/lib/utils";
@@ -33,6 +33,7 @@ import {
   PLAYBACK_OUTPUT_EVENT,
   PLAYBACK_SETTINGS_KEY,
   PLAYBACK_SETTINGS_EVENT,
+  playbackNeedsWebAudio,
   readPlaybackSettings,
   volumeLevelGain,
   type PlaybackSettings,
@@ -439,8 +440,31 @@ async function postConnectSync(body: {
 function audioSrcFor(track: PlayerTrack): string {
   const offline = offlineStreamUrl(track.id);
   if (offline) return offline;
-  if (track.streamUrl) return nativeAssetUrl(track.streamUrl) || track.streamUrl;
-  return nativeAssetUrl(`/api/stream/${track.id}`) || `/api/stream/${track.id}`;
+  let src =
+    track.streamUrl
+      ? nativeAssetUrl(track.streamUrl) || track.streamUrl
+      : nativeAssetUrl(`/api/stream/${track.id}`) || `/api/stream/${track.id}`;
+  // iOS HTMLAudio cannot decode FLAC — ask the server for a phone encode.
+  if (
+    typeof navigator !== "undefined" &&
+    (nativeClientPlatform() === "ios" ||
+      /iPhone|iPad|iPod/i.test(navigator.userAgent || ""))
+  ) {
+    try {
+      const url = new URL(src, window.location.origin);
+      if (/\/api\/(stream|live)\//.test(url.pathname)) {
+        url.searchParams.set("compat", "1");
+        url.searchParams.set(
+          "quality",
+          readPlaybackSettings().streamQuality || "high",
+        );
+        src = url.toString();
+      }
+    } catch {
+      /* keep original */
+    }
+  }
+  return src;
 }
 
 /** Browser throws this when play() is raced by pause/src change — not a real failure. */
@@ -1116,6 +1140,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     ) {
       return;
     }
+    // Skip Web Audio until EQ/mono/loudness/sink need it. createMediaElementSource
+    // permanently captures the element; on Capacitor (cross-origin streams) that
+    // often yields silent "playing" without CORS on the media element.
+    if (!playbackNeedsWebAudio(playbackSettingsRef.current)) return;
     const AudioContextCtor =
       window.AudioContext ||
       (window as typeof window & { webkitAudioContext?: typeof AudioContext })
@@ -1129,6 +1157,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         instAudioRef.current,
         nextAudioRef.current,
       ].map((element) => {
+          // Required before createMediaElementSource for cross-origin streams.
+          if (isNativeClient() && !element.crossOrigin) {
+            element.crossOrigin = "anonymous";
+          }
           const filters = EQ_FREQUENCIES.map(() => {
             const filter = context.createBiquadFilter();
             filter.type = "peaking";
@@ -1162,9 +1194,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const playBoth = useCallback(async () => {
     const mix = audioRef.current;
     if (!mix) return false;
-    ensureAudioEffects();
-    if (audioContextRef.current?.state === "suspended") {
-      await audioContextRef.current.resume().catch(() => null);
+    if (playbackNeedsWebAudio(playbackSettingsRef.current)) {
+      ensureAudioEffects();
+      if (audioContextRef.current?.state === "suspended") {
+        await audioContextRef.current.resume().catch(() => null);
+      }
     }
     const ok = await safePlay(mix);
     if (ok && instReadyRef.current && vocalLevelRef.current < 0.999) {
@@ -1220,6 +1254,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const applySettings = (settings: PlaybackSettings) => {
       cancelTransition();
       playbackSettingsRef.current = settings;
+      if (playbackNeedsWebAudio(settings)) ensureAudioEffects();
       effectsGraphsRef.current.forEach((graph) =>
         configureEffectsGraph(graph, settings),
       );
@@ -1233,7 +1268,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener(PLAYBACK_SETTINGS_EVENT, onSettings);
     return () =>
       window.removeEventListener(PLAYBACK_SETTINGS_EVENT, onSettings);
-  }, [applyOutputDevice, cancelTransition, configureEffectsGraph]);
+  }, [applyOutputDevice, cancelTransition, configureEffectsGraph, ensureAudioEffects]);
 
   useEffect(() => {
     shuffleRef.current = shuffle;
@@ -1407,7 +1442,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       warmAudio.removeAttribute("src");
       warmAudio.volume = volumeRef.current;
       setAudioSrc(warmAudio, audioSrcFor(ready));
-      ensureAudioEffects();
+      if (playbackNeedsWebAudio(playbackSettingsRef.current)) {
+        ensureAudioEffects();
+      }
       const stillCurrent = () =>
         transitionBusyRef.current &&
         transitionGen === playGenRef.current &&
@@ -1642,8 +1679,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
       void (async () => {
         const current = () => playGen === playGenRef.current;
-        // Native <audio> cannot send Bearer tokens — wait for mediaTicket first.
-        if (isNativeClient()) await ensureNativeMediaTicket();
+        // Native <audio> needs mediaTicket, but only block play when we have none —
+        // awaiting a refresh here drops the iOS user-gesture for audio.play().
+        if (isNativeClient() && !window.__POLARR_NATIVE_CLIENT__?.mediaTicket) {
+          await ensureNativeMediaTicket();
+        }
         if (!current()) return;
         setAudioSrc(audio, audioSrcFor(next));
         applyMixVolumes();
@@ -1922,13 +1962,23 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const audio = new Audio();
     audio.preload = "auto";
+    // iOS: system volume is the real control; keep element gain full so the
+    // in-app slider isn't fighting Control Center.
+    const iosNative = nativeClientPlatform() === "ios";
+    if (iosNative) {
+      audio.crossOrigin = "anonymous";
+      volumeRef.current = 1;
+      setVolumeState(1);
+    }
     audio.volume = volumeRef.current;
     audioRef.current = audio;
     const inst = new Audio();
+    if (iosNative) inst.crossOrigin = "anonymous";
     inst.volume = 0;
     inst.preload = "auto";
     instAudioRef.current = inst;
     const nextAudio = new Audio();
+    if (iosNative) nextAudio.crossOrigin = "anonymous";
     nextAudio.volume = volumeRef.current;
     nextAudio.preload = "auto";
     nextAudioRef.current = nextAudio;
@@ -1984,7 +2034,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       playingRef.current = uiPlaying;
       progressRef.current = stored.progress ?? 0;
       durationRef.current = stored.duration ?? 0;
-      volumeRef.current = stored.volume ?? 0.8;
+      const restoredVolume = iosNative ? 1 : (stored.volume ?? 0.8);
+      volumeRef.current = restoredVolume;
       const storedShuffle = Boolean(stored.shuffle);
       shuffleRef.current = storedShuffle;
       setQueue(stored.queue ?? []);
@@ -1992,9 +2043,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setPlaying(uiPlaying);
       setProgress(stored.progress ?? 0);
       setDuration(stored.duration ?? 0);
-      setVolumeState(stored.volume ?? 0.8);
+      setVolumeState(restoredVolume);
       setShuffle(storedShuffle);
-      audio.volume = stored.volume ?? 0.8;
+      audio.volume = restoredVolume;
 
       const savedProgress = stored.progress ?? 0;
       const hydrateId = stored.track.id;
@@ -2886,6 +2937,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const setVolume = useCallback(
     (v: number) => {
+      // iOS hardware / Control Center owns loudness; keep element gain full.
+      if (nativeClientPlatform() === "ios") {
+        const locked = 1;
+        setVolumeState(locked);
+        volumeRef.current = locked;
+        applyMixVolumes();
+        return;
+      }
       const next = Math.max(0, Math.min(1, v));
       setVolumeState(next);
       volumeRef.current = next;

@@ -40,11 +40,13 @@ import {
   EQ_FREQUENCIES,
   EQ_PRESETS,
   PLAYBACK_OUTPUT_EVENT,
+  STREAM_QUALITIES,
   readPlaybackSettings,
   writePlaybackSettings,
   type PlaybackOutputResult,
   type EqPreset,
   type PlaybackSettings,
+  type StreamQuality,
   type VolumeLevel,
 } from "@/lib/playback-settings";
 import {
@@ -1233,6 +1235,33 @@ export function SettingsClient() {
             <h2 className="px-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Audio</h2>
             <InsetGroup>
               <div className="space-y-2 px-4 py-3">
+                <Label htmlFor="stream-quality">Streaming quality</Label>
+                <select
+                  id="stream-quality"
+                  value={playback.streamQuality}
+                  onChange={(event) =>
+                    updatePlayback({
+                      streamQuality: event.target.value as StreamQuality,
+                    })
+                  }
+                  className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {STREAM_QUALITIES.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-sm text-muted-foreground">
+                  {
+                    STREAM_QUALITIES.find((q) => q.id === playback.streamQuality)
+                      ?.detail
+                  }
+                  . On iPhone/iPad, FLAC is converted to this quality for playback
+                  and offline downloads.
+                </p>
+              </div>
+              <div className="space-y-2 border-t border-border/70 px-4 py-3">
                 <Label htmlFor="volume-level">Volume level</Label>
                 <select id="volume-level" value={playback.volumeLevel} onChange={(event) => updatePlayback({ volumeLevel: event.target.value as VolumeLevel })} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring">
                   <option value="quiet">Quiet</option>

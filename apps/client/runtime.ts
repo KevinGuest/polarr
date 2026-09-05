@@ -1,5 +1,6 @@
 import {
   clearNativeSessionToken,
+  detectIosMobilePlatform,
   nativeAssetUrl,
   nativeSessionToken,
 } from "../../src/lib/native-client";
@@ -34,6 +35,21 @@ let installed = false;
 let flushing = false;
 let warming = false;
 
+type CapacitorHttpPlugin = {
+  request(options: {
+    url: string;
+    method?: string;
+    headers?: Record<string, string>;
+    data?: string | Record<string, unknown> | null;
+    responseType?: "text" | "json" | "arraybuffer" | "blob";
+  }): Promise<{
+    status: number;
+    data: unknown;
+    headers: Record<string, string>;
+    url: string;
+  }>;
+};
+
 function apiUrl(serverUrl: string, input: RequestInfo | URL): RequestInfo | URL {
   if (typeof input === "string" && input.startsWith("/api/")) {
     return new URL(input, `${serverUrl}/`).toString();
@@ -42,6 +58,106 @@ function apiUrl(serverUrl: string, input: RequestInfo | URL): RequestInfo | URL 
     return new URL(`${input.pathname}${input.search}`, `${serverUrl}/`);
   }
   return input;
+}
+
+/** iOS WKWebView fetch is CORS-bound; CapacitorHttp talks to the server natively. */
+function getCapacitorHttp(): CapacitorHttpPlugin | null {
+  if (typeof window === "undefined") return null;
+  if (window.__POLARR_NATIVE_CLIENT__?.platform !== "ios") return null;
+  const cap = (
+    window as Window & {
+      Capacitor?: {
+        isNativePlatform?: () => boolean;
+        Plugins?: { CapacitorHttp?: CapacitorHttpPlugin };
+      };
+      CapacitorHttp?: CapacitorHttpPlugin;
+    }
+  );
+  if (cap.Capacitor?.isNativePlatform && !cap.Capacitor.isNativePlatform()) return null;
+  return cap.CapacitorHttp || cap.Capacitor?.Plugins?.CapacitorHttp || null;
+}
+
+function headersToRecord(headers: Headers): Record<string, string> {
+  const out: Record<string, string> = {};
+  headers.forEach((value, key) => {
+    out[key] = value;
+  });
+  return out;
+}
+
+async function serverFetch(url: string, init?: RequestInit): Promise<Response> {
+  const http = getCapacitorHttp();
+  const headers = new Headers(init?.headers);
+  const mobilePlatform = window.__POLARR_NATIVE_CLIENT__?.mobilePlatform;
+  if (mobilePlatform) {
+    headers.set("x-polarr-mobile-platform", mobilePlatform);
+  }
+  if (!http) return originalFetch(url, { ...init, headers });
+
+  const method = (init?.method || "GET").toUpperCase();
+  let data: string | null = null;
+  if (method !== "GET" && method !== "HEAD") {
+    if (typeof init?.body === "string") data = init.body;
+    else if (init?.body != null) data = String(init.body);
+  }
+
+  const path = (() => {
+    try {
+      return new URL(url).pathname;
+    } catch {
+      return url;
+    }
+  })();
+  const wantsBinary =
+    method === "GET" &&
+    (path.startsWith("/uploads/") ||
+      path.includes("/cover") ||
+      path.includes("/avatar") ||
+      /\.(avif|gif|jpe?g|png|webp)$/i.test(path));
+
+  const result = await http.request({
+    url,
+    method,
+    headers: headersToRecord(headers),
+    data,
+    responseType: wantsBinary ? "blob" : "text",
+  });
+
+  const responseHeaders = new Headers();
+  for (const [key, value] of Object.entries(result.headers || {})) {
+    if (value != null) responseHeaders.set(key, String(value));
+  }
+
+  if (wantsBinary) {
+    let body: Blob;
+    if (result.data instanceof Blob) {
+      body = result.data;
+    } else if (typeof result.data === "string") {
+      // Native bridge may base64-encode binary payloads.
+      const binary = atob(result.data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      body = new Blob([bytes], {
+        type: responseHeaders.get("content-type") || "application/octet-stream",
+      });
+    } else if (result.data == null) {
+      body = new Blob();
+    } else {
+      body = new Blob([JSON.stringify(result.data)]);
+    }
+    return new Response(body, { status: result.status, headers: responseHeaders });
+  }
+
+  let body: string;
+  if (typeof result.data === "string") body = result.data;
+  else if (result.data == null) body = "";
+  else body = JSON.stringify(result.data);
+
+  if (!responseHeaders.has("content-type") && body && (body.startsWith("{") || body.startsWith("["))) {
+    responseHeaders.set("content-type", "application/json");
+  }
+
+  return new Response(body, { status: result.status, headers: responseHeaders });
 }
 
 function credentialScope(token: string | null) {
@@ -122,7 +238,9 @@ function artworkKey(url: string) {
 
 function isArtworkUrl(url: string) {
   try {
-    const path = new URL(url).pathname;
+    const path = url.startsWith("/")
+      ? url.split("?")[0] || url
+      : new URL(url).pathname;
     return path.startsWith("/uploads/") || path.includes("/cover") || path.includes("/avatar") || /\.(avif|gif|jpe?g|png|webp)$/i.test(path);
   } catch {
     return false;
@@ -140,6 +258,7 @@ async function cacheArtwork(url: string, token: string | null) {
   try {
     const headers = new Headers();
     if (token) headers.set("Authorization", `Bearer ${token}`);
+    // Images stay on browser fetch — CapacitorHttp text mode would corrupt binary.
     const response = await originalFetch(url, { headers });
     const contentType = response.headers.get("content-type") || "";
     if (!response.ok || !contentType.startsWith("image/")) return;
@@ -379,7 +498,7 @@ async function flushMutationQueue() {
         const headers = new Headers();
         headers.set("Authorization", `Bearer ${token}`);
         if (entry.contentType) headers.set("Content-Type", entry.contentType);
-        const response = await originalFetch(entry.url, { method: entry.method, headers, body: entry.body || undefined });
+        const response = await serverFetch(entry.url, { method: entry.method, headers, body: entry.body || undefined });
         if (response.ok) {
           await deleteMutation(entry.id);
           window.dispatchEvent(new CustomEvent("polarr-offline-change-synced", { detail: { id: entry.id } }));
@@ -413,12 +532,18 @@ async function refreshMediaTicket() {
     return;
   }
   try {
-    const response = await originalFetch(
+    const response = await serverFetch(
       new URL("/api/v1/native/media-ticket", `${bridge.serverUrl}/`).toString(),
       { method: "POST", headers: { Authorization: `Bearer ${token}` } },
     );
     const data = response.ok ? await response.json() : null;
-    bridge.mediaTicket = typeof data?.ticket === "string" ? data.ticket : null;
+    const next = typeof data?.ticket === "string" ? data.ticket : null;
+    const changed = bridge.mediaTicket !== next;
+    bridge.mediaTicket = next;
+    if (changed && next) {
+      const { emitMediaTicketUpdated } = await import("../../src/lib/ui-events");
+      emitMediaTicketUpdated();
+    }
   } catch {
     bridge.mediaTicket = null;
   }
@@ -449,7 +574,7 @@ async function warmOfflineLibrary() {
     await Promise.allSettled(
       paths.map(async (path) => {
         const url = new URL(path, `${bridge.serverUrl}/`).toString();
-        const response = await originalFetch(url, { headers });
+        const response = await serverFetch(url, { headers });
         if (response.ok) successful += 1;
         cacheResponse(url, token, response);
       }),
@@ -460,11 +585,55 @@ async function warmOfflineLibrary() {
   }
 }
 
+function clearDesktopLayoutMarkers() {
+  document.documentElement.classList.remove("polarr-desktop");
+  document.documentElement.removeAttribute("data-polarr-desktop");
+  delete document.documentElement.dataset.polarrDesktop;
+  document.documentElement.removeAttribute("data-polarr-overlay-titlebar");
+  delete document.documentElement.dataset.polarrOverlayTitlebar;
+  try {
+    sessionStorage.removeItem("polarr-desktop");
+    sessionStorage.removeItem("polarr-desktop-overlay");
+  } catch {
+    /* private mode */
+  }
+  const hide = document.getElementById("polarr-desktop-hide-header");
+  hide?.remove();
+  try {
+    const w = window as Window & { __POLARR_DESKTOP__?: Record<string, unknown> };
+    // Drop a desktop global that was only stamped for offline downloads.
+    if (w.__POLARR_DESKTOP__ && w.__POLARR_DESKTOP__.chrome !== true) {
+      delete w.__POLARR_DESKTOP__;
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function installNativeRuntime(serverUrl: string, platform: NativePlatform, version?: string, changeServer?: () => void | Promise<void>) {
   const normalized = serverUrl.replace(/\/+$/, "");
-  window.__POLARR_NATIVE_CLIENT__ = { serverUrl: normalized, platform, version, changeServer, mediaTicket: null, refreshMediaTicket };
-  document.documentElement.classList.add("dark", "polarr-ios");
-  document.documentElement.dataset.polarrNative = platform;
+  const mobilePlatform = platform === "ios" ? detectIosMobilePlatform() : undefined;
+  window.__POLARR_NATIVE_CLIENT__ = {
+    serverUrl: normalized,
+    platform,
+    mobilePlatform,
+    version,
+    changeServer,
+    mediaTicket: null,
+    refreshMediaTicket,
+  };
+  if (platform === "ios") {
+    document.documentElement.classList.add("dark", "polarr-ios");
+    document.documentElement.dataset.polarrNative = "ios";
+    if (mobilePlatform) {
+      document.documentElement.dataset.polarrMobile = mobilePlatform;
+    }
+    // Offline downloads must not flip the phone UI into desktop chrome.
+    clearDesktopLayoutMarkers();
+  } else {
+    document.documentElement.classList.add("dark");
+    document.documentElement.dataset.polarrNative = platform;
+  }
 
   if (!installed) {
     installed = true;
@@ -482,13 +651,18 @@ export async function installNativeRuntime(serverUrl: string, platform: NativePl
       const scope = credentialScope(token);
       const sameServer = new URL(url).origin === new URL(bridge.serverUrl).origin;
       if (token && sameServer) headers.set("Authorization", `Bearer ${token}`);
+      if (bridge.mobilePlatform && sameServer) {
+        headers.set("x-polarr-mobile-platform", bridge.mobilePlatform);
+      }
       const method = (init?.method || (rewritten instanceof Request ? rewritten.method : "GET")).toUpperCase();
       const body = method === "GET" || method === "HEAD" ? "" : await requestBody(input, init);
       const plan = sameServer ? queuePlan(url, method, body) : null;
 
       if (method !== "GET" && method !== "HEAD" && navigator.onLine) await flushMutationQueue();
       try {
-        const response = await originalFetch(rewritten, { ...init, headers });
+        const response = sameServer
+          ? await serverFetch(url, { ...init, method, headers, body: body || undefined })
+          : await originalFetch(rewritten, { ...init, headers });
         if (method === "GET") cacheResponse(url, token, response);
         if (response.status === 401 && token) clearNativeSessionToken();
         if (response.ok) void flushMutationQueue();
@@ -510,7 +684,9 @@ export async function installNativeRuntime(serverUrl: string, platform: NativePl
       }
     };
   }
-  await refreshMediaTicket();
+  // Never hold the bundled interface behind a server request. The client must
+  // paint immediately from local state when the server is slow or unavailable.
+  void refreshMediaTicket();
   void flushMutationQueue();
   void warmOfflineLibrary();
 }

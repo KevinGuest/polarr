@@ -1,10 +1,11 @@
 /**
  * Best-effort User-Agent parsing for admin/Discord alerts.
  *
- * The Polarr desktop (Tauri) and mobile (Capacitor) apps run inside the
- * system webview and do not set a custom UA, so the platform/device we can
- * report is whatever the underlying browser exposes. This is purely for
- * human-readable notifications — never for auth or access decisions.
+ * Desktop and mobile shells send an explicit platform hint
+ * (`x-polarr-desktop-platform` / cookie, or `x-polarr-mobile-platform`).
+ * When those are absent we fall back to the underlying browser User-Agent.
+ * This is purely for human-readable notifications — never for auth or
+ * access decisions.
  */
 
 export type ClientDescription = {
@@ -22,6 +23,14 @@ const DESKTOP_LABELS: Record<string, string> = {
   linux: "Polarr for Linux",
   desktop: "Polarr Desktop",
 };
+
+const MOBILE_LABELS: Record<string, { platform: string; device: string | null }> =
+  {
+    iphone: { platform: "Polarr for iPhone", device: "iPhone" },
+    ipad: { platform: "Polarr for iPad", device: "iPad" },
+    ios: { platform: "Polarr for iOS", device: null },
+    android: { platform: "Polarr for Android", device: null },
+  };
 
 function cookieValue(cookieHeader: string | null, name: string): string | null {
   if (!cookieHeader) return null;
@@ -87,8 +96,8 @@ export function describeUserAgent(
 }
 
 /**
- * Prefer the desktop shell's explicit display hint over its embedded browser
- * User-Agent. This hint is notification metadata only, never an auth signal.
+ * Prefer the desktop/mobile shell's explicit display hint over its embedded
+ * browser User-Agent. These hints are notification metadata only, never auth.
  */
 export function describeRequestClient(req: Request): ClientDescription {
   const nativePlatform = req.headers.get("x-polarr-desktop-platform")?.trim();
@@ -96,7 +105,16 @@ export function describeRequestClient(req: Request): ClientDescription {
     req.headers.get("cookie"),
     DESKTOP_PLATFORM_COOKIE,
   );
-  const label = DESKTOP_LABELS[nativePlatform || desktopPlatform || ""];
-  if (label) return { platform: label, device: null };
+  const desktopLabel = DESKTOP_LABELS[nativePlatform || desktopPlatform || ""];
+  if (desktopLabel) return { platform: desktopLabel, device: null };
+
+  const mobileKey = (
+    req.headers.get("x-polarr-mobile-platform") || ""
+  )
+    .trim()
+    .toLowerCase();
+  const mobile = MOBILE_LABELS[mobileKey];
+  if (mobile) return mobile;
+
   return describeUserAgent(req.headers.get("user-agent"));
 }

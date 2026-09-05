@@ -13,6 +13,7 @@ import {
   hasPolarrDesktopGlobal,
   isPolarrDesktop as isDesktopShell,
 } from "@/lib/desktop-shell";
+import { nativeSessionToken } from "@/lib/native-client";
 
 export type DesktopOfflineTrack = {
   trackId: string;
@@ -23,6 +24,7 @@ export type DesktopOfflineTrack = {
   duration?: number | null;
   contentType?: string | null;
   userId: string;
+  localUrl?: string | null;
 };
 
 export type OfflineTrackStatus =
@@ -53,10 +55,12 @@ type TauriInvoke = (
 let bridge: boolean | null = null;
 let authorizedUserId: string | null = null;
 let offlineIds = new Set<string>();
+let offlineUrls = new Map<string, string>();
 let syncTimer: number | null = null;
 
 let batchCancelled = false;
 let batchRunning = false;
+let activeIOSJobId: string | null = null;
 let progress: OfflineProgressDetail = {
   active: false,
   done: 0,
@@ -80,6 +84,36 @@ function getTauriInvoke(): TauriInvoke | null {
     w.__TAURI__?.core?.invoke ?? w.__TAURI_INTERNALS__?.invoke ?? null;
   if (typeof invoke !== "function") return null;
   return invoke.bind(w.__TAURI__?.core ?? w);
+}
+
+type IOSOfflinePlugin = {
+  setSession(options: { userId: string | null }): Promise<void>;
+  list(): Promise<{ tracks?: DesktopOfflineTrack[] }>;
+  ids(): Promise<{ ids?: string[] }>;
+  has(options: { trackId: string }): Promise<{ has?: boolean }>;
+  download(options: DesktopOfflineTrack & { url: string; token: string }): Promise<{ jobId?: string }>;
+  status(options: { jobId: string }): Promise<{ status?: string; progress?: number; error?: string }>;
+  cancel(options: { jobId: string }): Promise<void>;
+  remove(options: { trackId: string }): Promise<void>;
+  clear(): Promise<void>;
+};
+
+function getIOSOfflinePlugin(): IOSOfflinePlugin | null {
+  if (typeof window === "undefined" || window.__POLARR_NATIVE_CLIENT__?.platform !== "ios") return null;
+  const capacitor = (window as Window & {
+    Capacitor?: {
+      Plugins?: { PolarrOffline?: IOSOfflinePlugin };
+      convertFileSrc?: (path: string) => string;
+    };
+  }).Capacitor;
+  return capacitor?.Plugins?.PolarrOffline || null;
+}
+
+function convertIOSFileUrl(path: string) {
+  const capacitor = (window as Window & {
+    Capacitor?: { convertFileSrc?: (value: string) => string };
+  }).Capacitor;
+  return capacitor?.convertFileSrc?.(path) || path;
 }
 
 function emitProgress() {
@@ -174,6 +208,44 @@ async function callDesktop(
   tracks?: DesktopOfflineTrack[];
   has?: boolean;
 }> {
+  const ios = getIOSOfflinePlugin();
+  if (ios) {
+    try {
+      switch (type) {
+        case "ping":
+          return { ok: true };
+        case "session":
+          await ios.setSession({ userId: (payload?.userId as string | null | undefined) ?? null });
+          return { ok: true };
+        case "ids": {
+          const result = await ios.ids();
+          return { ok: true, ids: Array.isArray(result.ids) ? result.ids : [] };
+        }
+        case "list": {
+          const result = await ios.list();
+          const tracks = Array.isArray(result.tracks)
+            ? result.tracks.map((track) => ({
+                ...track,
+                localUrl: track.localUrl ? convertIOSFileUrl(track.localUrl) : null,
+              }))
+            : [];
+          return { ok: true, tracks };
+        }
+        case "has": {
+          const result = await ios.has({ trackId: String(payload?.trackId || "") });
+          return { ok: true, has: Boolean(result.has) };
+        }
+        case "remove":
+          await ios.remove({ trackId: String(payload?.trackId || "") });
+          return { ok: true };
+        default:
+          return { ok: false, error: `unknown ${type}` };
+      }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   const invoke = getTauriInvoke();
   if (invoke) {
     try {
@@ -250,6 +322,12 @@ export async function isPolarrDesktop(): Promise<boolean> {
     bridge = false;
     return false;
   }
+  if (getIOSOfflinePlugin()) {
+    // Offline-capable native app — do NOT mark the Tauri desktop shell.
+    // `__POLARR_DESKTOP__` / data-polarr-desktop force the lg desktop layout.
+    bridge = true;
+    return true;
+  }
   if (hasPolarrDesktopGlobal() || isDesktopShell()) {
     const invoke = getTauriInvoke();
     if (invoke) {
@@ -264,9 +342,16 @@ export async function isPolarrDesktop(): Promise<boolean> {
   return bridge;
 }
 
-/** Sync helper — marks `__POLARR_DESKTOP__` for feature detection. */
+/** Sync helper — marks `__POLARR_DESKTOP__` for Tauri desktop feature detection only. */
 export function markDesktopGlobal() {
   if (typeof window === "undefined") return;
+  // iOS shares the offline download bridge but must keep the mobile chrome.
+  if (
+    window.__POLARR_NATIVE_CLIENT__?.platform === "ios" ||
+    document.documentElement.dataset.polarrNative === "ios"
+  ) {
+    return;
+  }
   const w = window as unknown as { __POLARR_DESKTOP__?: Record<string, unknown> };
   w.__POLARR_DESKTOP__ = {
     ...(w.__POLARR_DESKTOP__ || {}),
@@ -276,6 +361,8 @@ export function markDesktopGlobal() {
 
 export function offlineStreamUrl(trackId: string): string | null {
   if (!authorizedUserId || !offlineIds.has(trackId)) return null;
+  const iosUrl = offlineUrls.get(trackId);
+  if (iosUrl) return iosUrl;
   // Tauri 2 custom schemes on Windows are exposed as http://{scheme}.localhost/
   return `http://polarroffline.localhost/${encodeURIComponent(trackId)}`;
 }
@@ -306,6 +393,14 @@ export async function refreshOfflineIds(): Promise<string[]> {
   const res = await callDesktop("ids");
   if (!res.ok || !Array.isArray(res.ids)) return [...offlineIds];
   offlineIds = new Set(res.ids);
+  if (getIOSOfflinePlugin()) {
+    const listed = await callDesktop("list");
+    offlineUrls = new Map(
+      (listed.tracks || [])
+        .filter((track) => track.trackId && track.localUrl)
+        .map((track) => [track.trackId, track.localUrl!] as const),
+    );
+  }
   return res.ids;
 }
 
@@ -320,6 +415,7 @@ export async function setDesktopOfflineSession(
   }
   if (!userId) {
     offlineIds = new Set();
+    offlineUrls = new Map();
   }
   return res.ok;
 }
@@ -337,13 +433,43 @@ export async function downloadTrackOffline(
   track: DesktopOfflineTrack,
 ): Promise<void> {
   if (!(await isPolarrDesktop())) {
-    throw new Error("Offline downloads require the Polarr desktop app");
+    throw new Error("Offline downloads require a Polarr app");
   }
   if (!track.userId) {
     throw new Error("Sign in to download offline");
   }
 
   await setDesktopOfflineSession(track.userId);
+
+  const ios = getIOSOfflinePlugin();
+  if (ios) {
+    const token = nativeSessionToken();
+    const serverUrl = window.__POLARR_NATIVE_CLIENT__?.serverUrl;
+    if (!token || !serverUrl) throw new Error("Sign in to download offline");
+    const source = new URL(`/api/stream/${encodeURIComponent(track.trackId)}`, `${serverUrl}/`).toString();
+    const started = await ios.download({ ...track, url: source, token });
+    if (!started.jobId) throw new Error("Couldn’t start offline download");
+    activeIOSJobId = started.jobId;
+    try {
+      while (true) {
+        const current = await ios.status({ jobId: started.jobId });
+        if (current.status === "done") break;
+        if (current.status === "error" || current.status === "cancelled") {
+          throw new Error(current.error || (current.status === "cancelled" ? "Download stopped" : "Offline download failed"));
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+      }
+    } finally {
+      activeIOSJobId = null;
+    }
+    await fetch(`/api/tracks/${encodeURIComponent(track.trackId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId: "polarr-ios" }),
+    }).catch(() => null);
+    await refreshOfflineIds();
+    return;
+  }
 
   const begin = await callDesktop("begin-download", {
     trackId: track.trackId,
@@ -402,11 +528,16 @@ export async function removeTrackOffline(trackId: string): Promise<void> {
   if (!(await isPolarrDesktop())) return;
   await callDesktop("remove", { trackId });
   offlineIds.delete(trackId);
+  offlineUrls.delete(trackId);
 }
 
 export function cancelOfflineBatch(): void {
   if (!batchRunning) return;
   batchCancelled = true;
+  const ios = getIOSOfflinePlugin();
+  if (ios && activeIOSJobId) {
+    void ios.cancel({ jobId: activeIOSJobId });
+  }
 }
 
 export function isOfflineBatchActive(): boolean {
@@ -422,7 +553,7 @@ export async function downloadTracksOfflineBatch(opts: {
   tracks: DesktopOfflineTrack[];
 }): Promise<{ done: number; total: number; cancelled: boolean }> {
   if (!(await isPolarrDesktop())) {
-    throw new Error("Offline downloads require the Polarr desktop app");
+    throw new Error("Offline downloads require a Polarr app");
   }
   if (batchRunning) {
     throw new Error("A download is already in progress");
@@ -517,7 +648,7 @@ export function startDesktopOfflineSync(getUserId: () => string | null) {
   const tick = () => {
     void (async () => {
       if (!(await isPolarrDesktop())) return;
-      markDesktopGlobal();
+      if (!getIOSOfflinePlugin()) markDesktopGlobal();
       const uid = getUserId();
       if (uid !== authorizedUserId) {
         await setDesktopOfflineSession(uid);

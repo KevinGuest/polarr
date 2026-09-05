@@ -53,7 +53,7 @@ export function useOfflineProgress() {
   return detail;
 }
 
-/** Spotify-style playlist/album download control (desktop app only). */
+/** Spotify-style playlist/album download control for native apps. */
 export function PlaylistOfflineDownloadButton({
   collectionId,
   tracks,
@@ -210,7 +210,7 @@ export function PlaylistOfflineDownloadButton({
   );
 }
 
-/** Compact per-track offline indicator (desktop only). */
+/** Compact per-track offline indicator for native apps. */
 export function TrackOfflineIndicator({
   trackId,
   collectionId,

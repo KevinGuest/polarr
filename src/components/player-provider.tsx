@@ -10,11 +10,11 @@ import {
   useState,
 } from "react";
 import { usePathname } from "next/navigation";
-import { nativeAssetUrl } from "@/lib/native-client";
+import { nativeAssetUrl, ensureNativeMediaTicket, isNativeClient } from "@/lib/native-client";
 import { primaryArtistName } from "@/lib/track-match";
 import { pushRecentPlayedTrack } from "@/lib/recent-searches";
 import { formatDuration, titleLooksExplicit } from "@/lib/utils";
-import { emitListenCredited } from "@/lib/ui-events";
+import { emitListenCredited, MEDIA_TICKET_UPDATED_EVENT } from "@/lib/ui-events";
 import { LISTEN_HEARTBEAT_SECONDS } from "@/lib/listen";
 import { offlineStreamUrl } from "@/lib/desktop-offline";
 import {
@@ -1640,12 +1640,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setKaraokeProgress(0);
       setKaraokeError(null);
 
-      const src = audioSrcFor(next);
-      setAudioSrc(audio, src);
-      applyMixVolumes();
-
       void (async () => {
         const current = () => playGen === playGenRef.current;
+        // Native <audio> cannot send Bearer tokens — wait for mediaTicket first.
+        if (isNativeClient()) await ensureNativeMediaTicket();
+        if (!current()) return;
+        setAudioSrc(audio, audioSrcFor(next));
+        applyMixVolumes();
         // Start immediately — don't wait for canplay (saves buffer latency).
         // Retry once if the element wasn't ready yet.
         let ok = await playBoth();

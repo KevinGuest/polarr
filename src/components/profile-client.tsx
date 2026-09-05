@@ -17,7 +17,8 @@ import {
   extractBannerColors,
   extractBannerColorsFromUrl,
 } from "@/lib/banner-colors";
-import { AVATAR_UPDATED_EVENT } from "@/lib/ui-events";
+import { AVATAR_UPDATED_EVENT, MEDIA_TICKET_UPDATED_EVENT } from "@/lib/ui-events";
+import { nativeAssetUrl } from "@/lib/native-client";
 import { toastError, toastSaved } from "@/lib/toast";
 
 type Profile = {
@@ -169,8 +170,9 @@ function bannerStyle(colors: string[] | null | undefined): CSSProperties {
 
 function cacheBust(url: string | null, v: number) {
   if (!url) return null;
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}v=${v}`;
+  const resolved = nativeAssetUrl(url) || url;
+  const sep = resolved.includes("?") ? "&" : "?";
+  return `${resolved}${sep}v=${v}`;
 }
 
 export function ProfileClient({
@@ -190,8 +192,9 @@ export function ProfileClient({
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     setError(null);
+    // Keep the previous profile painted while refreshing to avoid a full-page skeleton flash.
+    if (!data) setLoading(true);
 
     async function load() {
       try {
@@ -235,29 +238,34 @@ export function ProfileClient({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only reload when the target profile changes
   }, [username, router]);
 
-  // Re-sample banner from the visible avatar so gradient always matches the photo
+  // Prefer stored banner colors; only replace when a fresh sample succeeds.
   useEffect(() => {
     const url = data?.user?.avatarUrl;
-    if (!url) {
-      setLiveBanner(null);
-      return;
-    }
-    setLiveBanner(null); // fall back to stored colors until resample finishes
+    if (!url) return;
     let cancelled = false;
     const src = cacheBust(url, avatarVer) ?? url;
     void extractBannerColorsFromUrl(src)
       .then((colors) => {
-        if (!cancelled) setLiveBanner(colors);
+        if (!cancelled && colors?.length) setLiveBanner(colors);
       })
       .catch(() => {
-        if (!cancelled) setLiveBanner(null);
+        /* keep stored bannerColors */
       });
     return () => {
       cancelled = true;
     };
   }, [data?.user?.publicId, data?.user?.avatarUrl, avatarVer]);
+
+  useEffect(() => {
+    function onMediaTicket() {
+      setAvatarVer(Date.now());
+    }
+    window.addEventListener(MEDIA_TICKET_UPDATED_EVENT, onMediaTicket);
+    return () => window.removeEventListener(MEDIA_TICKET_UPDATED_EVENT, onMediaTicket);
+  }, []);
 
   async function onPickAvatar(file: File | null) {
     if (!file || !data?.isSelf) return;

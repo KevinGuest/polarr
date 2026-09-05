@@ -1,11 +1,17 @@
 /** Cross-component UI events (window CustomEvent / Event names). */
 export const AVATAR_UPDATED_EVENT = "polarr:avatar-updated";
+export const MEDIA_TICKET_UPDATED_EVENT = "polarr:media-ticket-updated";
 export const LIKES_CHANGED_EVENT = "polarr:likes-changed";
 export const LIBRARY_CHANGED_EVENT = "polarr:library-changed";
 export const LIBRARY_PINS_CHANGED_EVENT = "polarr:library-pins-changed";
 /** Fired after a ≥30s listen heartbeat is credited (recent / others feed). */
 export const LISTEN_CREDITED_EVENT = "polarr:listen-credited";
 export const RECENT_PLAYED_CHANGED_EVENT = "polarr:recent-played-changed";
+
+export function emitMediaTicketUpdated() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(MEDIA_TICKET_UPDATED_EVENT));
+}
 
 export function emitLikesChanged(detail?: { count?: number; liked?: boolean }) {
   if (typeof window === "undefined") return;

@@ -25,7 +25,10 @@ export function getAuthUserFromRequest(req: Request) {
     return getUserByToken(auth.slice(7).trim());
   }
   const mediaTicket = new URL(req.url).searchParams.get("mediaTicket");
-  if (mediaTicket) return getUserByNativeMediaTicket(mediaTicket);
+  if (mediaTicket) {
+    const fromTicket = getUserByNativeMediaTicket(mediaTicket);
+    if (fromTicket) return fromTicket;
+  }
   return getUserByToken(tokenFromCookieHeader(req.headers.get("cookie")));
 }
 

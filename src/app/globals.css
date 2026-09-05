@@ -2,19 +2,21 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Desktop shell always uses lg layout — never flip to phone chrome on resize. */
+/* Desktop shell always uses lg layout — never flip to phone chrome on resize.
+   iOS native keeps viewport breakpoints even if a desktop marker leaks in. */
 @custom-variant lg {
   @media (width >= 1024px) {
     @slot;
   }
-  html[data-polarr-desktop] & {
+  html[data-polarr-desktop]:not([data-polarr-native="ios"]) & {
     @slot;
   }
 }
 
 @custom-variant max-lg {
   @media (width < 1024px) {
-    html:not([data-polarr-desktop]) & {
+    html:not([data-polarr-desktop]) &,
+    html[data-polarr-native="ios"] & {
       @slot;
     }
   }
@@ -170,6 +172,27 @@
     min-height: 3rem;
     font-size: 1rem;
   }
+}
+
+/* iOS native: keep transient messages clear of the Dynamic Island/notch. */
+html[data-polarr-native="ios"]
+  [data-sonner-toaster][data-y-position="top"] {
+  top: calc(env(safe-area-inset-top, 0px) + 12px) !important;
+  left: 12px !important;
+  right: 12px !important;
+  width: auto !important;
+  max-width: none !important;
+  padding-top: 0 !important;
+  transform: none !important;
+}
+
+html[data-polarr-native="ios"]
+  [data-sonner-toaster][data-y-position="top"]
+  [data-sonner-toast] {
+  left: auto !important;
+  right: auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
 }
 
 /* Tauri desktop shell: hide only app chrome headers (title bar owns them).
@@ -417,4 +440,3 @@ html[data-polarr-overlay-titlebar] [data-polarr-auth] {
     display: none !important;
   }
 }
-

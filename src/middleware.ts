@@ -28,7 +28,10 @@ function withNativeCors(response: NextResponse, origin: string | null) {
   if (!origin) return response;
   response.headers.set("Access-Control-Allow-Origin", origin);
   response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-  response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Range");
+  response.headers.set(
+    "Access-Control-Allow-Headers",
+    "Authorization, Content-Type, Range, x-polarr-mobile-platform, x-polarr-desktop-platform",
+  );
   response.headers.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
   response.headers.set("Vary", "Origin");
   return response;

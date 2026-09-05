@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { useNativeMediaDisplaySrc } from "@/lib/use-native-media-src";
 
 /**
  * Profile image with initial fallback when missing or load fails
@@ -20,9 +21,14 @@ export function UserAvatar({
   imgClassName?: string;
   textClassName?: string;
 }) {
+  const resolved = useNativeMediaDisplaySrc(avatarUrl);
   const [broken, setBroken] = useState(false);
   const letter = (username.trim()[0] || "?").toUpperCase();
-  const showImg = Boolean(avatarUrl) && !broken;
+  const showImg = Boolean(resolved) && !broken;
+
+  useEffect(() => {
+    setBroken(false);
+  }, [resolved]);
 
   return (
     <span
@@ -35,7 +41,7 @@ export function UserAvatar({
       {showImg ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={avatarUrl!}
+          src={resolved!}
           alt=""
           className={cn("absolute inset-0 size-full object-cover", imgClassName)}
           onError={() => setBroken(true)}

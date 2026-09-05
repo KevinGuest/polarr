@@ -14,11 +14,11 @@ export async function extractBannerColors(source: Blob): Promise<string[]> {
 /** Re-sample an already-hosted avatar (keeps banner in sync with the photo). */
 export async function extractBannerColorsFromUrl(
   url: string,
-): Promise<string[]> {
+): Promise<string[] | null> {
   const res = await fetch(url);
-  if (!res.ok) return defaultBanner();
+  if (!res.ok) return null;
   const blob = await res.blob();
-  if (!blob.type.startsWith("image/") && blob.size === 0) return defaultBanner();
+  if (!blob.type.startsWith("image/") && blob.size === 0) return null;
   return extractBannerColors(blob);
 }
 

@@ -187,25 +187,40 @@ export function DownloadsClient() {
           Listen on your phone
         </h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          {["iOS", "Android"].map((name) => (
-            <article
-              key={name}
-              className="flex min-h-24 items-center gap-4 rounded-2xl border border-border bg-card px-5 py-4"
+          <article className="flex min-h-24 items-center gap-4 rounded-2xl border border-border bg-card px-5 py-4">
+            <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground">
+              <Smartphone className="size-5" strokeWidth={1.7} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-semibold text-foreground">iOS</h3>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Polarr for iPhone and iPad
+              </p>
+            </div>
+            <a
+              href="https://testflight.apple.com/join/17ya8S7t"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-foreground px-3 py-1.5 text-[11px] font-semibold text-background transition-opacity hover:opacity-85"
             >
-              <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                <Smartphone className="size-5" strokeWidth={1.7} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="font-semibold text-foreground">{name}</h3>
-                <p className="mt-0.5 text-sm text-muted-foreground">
-                  Polarr for {name}
-                </p>
-              </div>
-              <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-                Coming soon
-              </span>
-            </article>
-          ))}
+              TestFlight
+              <ExternalLink className="size-3" />
+            </a>
+          </article>
+          <article className="flex min-h-24 items-center gap-4 rounded-2xl border border-border bg-card px-5 py-4">
+            <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+              <Smartphone className="size-5" strokeWidth={1.7} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-semibold text-foreground">Android</h3>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Polarr for Android
+              </p>
+            </div>
+            <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+              Coming soon
+            </span>
+          </article>
         </div>
       </section>
 

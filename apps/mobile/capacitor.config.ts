@@ -20,6 +20,10 @@ const config: CapacitorConfig = {
     allowsLinkPreview: false,
   },
   plugins: {
+    CapacitorHttp: {
+      // Native HTTP for API traffic; avoids WKWebView CORS against the Polarr server.
+      enabled: true,
+    },
     SplashScreen: {
       backgroundColor: "#09090b",
       launchAutoHide: true,

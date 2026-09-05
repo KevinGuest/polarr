@@ -198,6 +198,13 @@ export function isOverlayTitlebar(): boolean {
 
 export function markPolarrDesktop(): void {
   if (typeof window === "undefined") return;
+  // Bundled iOS client must stay on mobile chrome.
+  if (
+    document.documentElement.dataset.polarrNative === "ios" ||
+    window.__POLARR_NATIVE_CLIENT__?.platform === "ios"
+  ) {
+    return;
+  }
   try {
     const agent = navigator.userAgent;
     const platform = /Windows/i.test(agent)
@@ -259,6 +266,12 @@ export function markPolarrDesktop(): void {
 
 export function isPolarrDesktop(): boolean {
   if (typeof window === "undefined") return false;
+  if (
+    document.documentElement.dataset.polarrNative === "ios" ||
+    window.__POLARR_NATIVE_CLIENT__?.platform === "ios"
+  ) {
+    return false;
+  }
   if (document.documentElement.dataset.polarrDesktop === "1") return true;
   if (
     document.documentElement.getAttribute("data-polarr-desktop") === "1"

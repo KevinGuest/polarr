@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { AVATAR_UPDATED_EVENT } from "@/lib/ui-events";
+import { AVATAR_UPDATED_EVENT, MEDIA_TICKET_UPDATED_EVENT } from "@/lib/ui-events";
 import type { UserRole } from "@/lib/roles";
 import { roleIsStaff } from "@/lib/roles";
 import {
@@ -17,7 +17,7 @@ import {
   setDesktopOfflineSession,
   startDesktopOfflineSync,
 } from "@/lib/desktop-offline";
-import { clearNativeSessionToken } from "@/lib/native-client";
+import { clearNativeSessionToken, nativeAssetUrl } from "@/lib/native-client";
 
 export type BanStatus = {
   stream: boolean;
@@ -107,16 +107,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     function onAvatarUpdated() {
       void refresh();
     }
+    function onMediaTicket() {
+      // Re-stamp cache busters so avatar <img> URLs pick up mediaTicket.
+      setAvatarVer(Date.now());
+    }
     window.addEventListener(AVATAR_UPDATED_EVENT, onAvatarUpdated);
+    window.addEventListener(MEDIA_TICKET_UPDATED_EVENT, onMediaTicket);
     return () => {
       window.removeEventListener(AVATAR_UPDATED_EVENT, onAvatarUpdated);
+      window.removeEventListener(MEDIA_TICKET_UPDATED_EVENT, onMediaTicket);
     };
   }, [refresh]);
 
   const role = roleFromUser(user);
-  const avatarSrc = user?.avatarUrl
-    ? `${user.avatarUrl}${user.avatarUrl.includes("?") ? "&" : "?"}v=${avatarVer || 1}`
-    : null;
+  const avatarSrc = (() => {
+    if (!user?.avatarUrl) return null;
+    const resolved = nativeAssetUrl(user.avatarUrl) || user.avatarUrl;
+    const sep = resolved.includes("?") ? "&" : "?";
+    return `${resolved}${sep}v=${avatarVer || 1}`;
+  })();
   const isStaff = roleIsStaff(role) || Boolean(user?.isAdmin);
 
   const value = useMemo<AuthContextValue>(

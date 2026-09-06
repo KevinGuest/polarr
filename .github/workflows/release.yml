@@ -41,7 +41,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: apps/desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            apps/desktop/package-lock.json
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -57,7 +59,12 @@ jobs:
           shared-key: ${{ matrix.artifact_name }}
           cache-on-failure: true
 
-      - name: Install dependencies
+      # Shared UI source lives at /src, so its imports resolve through the root
+      # node_modules. Local machines already have that tree; clean runners do not.
+      - name: Install shared UI dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install desktop dependencies
         working-directory: apps/desktop
         run: npm ci
 

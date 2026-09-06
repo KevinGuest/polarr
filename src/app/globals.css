@@ -195,6 +195,19 @@ html[data-polarr-native="ios"]
   max-width: 100% !important;
 }
 
+/* Native desktop title bars sit above the bundled document. Keep portalled
+   account drawers below that chrome instead of clipping their profile row. */
+html[data-polarr-native="desktop"] [data-polarr-profile-drawer],
+html[data-polarr-desktop] [data-polarr-profile-drawer] {
+  top: var(--titlebar-h, 48px);
+}
+
+/* Title bar already clears the chrome — don't stack safe-area padding on top. */
+html[data-polarr-native="desktop"] [data-polarr-profile-drawer-scroll],
+html[data-polarr-desktop] [data-polarr-profile-drawer-scroll] {
+  padding-top: 0.25rem;
+}
+
 /* Tauri desktop shell: hide only app chrome headers (title bar owns them).
    macOS overlay titlebar keeps this header — it IS the top bar.
    Do NOT target bare `header` — artist/playlist heroes use <header>. */

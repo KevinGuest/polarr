@@ -236,6 +236,7 @@ export function ProfileDrawer({
       <DialogPortal>
         <DialogOverlay className="z-[70] bg-black/55" />
         <DialogPrimitive.Content
+          data-polarr-profile-drawer=""
           aria-describedby={undefined}
           className={cn(
             "fixed inset-y-0 z-[70] flex w-[min(24rem,88vw)] flex-col bg-background text-foreground shadow-2xl outline-none",
@@ -252,11 +253,14 @@ export function ProfileDrawer({
             Account menu
           </DialogPrimitive.Title>
 
-          <div className="min-h-0 flex-1 overflow-y-auto pt-[max(1rem,var(--safe-top))]">
+          <div
+            data-polarr-profile-drawer-scroll=""
+            className="min-h-0 flex-1 overflow-y-auto pt-[max(1rem,var(--safe-top))]"
+          >
             <button
               type="button"
               onClick={() => go("/profile")}
-              className="flex w-full items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-muted/40"
+              className="flex w-full items-center gap-3 px-5 py-3.5 text-left transition-colors hover:bg-muted/40"
             >
               <span className="relative size-12 shrink-0 overflow-hidden rounded-full border border-border">
                 <UserAvatar
@@ -275,7 +279,7 @@ export function ProfileDrawer({
               </span>
             </button>
 
-            <div className="mt-1 border-t border-border/60 pt-1">
+            <div className="border-t border-border/60">
               <DrawerRow
                 icon={Settings}
                 label="Settings and privacy"

@@ -1,5 +1,6 @@
 import {
   clearNativeSessionToken,
+  detectNativeDesktopPlatform,
   detectIosMobilePlatform,
   nativeAssetUrl,
   nativeSessionToken,
@@ -91,8 +92,12 @@ async function serverFetch(url: string, init?: RequestInit): Promise<Response> {
   const http = getCapacitorHttp();
   const headers = new Headers(init?.headers);
   const mobilePlatform = window.__POLARR_NATIVE_CLIENT__?.mobilePlatform;
+  const desktopPlatform = window.__POLARR_NATIVE_CLIENT__?.desktopPlatform;
   if (mobilePlatform) {
     headers.set("x-polarr-mobile-platform", mobilePlatform);
+  }
+  if (desktopPlatform) {
+    headers.set("x-polarr-desktop-platform", desktopPlatform);
   }
   if (!http) return originalFetch(url, { ...init, headers });
 
@@ -673,10 +678,12 @@ function clearDesktopLayoutMarkers() {
 export async function installNativeRuntime(serverUrl: string, platform: NativePlatform, version?: string, changeServer?: () => void | Promise<void>) {
   const normalized = serverUrl.replace(/\/+$/, "");
   const mobilePlatform = platform === "ios" ? detectIosMobilePlatform() : undefined;
+  const desktopPlatform = platform === "desktop" ? detectNativeDesktopPlatform() : undefined;
   window.__POLARR_NATIVE_CLIENT__ = {
     serverUrl: normalized,
     platform,
     mobilePlatform,
+    desktopPlatform,
     version,
     changeServer,
     mediaTicket: null,
@@ -714,6 +721,9 @@ export async function installNativeRuntime(serverUrl: string, platform: NativePl
       if (token && sameServer) headers.set("Authorization", `Bearer ${token}`);
       if (bridge.mobilePlatform && sameServer) {
         headers.set("x-polarr-mobile-platform", bridge.mobilePlatform);
+      }
+      if (bridge.desktopPlatform && sameServer) {
+        headers.set("x-polarr-desktop-platform", bridge.desktopPlatform);
       }
       const method = (init?.method || (rewritten instanceof Request ? rewritten.method : "GET")).toUpperCase();
       const body = method === "GET" || method === "HEAD" ? "" : await requestBody(input, init);

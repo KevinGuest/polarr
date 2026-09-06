@@ -13,13 +13,51 @@ import {
   markPolarrDesktop,
   postChromeToShell,
 } from "@/lib/desktop-shell";
+import { nativeSessionToken } from "@/lib/native-client";
+
+type TauriInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+
+function desktopInvoke(): TauriInvoke | null {
+  if (typeof window === "undefined") return null;
+  const nativeWindow = window as Window & {
+    __TAURI__?: { core?: { invoke?: TauriInvoke } };
+    __TAURI_INTERNALS__?: { invoke?: TauriInvoke };
+  };
+  const owner = nativeWindow.__TAURI__?.core ?? nativeWindow.__TAURI_INTERNALS__;
+  const invoke = owner?.invoke;
+  return typeof invoke === "function" ? invoke.bind(owner) : null;
+}
 
 async function avatarDataUrlFromSrc(
   src: string | null | undefined,
 ): Promise<string | null> {
   if (!src) return null;
   try {
-    const res = await fetch(src, { credentials: "include", cache: "no-store" });
+    const token = nativeSessionToken();
+    const invoke = token ? desktopInvoke() : null;
+    if (invoke) {
+      try {
+        const parsed = new URL(src, window.location.origin);
+        parsed.searchParams.delete("mediaTicket");
+        parsed.searchParams.delete("v");
+        if (parsed.pathname.startsWith("/api/")) {
+          const dataUrl = await invoke<string | null>("desktop_media_data_url", {
+            path: `${parsed.pathname}${parsed.search}`,
+            token,
+          });
+          if (dataUrl) return dataUrl;
+        }
+      } catch {
+        /* Fall through to fetch. */
+      }
+    }
+    const headers = new Headers();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const res = await fetch(src, {
+      credentials: "include",
+      cache: "no-store",
+      headers,
+    });
     if (!res.ok) return null;
     const blob = await res.blob();
     if (!blob.size) return null;

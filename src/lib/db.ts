@@ -2489,6 +2489,11 @@ function sessionPublicId(token: string): string {
 
 function sessionDeviceName(userAgent: string | null): string {
   const ua = userAgent || "";
+  if (/PolarrDesktop\/windows/i.test(ua)) return "Polarr for Windows";
+  if (/PolarrDesktop\/macos/i.test(ua)) return "Polarr for macOS";
+  if (/PolarrDesktop\/linux/i.test(ua)) return "Polarr for Linux";
+  if (/PolarrMobile\/iphone/i.test(ua)) return "Polarr for iPhone";
+  if (/PolarrMobile\/ipad/i.test(ua)) return "Polarr for iPad";
   if (/Edg\//i.test(ua)) return "Web Player (Edge)";
   if (/Chrome\//i.test(ua) && !/Edg\//i.test(ua)) return "Web Player (Chrome)";
   if (/Safari\//i.test(ua) && !/Chrome\//i.test(ua)) return "Web Player (Safari)";

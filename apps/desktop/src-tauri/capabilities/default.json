@@ -47,6 +47,7 @@
     "allow-probe-server-url",
     "allow-probe-server",
     "allow-desktop-api-request",
+    "allow-desktop-media-data-url",
     "allow-desktop-api-reset-session",
     "allow-open-server-webview",
     "allow-hide-server-webview",

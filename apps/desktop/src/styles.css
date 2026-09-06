@@ -9,14 +9,14 @@
   --panel: #18181b;
   --titlebar: #09090b;
   --text: #fafafa;
-  --muted: #a1a1aa;
-  --border: #27272a;
+  --desktop-muted: #a1a1aa;
+  --desktop-border: #27272a;
   --border-subtle: rgba(255, 255, 255, 0.06);
-  --accent: #fafafa;
+  --desktop-accent: #fafafa;
   --danger: #e11d48;
   --titlebar-h: 48px;
   --win-btn-w: 46px;
-  --radius: 10px;
+  --desktop-radius: 10px;
   --search-max: 28rem;
   font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
 }
@@ -53,7 +53,7 @@ body {
   min-height: 100vh;
   background: var(--bg);
   overflow: hidden;
-  border-radius: var(--radius);
+  border-radius: var(--desktop-radius);
 }
 
 .app-frame.is-maximized {
@@ -68,7 +68,7 @@ body {
   grid-template-areas: "menu nav center right win";
   align-items: stretch;
   background: var(--titlebar);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--desktop-border);
   user-select: none;
   -webkit-user-select: none;
   position: relative;
@@ -368,7 +368,7 @@ html.mac .titlebar-center {
   padding: 6px;
   border-radius: 10px;
   background: #18181b;
-  border: 1px solid var(--border);
+  border: 1px solid var(--desktop-border);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 
@@ -425,7 +425,7 @@ html.mac .titlebar-center {
   padding: 6px 10px 8px;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--muted);
+  color: var(--desktop-muted);
   letter-spacing: 0.02em;
 }
 
@@ -440,7 +440,7 @@ html.mac .titlebar-center {
 .profile-sep {
   height: 1px;
   margin: 4px 6px;
-  background: var(--border);
+  background: var(--desktop-border);
 }
 
 /* Centered search — Polarr mark hangs immediately to its left */
@@ -463,7 +463,7 @@ html.mac .titlebar-center {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  color: var(--muted);
+  color: var(--desktop-muted);
   font-size: 0.875rem;
   opacity: 1;
   transition: opacity 0.15s;
@@ -478,7 +478,7 @@ html.mac .titlebar-center {
   left: 12px;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--muted);
+  color: var(--desktop-muted);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s;
@@ -493,7 +493,7 @@ html.mac .titlebar-center {
   height: 100%;
   margin: 0;
   border-radius: 999px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--desktop-border);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -515,7 +515,7 @@ html.mac .titlebar-center {
 }
 
 .titlebar-search.is-active input::placeholder {
-  color: var(--muted);
+  color: var(--desktop-muted);
 }
 
 .titlebar-search input:hover {
@@ -531,7 +531,7 @@ html.mac .titlebar-center {
   height: 32px;
   margin-right: 4px;
   border-radius: 999px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--desktop-border);
   background: var(--panel);
   overflow: hidden;
   padding: 0;
@@ -691,7 +691,7 @@ html.mac.server-open .titlebar {
 }
 
 .setup #server-url::placeholder {
-  color: var(--muted);
+  color: var(--desktop-muted);
 }
 
 .setup .error {
@@ -712,7 +712,7 @@ html.mac.server-open .titlebar {
   font-weight: 600;
   cursor: pointer;
   color: #09090b;
-  background: var(--accent);
+  background: var(--desktop-accent);
   display: inline-flex;
   align-items: center;
   justify-content: center;

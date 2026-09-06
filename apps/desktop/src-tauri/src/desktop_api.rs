@@ -7,12 +7,14 @@
 
 use std::sync::Mutex;
 
+use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use url::Url;
 
 const MAX_API_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_MEDIA_RESPONSE_BYTES: usize = 12 * 1024 * 1024;
 
 pub struct DesktopApiState {
     client: Mutex<Client>,
@@ -174,6 +176,75 @@ pub async fn desktop_api_request(
         etag,
         location,
     })
+}
+
+/// Fetch protected artwork through the native client and return a browser-safe
+/// data URL. This avoids WebView CORS/cookie differences for profile photos
+/// while keeping the API path constrained to the configured Polarr server.
+#[tauri::command]
+pub async fn desktop_media_data_url(
+    app: AppHandle,
+    state: State<'_, DesktopApiState>,
+    path: String,
+    token: String,
+) -> Result<Option<String>, String> {
+    if token.trim().len() < 8 || token.len() > 512 {
+        return Err("Desktop media session token is invalid".into());
+    }
+    let base =
+        super::read_config(&app)?.ok_or_else(|| "Connect to a Polarr server first".to_string())?;
+    let url = api_url(&base, &path)?;
+    let client = state
+        .client
+        .lock()
+        .map_err(|_| "Desktop API session lock poisoned".to_string())?
+        .clone();
+    let response = client
+        .get(url)
+        .bearer_auth(token.trim())
+        .header("X-Polarr-Desktop-Platform", desktop_platform())
+        .send()
+        .await
+        .map_err(|e| format!("Could not load desktop artwork: {e}"))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        return Err(format!(
+            "Desktop artwork request failed ({})",
+            response.status()
+        ));
+    }
+    if response
+        .content_length()
+        .is_some_and(|len| len > MAX_MEDIA_RESPONSE_BYTES as u64)
+    {
+        return Err("Desktop artwork is too large".into());
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .split(';')
+        .next()
+        .unwrap_or("application/octet-stream")
+        .trim()
+        .to_string();
+    if !content_type.starts_with("image/") && content_type != "application/octet-stream" {
+        return Err("Desktop artwork response was not an image".into());
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Read desktop artwork: {e}"))?;
+    if bytes.is_empty() || bytes.len() > MAX_MEDIA_RESPONSE_BYTES {
+        return Err("Desktop artwork response size is invalid".into());
+    }
+    Ok(Some(format!(
+        "data:{content_type};base64,{}",
+        B64.encode(bytes)
+    )))
 }
 
 #[tauri::command]

@@ -34,6 +34,11 @@ description = "Send an API request to the configured Polarr server from the bund
 commands.allow = ["desktop_api_request"]
 
 [[permission]]
+identifier = "allow-desktop-media-data-url"
+description = "Load protected Polarr artwork for the bundled desktop UI"
+commands.allow = ["desktop_media_data_url"]
+
+[[permission]]
 identifier = "allow-desktop-api-reset-session"
 description = "Clear the bundled UI's native Polarr server session"
 commands.allow = ["desktop_api_reset_session"]

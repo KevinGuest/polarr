@@ -20,6 +20,7 @@ import {
   recordLoginSuccess,
 } from "@/lib/login-rate-limit";
 import { sessionCookieOptions, SESSION_COOKIE_NAME } from "@/lib/session-cookie";
+import { requestSessionUserAgent } from "@/lib/user-agent";
 
 export const dynamic = "force-dynamic";
 
@@ -141,7 +142,7 @@ export async function GET(req: Request) {
 
     const result = createSessionForUser(userId, {
       ip,
-      userAgent: req.headers.get("user-agent"),
+      userAgent: requestSessionUserAgent(req),
     });
     if (!result) {
       recordLoginFailure(ip, "discord");

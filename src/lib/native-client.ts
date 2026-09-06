@@ -2,12 +2,14 @@ const NATIVE_TOKEN_KEY = "polarr_native_token";
 
 /** Device class for Discord/admin alerts (notification metadata only). */
 export type NativeMobilePlatform = "iphone" | "ipad";
+export type NativeDesktopPlatform = "windows" | "macos" | "linux";
 
 type NativeClientBridge = {
   serverUrl: string;
   platform: "ios" | "desktop";
   /** iPhone vs iPad when `platform` is `"ios"`. */
   mobilePlatform?: NativeMobilePlatform;
+  desktopPlatform?: NativeDesktopPlatform;
   version?: string;
   changeServer?: () => void | Promise<void>;
   mediaTicket?: string | null;
@@ -62,6 +64,14 @@ export function detectIosMobilePlatform(): NativeMobilePlatform {
     return "ipad";
   }
   return "iphone";
+}
+
+export function detectNativeDesktopPlatform(): NativeDesktopPlatform {
+  if (typeof navigator === "undefined") return "linux";
+  const agent = `${navigator.userAgent || ""} ${navigator.platform || ""}`;
+  if (/Windows/i.test(agent)) return "windows";
+  if (/Macintosh|Mac OS X|MacIntel/i.test(agent)) return "macos";
+  return "linux";
 }
 
 export function nativeClientVersion(): string | null {

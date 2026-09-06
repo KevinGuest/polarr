@@ -70,7 +70,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch("/api/auth/me");
+      // Identity data must not be served from the native stale-first cache.
+      // In particular, avatar uploads need to replace a previously cached
+      // `avatarUrl: null` as soon as the app reconnects.
+      const res = await fetch("/api/auth/me", { cache: "no-store" });
       const data = res.ok ? await res.json() : { user: null, ban: null };
       const nextUser = (data.user ?? null) as AuthUser | null;
       setUser((prev) => {

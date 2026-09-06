@@ -1,5 +1,7 @@
 /** Sample dominant colors from an image for profile banner gradients. */
 
+import { nativeSessionToken } from "@/lib/native-client";
+
 type Rgb = { r: number; g: number; b: number; n: number; sat: number };
 
 export async function extractBannerColors(source: Blob): Promise<string[]> {
@@ -15,7 +17,14 @@ export async function extractBannerColors(source: Blob): Promise<string[]> {
 export async function extractBannerColorsFromUrl(
   url: string,
 ): Promise<string[] | null> {
-  const res = await fetch(url);
+  const headers = new Headers();
+  const token = nativeSessionToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(url, {
+    headers,
+    cache: "no-store",
+    credentials: "include",
+  });
   if (!res.ok) return null;
   const blob = await res.blob();
   if (!blob.type.startsWith("image/") && blob.size === 0) return null;

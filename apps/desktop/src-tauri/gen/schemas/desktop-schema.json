@@ -207,6 +207,12 @@
           "markdownDescription": "Relay desktop chrome auth/ready messages from the server webview to the shell"
         },
         {
+          "description": "Load protected Polarr artwork for the bundled desktop UI",
+          "type": "string",
+          "const": "allow-desktop-media-data-url",
+          "markdownDescription": "Load protected Polarr artwork for the bundled desktop UI"
+        },
+        {
           "description": "Clear Discord Rich Presence",
           "type": "string",
           "const": "allow-discord-clear-presence",

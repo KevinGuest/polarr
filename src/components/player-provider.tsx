@@ -3090,9 +3090,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const audio = audioRef.current;
     if (!audio || !track) return;
 
-    // Use synced `playing` (not audio.paused) so a follower tab that shows
-    // “playing elsewhere” pauses the session instead of starting a 2nd stream.
-    const shouldPause = playingRef.current;
+    // Remote followers are handled above. For the local owner, the media
+    // element is authoritative: restored/cross-tab state can say "playing"
+    // even when the browser has paused or rejected the element.
+    const shouldPause = !audio.paused;
     ownerIdRef.current = tabIdRef.current;
 
     if (shouldPause) {

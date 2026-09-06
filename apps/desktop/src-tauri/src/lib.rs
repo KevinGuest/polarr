@@ -463,6 +463,7 @@ pub fn run() {
             probe_server,
             get_desktop_device_name,
             desktop_api::desktop_api_request,
+            desktop_api::desktop_media_data_url,
             desktop_api::desktop_api_reset_session,
             server_webview::open_server_webview,
             server_webview::hide_server_webview,

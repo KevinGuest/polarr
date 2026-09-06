@@ -117,3 +117,19 @@ export function describeRequestClient(req: Request): ClientDescription {
 
   return describeUserAgent(req.headers.get("user-agent"));
 }
+
+/** Store a stable native identifier instead of the embedded WebView's UA. */
+export function requestSessionUserAgent(req: Request): string | null {
+  const desktop = (
+    req.headers.get("x-polarr-desktop-platform") ||
+    cookieValue(req.headers.get("cookie"), DESKTOP_PLATFORM_COOKIE) ||
+    ""
+  ).trim().toLowerCase();
+  if (DESKTOP_LABELS[desktop]) return `PolarrDesktop/${desktop}`;
+
+  const mobile = (req.headers.get("x-polarr-mobile-platform") || "")
+    .trim()
+    .toLowerCase();
+  if (MOBILE_LABELS[mobile]) return `PolarrMobile/${mobile}`;
+  return req.headers.get("user-agent");
+}

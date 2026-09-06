@@ -10,6 +10,7 @@ import { authenticate, createAdminUser, hasUsers } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH } from "@/lib/auth-password";
 import { getRequestIpFromRequest, normalizeHwid } from "@/lib/request-client";
 import { sessionCookieOptions, SESSION_COOKIE_NAME } from "@/lib/session-cookie";
+import { requestSessionUserAgent } from "@/lib/user-agent";
 
 export const dynamic = "force-dynamic";
 
@@ -66,7 +67,7 @@ export async function POST(req: Request) {
     const session = authenticate(username, password, {
       ip,
       hwid,
-      userAgent: req.headers.get("user-agent"),
+      userAgent: requestSessionUserAgent(req),
     });
     if (!session || "banned" in session) {
       recordAuthRateFailure(req, "register");

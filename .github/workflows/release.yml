@@ -121,11 +121,10 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
           releaseBody: |
-            - **Player artwork** — album covers load correctly in the desktop and iOS players
-            - **iOS Now Playing** — cover art appears on the Lock Screen and Dynamic Island
-            - **Profile photos** — avatars load throughout the iOS app
-            - **iPhone volume** — the player slider controls system volume and follows the hardware buttons
-            - **Desktop app** — includes the latest shared player and artwork fixes
+            - **Instant library search** — your catalog caches on-device for Spotify-style typeahead
+            - **Faster Connect** — pause/skip/volume sync across devices over realtime SSE
+            - **Player covers & volume** — Lock Screen art and hardware volume stay in sync on iOS
+            - **Smarter auto-queue** — radio stays on the album longer and skips recent repeats
 
             ## Downloads
 

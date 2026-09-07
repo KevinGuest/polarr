@@ -44,9 +44,10 @@ async function deezerPortraitFor(name: string): Promise<string | null> {
       `https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=15`,
       {
         headers: { Accept: "application/json", "User-Agent": "Polarr/1.0" },
+        // Next.js cache hint — cast for desktop/mobile tsc (plain RequestInit).
         next: { revalidate: 1800 },
         signal: AbortSignal.timeout(8_000),
-      },
+      } as RequestInit,
     );
     if (!res.ok) return null;
     const data = (await res.json()) as { data?: DeezerArtist[] };

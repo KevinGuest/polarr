@@ -149,7 +149,7 @@ jobs:
             `xattr -cr /Applications/Polarr.app && open /Applications/Polarr.app`
 
             Right-click → Open is unreliable on macOS Sequoia and later.
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.target && format('--target {0} --bundles {1}', matrix.target, matrix.bundles) || format('--bundles {0}', matrix.bundles) }}
 
@@ -159,3 +159,34 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_glob }}
           if-no-files-found: warn
+
+  # GitHub's /releases/latest/download/<name> can stick on an older release that
+  # still has the same asset name. Keep latest.json only on the newest desktop
+  # release so the Tauri updater endpoint stays correct.
+  finalize-updater:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Drop latest.json from prior desktop releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mapfile -t tags < <(
+            gh api "repos/${{ github.repository }}/releases" --paginate \
+              --jq '.[] | select(.draft == false and (.tag_name | startswith("desktop-v"))) | .tag_name'
+          )
+          if [ "${#tags[@]}" -eq 0 ]; then
+            echo "No published desktop releases"
+            exit 0
+          fi
+          latest="${tags[0]}"
+          echo "Keeping latest.json on ${latest}"
+          for tag in "${tags[@]:1}"; do
+            if gh release view "$tag" --json assets --jq '.assets[].name' | grep -qx 'latest.json'; then
+              echo "Removing latest.json from ${tag}"
+              gh release delete-asset "$tag" latest.json --yes
+            fi
+          done

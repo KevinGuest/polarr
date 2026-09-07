@@ -44,7 +44,25 @@ function needsAuthFetch(url: string) {
     const path = url.startsWith("/")
       ? url.split("?")[0] || url
       : new URL(url).pathname;
-    return isNativeMediaPath(path);
+    if (isNativeMediaPath(path)) return true;
+    // iOS WKWebView can reject otherwise valid remote artwork while the
+    // native HTTP stack can load it. Convert likely image URLs to local blobs.
+    return (
+      window.__POLARR_NATIVE_CLIENT__?.platform === "ios" &&
+      (/\.(avif|gif|jpe?g|png|webp)$/i.test(path) ||
+        path.includes("/cover") ||
+        path.includes("/avatar"))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function belongsToNativeServer(url: string) {
+  const server = window.__POLARR_NATIVE_CLIENT__?.serverUrl;
+  if (!server) return false;
+  try {
+    return new URL(url, `${server}/`).origin === new URL(server).origin;
   } catch {
     return false;
   }
@@ -94,19 +112,27 @@ export function useNativeMediaDisplaySrc(src: string | null | undefined): string
           parsed.searchParams.delete("mediaTicket");
           parsed.searchParams.delete("v");
           if (parsed.pathname.startsWith("/api/")) {
-            const dataUrl = await invoke<string | null>("desktop_media_data_url", {
-              path: `${parsed.pathname}${parsed.search}`,
-              token,
-            });
-            if (dataUrl) {
-              nativeDataUrlCache.set(key, dataUrl);
-              if (!cancelled) setBlobSrc(dataUrl);
-              return;
+            // A rejected IPC call must not skip the ticketed HTTP fallback —
+            // that left the profile hero on its letter initial.
+            try {
+              const dataUrl = await invoke<string | null>("desktop_media_data_url", {
+                path: `${parsed.pathname}${parsed.search}`,
+                token,
+              });
+              if (dataUrl) {
+                nativeDataUrlCache.set(key, dataUrl);
+                if (!cancelled) setBlobSrc(dataUrl);
+                return;
+              }
+            } catch {
+              /* Fall through to the ticketed HTTP fetch below. */
             }
           }
         }
         const headers = new Headers();
-        if (token) headers.set("Authorization", `Bearer ${token}`);
+        if (token && belongsToNativeServer(url)) {
+          headers.set("Authorization", `Bearer ${token}`);
+        }
         // Patched native fetch routes same-server image GETs through CapacitorHttp.
         // Never reuse a prior 401/empty cache entry for avatars.
         const response = await fetch(url, { headers, cache: "no-store" });
@@ -129,13 +155,10 @@ export function useNativeMediaDisplaySrc(src: string | null | undefined): string
     };
   }, [src, stamped, key, epoch]);
 
-  // Desktop loads the UI from the Tauri origin — ticketed <img> URLs are
-  // cross-origin and 401 without cookies. Wait for the native data URL / blob.
-  // iOS can paint the ticketed URL immediately while the blob warms.
+  // Ticketed URLs are safe to paint immediately in native WebViews while the
+  // native data URL / blob warms. This also keeps artwork visible if an IPC
+  // conversion fails; the opaque short-lived ticket supplies authentication.
   if (protectedSrc) {
-    if (typeof window !== "undefined" && window.__POLARR_NATIVE_CLIENT__?.platform === "desktop") {
-      return blobSrc;
-    }
     return blobSrc || stamped;
   }
   return blobSrc || stamped;

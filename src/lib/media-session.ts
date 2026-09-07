@@ -13,6 +13,11 @@ import {
   nativeAssetUrl,
   nativeServerUrl,
 } from "@/lib/native-client";
+import {
+  clearNativeNowPlaying,
+  setNativeNowPlayingMetadata,
+  setNativeNowPlayingPlayback,
+} from "@/lib/ios-now-playing";
 
 export type MediaSessionTrackInfo = {
   title: string;
@@ -96,9 +101,9 @@ function artworkList(coverUrl: string | null): MediaImage[] {
 export async function updateMediaSessionMetadata(
   track: MediaSessionTrackInfo | null,
 ): Promise<void> {
-  if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
-
   if (!track) {
+    clearNativeNowPlaying();
+    if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
     try {
       navigator.mediaSession.metadata = null;
     } catch {
@@ -112,6 +117,13 @@ export async function updateMediaSessionMetadata(
   }
 
   const artwork = mediaSessionArtworkUrl(track.coverPath);
+  setNativeNowPlayingMetadata({
+    title: track.title?.trim() || "Unknown track",
+    artist: track.artist?.trim() || "Unknown artist",
+    album: track.album?.trim() || "",
+    artworkUrl: artwork,
+  });
+  if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
   try {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title?.trim() || "Unknown track",
@@ -127,6 +139,11 @@ export async function updateMediaSessionMetadata(
 export function setMediaSessionPlaybackState(
   state: MediaSessionPlaybackState,
 ): void {
+  if (state === "none") {
+    clearNativeNowPlaying();
+  } else {
+    setNativeNowPlayingPlayback({ playing: state === "playing", force: true });
+  }
   if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
   try {
     navigator.mediaSession.playbackState = state;
@@ -140,11 +157,20 @@ export function setMediaSessionPositionState(
   durationSec: number,
   playbackRate = 1,
 ): void {
-  if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
-  if (!("setPositionState" in navigator.mediaSession)) return;
   if (!Number.isFinite(durationSec) || durationSec <= 0) return;
   const duration = durationSec;
   const position = Math.min(duration, Math.max(0, positionSec));
+  setNativeNowPlayingPlayback({
+    playing:
+      typeof navigator !== "undefined" && "mediaSession" in navigator
+        ? navigator.mediaSession.playbackState === "playing"
+        : playbackRate > 0,
+    position,
+    duration,
+    rate: playbackRate,
+  });
+  if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
+  if (!("setPositionState" in navigator.mediaSession)) return;
   try {
     navigator.mediaSession.setPositionState({
       duration,

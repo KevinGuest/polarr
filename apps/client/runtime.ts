@@ -93,10 +93,19 @@ async function serverFetch(url: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
   const mobilePlatform = window.__POLARR_NATIVE_CLIENT__?.mobilePlatform;
   const desktopPlatform = window.__POLARR_NATIVE_CLIENT__?.desktopPlatform;
-  if (mobilePlatform) {
+  const configuredServer = window.__POLARR_NATIVE_CLIENT__?.serverUrl;
+  const targetsConfiguredServer = (() => {
+    if (!configuredServer) return false;
+    try {
+      return new URL(url).origin === new URL(configuredServer).origin;
+    } catch {
+      return false;
+    }
+  })();
+  if (mobilePlatform && targetsConfiguredServer) {
     headers.set("x-polarr-mobile-platform", mobilePlatform);
   }
-  if (desktopPlatform) {
+  if (desktopPlatform && targetsConfiguredServer) {
     headers.set("x-polarr-desktop-platform", desktopPlatform);
   }
   if (!http) return originalFetch(url, { ...init, headers });
@@ -241,10 +250,37 @@ async function cachedResponse(url: string, token: string | null): Promise<Respon
 }
 
 /** Prefer IndexedDB while online; use `cache: "no-store"` / `reload` or header to force network. */
-function shouldBypassCache(init?: RequestInit, headers?: Headers): boolean {
-  if (init?.cache === "no-store" || init?.cache === "reload") return true;
+function shouldBypassCache(
+  init?: RequestInit,
+  headers?: Headers,
+  requestCache?: RequestCache,
+): boolean {
+  const mode = init?.cache ?? requestCache;
+  if (mode === "no-store" || mode === "reload") return true;
   const value = (headers || new Headers(init?.headers)).get("x-polarr-cache");
   return value === "bypass";
+}
+
+/**
+ * Identity payloads carry `avatarUrl`, which flips from `null` to a real path
+ * the moment a photo is uploaded. Painting them stale-first pins the old value
+ * — the profile hero kept showing the letter fallback because the cached copy
+ * won every load. These always go to the network while online; the offline
+ * fallback in the catch below still serves the cached copy when there is no
+ * connection.
+ */
+function isIdentityUrl(url: string): boolean {
+  try {
+    const path = new URL(url).pathname;
+    return (
+      path === "/api/profiles" ||
+      path.startsWith("/api/profiles/") ||
+      path === "/api/auth/me" ||
+      path === "/api/account"
+    );
+  } catch {
+    return false;
+  }
 }
 
 function revalidateInBackground(
@@ -315,7 +351,10 @@ async function cacheArtwork(url: string, token: string | null) {
   }
   try {
     const headers = new Headers();
-    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const server = window.__POLARR_NATIVE_CLIENT__?.serverUrl;
+    if (token && server && new URL(url).origin === new URL(server).origin) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
     // Use native HTTP on iOS so protected cross-origin artwork is not blocked
     // by WKWebView CORS. `serverFetch` decodes Capacitor's base64 blob result.
     const response = await serverFetch(url, { headers });
@@ -728,11 +767,17 @@ export async function installNativeRuntime(serverUrl: string, platform: NativePl
       const method = (init?.method || (rewritten instanceof Request ? rewritten.method : "GET")).toUpperCase();
       const body = method === "GET" || method === "HEAD" ? "" : await requestBody(input, init);
       const plan = sameServer ? queuePlan(url, method, body) : null;
+      const nativeExternalArtwork =
+        bridge.platform === "ios" && method === "GET" && isArtworkUrl(url);
+      const requestCache = rewritten instanceof Request ? rewritten.cache : undefined;
+      const staleFirst =
+        !shouldBypassCache(init, headers, requestCache) &&
+        !(navigator.onLine && isIdentityUrl(url));
 
       if (method !== "GET" && method !== "HEAD" && navigator.onLine) await flushMutationQueue();
       try {
         // Spotify-style: paint from IndexedDB immediately, refresh in background.
-        if (method === "GET" && sameServer && !shouldBypassCache(init, headers)) {
+        if (method === "GET" && sameServer && staleFirst) {
           const stale = await cachedResponse(url, token);
           if (stale) {
             const cachedAt = Number(stale.headers.get("X-Polarr-Cached-At") || "0");
@@ -744,7 +789,7 @@ export async function installNativeRuntime(serverUrl: string, platform: NativePl
             return decorateJson(stale, token);
           }
         }
-        const response = sameServer
+        const response = sameServer || nativeExternalArtwork
           ? await serverFetch(url, { ...init, method, headers, body: body || undefined })
           : await originalFetch(rewritten, { ...init, headers });
         if (method === "GET") cacheResponse(url, token, response);

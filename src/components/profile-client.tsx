@@ -202,9 +202,10 @@ export function ProfileClient({
         if (username) {
           res = await fetch(
             `/api/profiles?u=${encodeURIComponent(username)}&limit=5`,
+            { cache: "no-store" },
           );
         } else {
-          const meRes = await fetch("/api/profiles");
+          const meRes = await fetch("/api/profiles", { cache: "no-store" });
           if (meRes.status === 401) {
             router.replace("/login");
             return;
@@ -215,6 +216,7 @@ export function ProfileClient({
           };
           res = await fetch(
             `/api/profiles?u=${encodeURIComponent(meJson.me.username)}&limit=5`,
+            { cache: "no-store" },
           );
         }
         if (res.status === 401) {

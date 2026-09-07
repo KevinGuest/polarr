@@ -3,6 +3,7 @@ import { getAuthUser, json } from "@/lib/api";
 import {
   enqueueConnectCommand,
   heartbeatDevice,
+  notifyConnect,
   publishConnectState,
   snapshotConnect,
   transferPlayback,
@@ -107,7 +108,13 @@ export async function POST(req: Request) {
     }
   }
 
-  return json(snapshotConnect(user.id, device.id), {
+  const snapshot = snapshotConnect(user.id, device.id);
+  // Fan out to other devices' SSE streams (this caller already has the response).
+  if (state || command) {
+    notifyConnect(user.id, device.id);
+  }
+
+  return json(snapshot, {
     headers: { "Cache-Control": "private, no-store" },
   });
 }

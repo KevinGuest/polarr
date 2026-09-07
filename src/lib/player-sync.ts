@@ -1,6 +1,7 @@
 /**
  * In-memory Spotify-style Connect session per signed-in user.
  * Single-process Docker/Umbrel — heartbeats keep devices online.
+ * SSE subscribers get pushed snapshots when state/commands change.
  */
 
 export type ConnectDeviceKind = "phone" | "tablet" | "computer";
@@ -56,7 +57,14 @@ export type ConnectCommand =
   | { id: string; type: "become-owner" }
   | { id: string; type: "release" };
 
-const DEVICE_TTL_MS = 12_000;
+export type ConnectSnapshot = {
+  devices: ConnectDevice[];
+  state: ConnectPlaybackState | null;
+  commands: ConnectCommand[];
+};
+
+/** Long enough for SSE keepalive (~10s) without dropping devices. */
+const DEVICE_TTL_MS = 40_000;
 const MAX_COMMANDS = 24;
 
 type UserSession = {
@@ -67,13 +75,25 @@ type UserSession = {
   pendingVolume: { volume: number; at: number } | null;
 };
 
+type ConnectSubscriber = {
+  deviceId: string;
+  /** Skip this device when fanout originates from its own POST. */
+  send: (snapshot: ConnectSnapshot) => void;
+};
+
 const g = globalThis as typeof globalThis & {
   __polarrConnect?: Map<string, UserSession>;
+  __polarrConnectSubs?: Map<string, Set<ConnectSubscriber>>;
 };
 
 function store(): Map<string, UserSession> {
   if (!g.__polarrConnect) g.__polarrConnect = new Map();
   return g.__polarrConnect;
+}
+
+function subscribers(): Map<string, Set<ConnectSubscriber>> {
+  if (!g.__polarrConnectSubs) g.__polarrConnectSubs = new Map();
+  return g.__polarrConnectSubs;
 }
 
 function sessionFor(userId: string): UserSession {
@@ -119,6 +139,42 @@ function takeCommands(session: UserSession, deviceId: string): ConnectCommand[] 
   const list = session.commands.get(deviceId) ?? [];
   session.commands.set(deviceId, []);
   return list;
+}
+
+/**
+ * Push a fresh per-device snapshot to all SSE listeners.
+ * @param exceptDeviceId Skip the device that already received the POST response.
+ */
+export function notifyConnect(userId: string, exceptDeviceId?: string): void {
+  const subs = subscribers().get(userId);
+  if (!subs || subs.size === 0) return;
+  for (const sub of [...subs]) {
+    if (exceptDeviceId && sub.deviceId === exceptDeviceId) continue;
+    try {
+      sub.send(snapshotConnect(userId, sub.deviceId));
+    } catch {
+      subs.delete(sub);
+    }
+  }
+}
+
+export function subscribeConnect(
+  userId: string,
+  deviceId: string,
+  send: (snapshot: ConnectSnapshot) => void,
+): () => void {
+  const all = subscribers();
+  let set = all.get(userId);
+  if (!set) {
+    set = new Set();
+    all.set(userId, set);
+  }
+  const sub: ConnectSubscriber = { deviceId, send };
+  set.add(sub);
+  return () => {
+    set!.delete(sub);
+    if (set!.size === 0) all.delete(userId);
+  };
 }
 
 export function heartbeatDevice(
@@ -280,11 +336,7 @@ export function transferPlayback(
 export function snapshotConnect(
   userId: string,
   deviceId: string,
-): {
-  devices: ConnectDevice[];
-  state: ConnectPlaybackState | null;
-  commands: ConnectCommand[];
-} {
+): ConnectSnapshot {
   const session = sessionFor(userId);
   prune(session);
   return {

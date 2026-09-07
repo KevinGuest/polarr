@@ -10,7 +10,7 @@ import {
   useState,
 } from "react";
 import { usePathname } from "next/navigation";
-import { nativeAssetUrl, ensureNativeMediaTicket, isNativeClient, nativeClientPlatform } from "@/lib/native-client";
+import { nativeAssetUrl, ensureNativeMediaTicket, isNativeClient, nativeClientPlatform, nativeSessionToken } from "@/lib/native-client";
 import {
   bindMediaSessionActions,
   setMediaSessionPlaybackState,
@@ -446,6 +446,52 @@ async function postConnectSync(body: {
     return (await res.json()) as ConnectSyncResponse;
   } catch {
     return null;
+  }
+}
+
+/** Long-lived SSE (fetch stream) — Bearer works on native; cookies on web. */
+async function openConnectEventStream(
+  device: LocalConnectDevice,
+  onSnapshot: (data: ConnectSyncResponse) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const params = new URLSearchParams({
+    deviceId: device.id,
+    name: device.name,
+    kind: device.kind,
+  });
+  const headers: Record<string, string> = {};
+  const token = nativeSessionToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(`/api/player/sync/events?${params.toString()}`, {
+    headers,
+    signal,
+    cache: "no-store",
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(`connect sse ${res.status}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() || "";
+    for (const chunk of chunks) {
+      for (const line of chunk.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          onSnapshot(JSON.parse(line.slice(6)) as ConnectSyncResponse);
+        } catch {
+          /* ignore malformed */
+        }
+      }
+    }
   }
 }
 
@@ -2673,6 +2719,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (command.type === "volume") {
           volumeRef.current = command.volume;
           setVolumeState(command.volume);
+          if (usesSystemVolume()) {
+            if (audioRef.current) audioRef.current.volume = 1;
+            void writeSystemVolume(command.volume);
+          }
           applyMixVolumes();
           publishRef.current({ volume: command.volume });
           continue;
@@ -2686,12 +2736,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    const tick = async () => {
+    const applyConnectData = (data: ConnectSyncResponse) => {
       if (cancelled) return;
       const device = localDeviceRef.current;
       if (!device.id) return;
-      const data = await postConnectSync({ device });
-      if (cancelled || !data) return;
 
       const ownerId = data.state?.ownerId ?? null;
       applyConnectDevices(data.devices ?? [], ownerId);
@@ -2764,41 +2812,80 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
+    const tick = async () => {
+      if (cancelled) return;
+      const device = localDeviceRef.current;
+      if (!device.id) return;
+      const data = await postConnectSync({ device });
+      if (cancelled || !data) return;
+      applyConnectData(data);
+    };
+
     sendConnectCommandRef.current = (command) => {
       const device = localDeviceRef.current;
       void postConnectSync({ device, command }).then((data) => {
         if (!data || cancelled) return;
-        applyConnectDevices(data.devices ?? [], data.state?.ownerId ?? null);
-        if (
-          data.state &&
-          data.state.ownerId &&
-          data.state.ownerId !== device.id &&
-          data.state.updatedAt !== lastRemoteUpdatedAtRef.current
-        ) {
-          lastRemoteUpdatedAtRef.current = data.state.updatedAt;
-          applyRemote({
-            track: data.state.track ? connectToTrack(data.state.track) : null,
-            queue: (data.state.queue ?? []).map(connectToTrack),
-            playing: data.state.playing,
-            progress: data.state.progress,
-            duration: data.state.duration,
-            volume: data.state.volume,
-            shuffle: data.state.shuffle,
-            ownerId: data.state.ownerId,
-            updatedAt: data.state.updatedAt,
-          });
-        }
-        if (data.commands?.length) runCommands(data.commands);
+        applyConnectData(data);
       });
     };
 
+    let sseAlive = false;
+    let pollId: number | null = null;
+    let streamAbort: AbortController | null = null;
+    let reconnectTimer: number | null = null;
+
+    const schedulePoll = () => {
+      if (pollId != null) window.clearInterval(pollId);
+      // Fast poll while SSE is down; slow heartbeat while live.
+      pollId = window.setInterval(
+        () => {
+          void tick();
+        },
+        sseAlive ? 5_000 : 450,
+      );
+    };
+
+    const startStream = () => {
+      if (cancelled) return;
+      const device = localDeviceRef.current;
+      if (!device.id) {
+        reconnectTimer = window.setTimeout(startStream, 500);
+        return;
+      }
+      streamAbort?.abort();
+      streamAbort = new AbortController();
+      const signal = streamAbort.signal;
+      void openConnectEventStream(
+        device,
+        (data) => {
+          if (cancelled) return;
+          if (!sseAlive) {
+            sseAlive = true;
+            schedulePoll();
+          }
+          applyConnectData(data);
+        },
+        signal,
+      )
+        .catch(() => null)
+        .finally(() => {
+          if (cancelled || signal.aborted) return;
+          sseAlive = false;
+          schedulePoll();
+          reconnectTimer = window.setTimeout(startStream, 1_200);
+        });
+    };
+
     void tick();
-    const id = window.setInterval(() => {
-      void tick();
-    }, 1600);
+    schedulePoll();
+    startStream();
+
     return () => {
       cancelled = true;
-      window.clearInterval(id);
+      sseAlive = false;
+      streamAbort?.abort();
+      if (pollId != null) window.clearInterval(pollId);
+      if (reconnectTimer != null) window.clearTimeout(reconnectTimer);
     };
   }, [applyConnectDevices, applyMixVolumes, applyRemote, pauseBoth, playBoth]);
 
@@ -3704,24 +3791,43 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!usesSystemVolume()) return;
     let cancelled = false;
+    const applyHardwareVolume = (v: number) => {
+      if (Math.abs(volumeRef.current - v) < 0.01) return;
+      volumeRef.current = v;
+      setVolumeState(v);
+      if (audioRef.current) audioRef.current.volume = 1;
+      applyMixVolumes();
+      if (isOwner()) publishRef.current({ volume: v });
+    };
     void readSystemVolume().then((v) => {
       if (cancelled || v == null) return;
-      volumeRef.current = v;
-      setVolumeState(v);
-      if (audioRef.current) audioRef.current.volume = 1;
-      applyMixVolumes();
+      applyHardwareVolume(v);
     });
     const unsub = subscribeSystemVolume((v) => {
-      volumeRef.current = v;
-      setVolumeState(v);
-      if (audioRef.current) audioRef.current.volume = 1;
-      applyMixVolumes();
+      applyHardwareVolume(v);
     });
+    // KVO can miss bursts of hardware presses; poll as a safety net.
+    const poll = window.setInterval(() => {
+      void readSystemVolume().then((v) => {
+        if (cancelled || v == null) return;
+        applyHardwareVolume(v);
+      });
+    }, 400);
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void readSystemVolume().then((v) => {
+        if (cancelled || v == null) return;
+        applyHardwareVolume(v);
+      });
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
       unsub();
+      window.clearInterval(poll);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [applyMixVolumes]);
+  }, [applyMixVolumes, isOwner]);
 
   useEffect(() => {
     if (!track || isRemotePlayback) {
@@ -3835,11 +3941,41 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const url = map.get(prev.id);
         if (!url) return prev;
         if (prev.coverPath) return prev;
-        return { ...prev, coverPath: url };
+        const next = { ...prev, coverPath: url };
+        trackRef.current = next;
+        return next;
       });
     },
     [],
   );
+
+  // Resolve missing covers so the full player + Lock Screen/Dynamic Island get art.
+  useEffect(() => {
+    if (!track?.id || isRemotePlayback) return;
+    if (track.coverPath) return;
+    if (
+      track.id.startsWith("live:") ||
+      track.id.startsWith("stream:") ||
+      track.id.startsWith("catalog:")
+    ) {
+      return;
+    }
+    let cancelled = false;
+    void fetch(`/api/tracks/${encodeURIComponent(track.id)}`, {
+      cache: "no-store",
+    })
+      .then(async (res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.track) return;
+        const cover = data.track.coverUrl || data.track.coverPath;
+        if (!cover || typeof cover !== "string") return;
+        patchTrackCovers({ [track.id]: cover });
+      })
+      .catch(() => null);
+    return () => {
+      cancelled = true;
+    };
+  }, [track?.id, track?.coverPath, isRemotePlayback, patchTrackCovers]);
 
   const isPanelOpen = useCallback(
     (id: PlayerPanelId) => openPanels[id],

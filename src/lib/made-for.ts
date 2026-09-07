@@ -390,10 +390,15 @@ export function buildTasteAutoplay(
   }
   if (opts?.seed?.id) excluded.add(opts.seed.id);
 
+  // Don't immediately re-queue what you just heard.
+  for (const recent of listRecentPlays(userId, 40)) {
+    excluded.add(recent.id);
+  }
+
   const catalog = streamableCatalog(500, excluded);
   if (catalog.length === 0) return [];
 
-  const { scores } = listenArtistAffinity(userId);
+  const { scores, heardAlbums } = listenArtistAffinity(userId);
   let maxTaste = 1;
   for (const v of scores.values()) if (v > maxTaste) maxTaste = v;
   const hasTaste = scores.size > 0 && maxTaste > 1;
@@ -408,6 +413,10 @@ export function buildTasteAutoplay(
   )
     .trim()
     .toLowerCase();
+  const seedAlbumKey = seedArtist && seedAlbum ? `${seedArtist}::${seedAlbum}` : "";
+
+  // Soft co-listen: albums you've actually finished tracks from.
+  const familiarAlbums = heardAlbums;
 
   const day = new Date().toISOString().slice(0, 10);
   // Stable jitter so the same session isn’t identical every fill, but not pure random.
@@ -415,18 +424,21 @@ export function buildTasteAutoplay(
 
   const scored = catalog.map((t, i) => {
     const ak = artistKey(t.artist);
+    const albumNorm = t.album.trim().toLowerCase();
+    const albumK = ak && albumNorm ? `${ak}::${albumNorm}` : "";
     const tasteRaw = scores.get(ak) || 0;
     const tasteNorm = hasTaste ? Math.min(1, tasteRaw / maxTaste) : 0;
-    let score = hasTaste ? tasteNorm * 0.72 : 0.2;
+    // Taste is a prior, not the whole decision — leave room for continuity + discovery.
+    let score = hasTaste ? tasteNorm * 0.48 : 0.18;
 
-    if (seedArtist && ak === seedArtist) score += 0.28;
-    if (
-      seedAlbum &&
-      t.album.trim().toLowerCase() === seedAlbum &&
-      seedArtist &&
-      ak === seedArtist
-    ) {
-      score += 0.18;
+    if (seedArtist && ak === seedArtist) score += 0.22;
+    if (seedAlbum && albumNorm === seedAlbum && seedArtist && ak === seedArtist) {
+      // Stay on the seed album for a few songs (radio continuity).
+      score += 0.34;
+    } else if (seedAlbumKey && albumK && familiarAlbums.has(albumK)) {
+      score += 0.16;
+    } else if (albumK && familiarAlbums.has(albumK)) {
+      score += 0.1;
     }
 
     // Mild position-stable jitter (not Math.random each request)
@@ -436,21 +448,31 @@ export function buildTasteAutoplay(
       h ^= key.charCodeAt(c);
       h = Math.imul(h, 16777619);
     }
-    score += (Math.abs(h) % 1000) / 1000 * 0.12;
+    score += (Math.abs(h) % 1000) / 1000 * 0.1;
 
-    return { t, score, ak };
+    return { t, score, ak, albumK };
   });
 
   scored.sort((a, b) => b.score - a.score);
 
   const out: TrackRow[] = [];
   const perArtist = new Map<string, number>();
+  const perAlbum = new Map<string, number>();
   for (const row of scored) {
     const n = perArtist.get(row.ak) || 0;
     // Keep variety — seed artist can appear a bit more
-    const cap = row.ak && row.ak === seedArtist ? 4 : 2;
-    if (n >= cap) continue;
+    const artistCap = row.ak && row.ak === seedArtist ? 5 : 2;
+    if (n >= artistCap) continue;
+    const albumCount = row.albumK ? perAlbum.get(row.albumK) || 0 : 0;
+    const albumCap =
+      row.albumK && row.albumK === seedAlbumKey
+        ? 4
+        : row.ak && row.ak === seedArtist
+          ? 2
+          : 1;
+    if (row.albumK && albumCount >= albumCap) continue;
     perArtist.set(row.ak, n + 1);
+    if (row.albumK) perAlbum.set(row.albumK, albumCount + 1);
     out.push(row.t);
     if (out.length >= limit) break;
   }

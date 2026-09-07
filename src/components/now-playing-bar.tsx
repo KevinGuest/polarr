@@ -81,6 +81,7 @@ export function NowPlayingBar() {
     setVolume,
     toggleShuffle,
     togglePanel,
+    patchTrackCovers,
   } = usePlayer();
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [pipMount, setPipMount] = useState<HTMLElement | null>(null);
@@ -170,14 +171,19 @@ export function NowPlayingBar() {
       .then((data) => {
         if (cancelled || !data?.track) return;
         const cover = data.track.coverUrl || data.track.coverPath;
-        if (cover) setCoverUrl(cover);
+        if (!cover || typeof cover !== "string") return;
+        setCoverUrl(cover);
+        // Push into player state so Lock Screen / Dynamic Island get the same art.
+        if (!track.coverPath) {
+          patchTrackCovers({ [track.id]: cover });
+        }
       })
       .catch(() => null);
 
     return () => {
       cancelled = true;
     };
-  }, [track?.id, track?.coverPath]);
+  }, [track?.id, track?.coverPath, patchTrackCovers]);
 
   if (!track) {
     return pipMount

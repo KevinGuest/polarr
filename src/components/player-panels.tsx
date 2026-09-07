@@ -59,6 +59,16 @@ function formatRemaining(progress: number, duration: number): string {
   return `-${formatDuration(rem)}`;
 }
 
+/** Absolute CDN URLs or root-relative server paths (CoverArt authenticates natives). */
+function playerCoverUrl(coverPath: string | null | undefined): string | undefined {
+  if (!coverPath) return undefined;
+  const value = coverPath.trim();
+  if (!value) return undefined;
+  if (value.startsWith("blob:") || value.startsWith("data:")) return undefined;
+  if (/^https?:\/\//i.test(value) || value.startsWith("/")) return value;
+  return undefined;
+}
+
 /** Apple Music Sing–style mic with sparkles. */
 function SingMicIcon({ className }: { className?: string }) {
   return (
@@ -485,10 +495,7 @@ function LyricsPanel() {
   const lyricsOpen = isPanelOpen("lyrics");
   if (!lyricsOpen || !track) return null;
 
-  const cover =
-    track.coverPath && /^https?:\/\//i.test(track.coverPath)
-      ? track.coverPath
-      : undefined;
+  const cover = playerCoverUrl(track.coverPath);
 
   return (
     <div className="pointer-events-auto absolute inset-0 z-20 flex flex-col overflow-hidden">
@@ -725,9 +732,7 @@ function NowPlayingPopup() {
             <CoverArt
               seed={track.album || track.title}
               image={
-                track.coverPath && /^https?:\/\//i.test(track.coverPath)
-                  ? track.coverPath
-                  : undefined
+                playerCoverUrl(track.coverPath)
               }
               className="aspect-square w-full max-w-[min(100%,24rem)] rounded-lg shadow-lg"
             />
@@ -846,7 +851,7 @@ function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
           !t.id.startsWith("live:") &&
           !t.id.startsWith("stream:") &&
           !t.id.startsWith("catalog:") &&
-          !(t.coverPath && /^https?:\/\//i.test(t.coverPath)),
+          !playerCoverUrl(t.coverPath),
       )
       .slice(0, 16);
     if (missing.length === 0) return;
@@ -863,8 +868,9 @@ function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
           if (!res.ok) return null;
           const data = await res.json();
           const cover = data?.track?.coverUrl || data?.track?.coverPath;
-          if (cover && /^https?:\/\//i.test(cover)) {
-            return [t.id, cover] as const;
+          const resolved = playerCoverUrl(cover);
+          if (resolved) {
+            return [t.id, resolved] as const;
           }
         } catch {
           /* ignore */
@@ -1045,9 +1051,7 @@ function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
                     <CoverArt
                       seed={track.title}
                       image={
-                        track.coverPath && /^https?:\/\//i.test(track.coverPath)
-                          ? track.coverPath
-                          : undefined
+                        playerCoverUrl(track.coverPath)
                       }
                       className="size-12 shrink-0 rounded-md"
                     />
@@ -1110,9 +1114,7 @@ function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
                             <CoverArt
                               seed={t.title}
                               image={
-                                t.coverPath && /^https?:\/\//i.test(t.coverPath)
-                                  ? t.coverPath
-                                  : undefined
+                                playerCoverUrl(t.coverPath)
                               }
                               className="size-11 shrink-0 rounded-md"
                             />
@@ -1187,9 +1189,7 @@ function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
                         <CoverArt
                           seed={item.title}
                           image={
-                            item.coverPath && /^https?:\/\//i.test(item.coverPath)
-                              ? item.coverPath
-                              : undefined
+                            playerCoverUrl(item.coverPath)
                           }
                           className="size-11 shrink-0 rounded-md"
                         />
@@ -1242,10 +1242,7 @@ function SheetMoreButton({ track }: { track: PlayerTrack }) {
 }
 
 function MobileSheetHeader({ track }: { track: PlayerTrack }) {
-  const cover =
-    track.coverPath && /^https?:\/\//i.test(track.coverPath)
-      ? track.coverPath
-      : undefined;
+  const cover = playerCoverUrl(track.coverPath);
   return (
     <div className="flex shrink-0 items-center gap-3 px-4 py-2">
       <CoverArt
@@ -1498,10 +1495,7 @@ function MobilePlayerSheet() {
         ? "devices"
         : "player";
 
-  const cover =
-    track.coverPath && /^https?:\/\//i.test(track.coverPath)
-      ? track.coverPath
-      : undefined;
+  const cover = playerCoverUrl(track.coverPath);
   const showTransport = view !== "lyrics" || lyricsControlsVisible;
 
   function dismiss() {

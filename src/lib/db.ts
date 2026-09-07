@@ -180,7 +180,7 @@ export type RequestEvent = {
 
 let db: Database.Database | null = null;
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 function hashPassword(password: string, salt?: string): string {
   const s = salt || randomBytes(16).toString("hex");
@@ -1065,12 +1065,66 @@ function migrate(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, read_at);
   `);
 
+  migrateTracksFts(database);
+
   database
     .prepare(
       `INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)
        ON CONFLICT(version) DO NOTHING`,
     )
     .run(SCHEMA_VERSION, nowIso());
+}
+
+/**
+ * External-content FTS5 over library metadata. Triggers keep the index in sync
+ * with upsertTrack / deletes; version 4 rebuilds once on upgrade.
+ */
+function migrateTracksFts(database: Database.Database) {
+  database.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5(
+      title,
+      artist,
+      album,
+      match_key,
+      content='tracks',
+      content_rowid='rowid'
+    );
+  `);
+
+  // Drop + recreate triggers so definition changes apply cleanly.
+  database.exec(`
+    DROP TRIGGER IF EXISTS tracks_fts_ai;
+    DROP TRIGGER IF EXISTS tracks_fts_ad;
+    DROP TRIGGER IF EXISTS tracks_fts_au;
+
+    CREATE TRIGGER tracks_fts_ai AFTER INSERT ON tracks BEGIN
+      INSERT INTO tracks_fts(rowid, title, artist, album, match_key)
+      VALUES (new.rowid, new.title, new.artist, new.album, new.match_key);
+    END;
+
+    CREATE TRIGGER tracks_fts_ad AFTER DELETE ON tracks BEGIN
+      INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album, match_key)
+      VALUES ('delete', old.rowid, old.title, old.artist, old.album, old.match_key);
+    END;
+
+    CREATE TRIGGER tracks_fts_au AFTER UPDATE OF title, artist, album, match_key ON tracks BEGIN
+      INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, album, match_key)
+      VALUES ('delete', old.rowid, old.title, old.artist, old.album, old.match_key);
+      INSERT INTO tracks_fts(rowid, title, artist, album, match_key)
+      VALUES (new.rowid, new.title, new.artist, new.album, new.match_key);
+    END;
+  `);
+
+  const applied = database
+    .prepare(`SELECT 1 as ok FROM schema_migrations WHERE version = 4`)
+    .get() as { ok: number } | undefined;
+  if (!applied) {
+    try {
+      database.exec(`INSERT INTO tracks_fts(tracks_fts) VALUES('rebuild')`);
+    } catch (err) {
+      console.warn("[db] tracks_fts rebuild failed:", err);
+    }
+  }
 }
 
 // ─── Settings ───────────────────────────────────────────────────────────────
@@ -2903,6 +2957,7 @@ function notArtworkTrackSql(alias = ""): string {
 
 /** Real library files only — excludes stream history stubs used for Recently played. */
 const LIBRARY_TRACK_FILTER = `source != 'stream' AND path NOT LIKE 'stream:%' AND path NOT LIKE 'stream://%' AND ${notArtworkTrackSql()}`;
+const LIBRARY_TRACK_FILTER_T = `t.source != 'stream' AND t.path NOT LIKE 'stream:%' AND t.path NOT LIKE 'stream://%' AND ${notArtworkTrackSql("t.")}`;
 
 /** Stream stubs + library, still hide artwork-named junk. */
 const NON_ARTWORK_TRACK_FILTER = notArtworkTrackSql();
@@ -3702,11 +3757,52 @@ const SEARCH_STOP = new Set([
   "featuring",
 ]);
 
+/** Escape a token for FTS5 MATCH (prefix query). */
+function ftsTokenClause(raw: string): string {
+  const clean = raw.replace(/[^a-z0-9']/gi, "").toLowerCase();
+  if (clean.length < 2) return "";
+  const stripped = clean.replace(/'/g, "");
+  const parts = [`${clean}*`];
+  if (stripped && stripped !== clean && stripped.length >= 2) {
+    parts.push(`${stripped}*`);
+  }
+  return parts.length === 1 ? parts[0]! : `(${parts.join(" OR ")})`;
+}
+
+function ftsMatchQuery(tokens: string[]): string | null {
+  const clauses = tokens.map(ftsTokenClause).filter(Boolean);
+  if (!clauses.length) return null;
+  return clauses.join(" AND ");
+}
+
 function queryLibraryByTokens(
   tokens: string[],
   limit: number,
 ): Record<string, unknown>[] {
   if (tokens.length === 0) return [];
+
+  const match = ftsMatchQuery(tokens);
+  if (match) {
+    try {
+      return getDb()
+        .prepare(
+          `SELECT t.id, t.title, t.artist, t.album, t.duration, t.path,
+                  t.cover_path as coverPath, t.source, t.external_id as externalId,
+                  t.file_size as fileSize, t.mtime_ms as mtimeMs,
+                  t.added_at as addedAt, t.updated_at as updatedAt
+           FROM tracks t
+           JOIN tracks_fts ON t.rowid = tracks_fts.rowid
+           WHERE tracks_fts MATCH ?
+             AND (${LIBRARY_TRACK_FILTER_T})
+           LIMIT ?`,
+        )
+        .all(match, limit) as Record<string, unknown>[];
+    } catch (err) {
+      console.warn("[db] FTS search failed, falling back to LIKE:", err);
+    }
+  }
+
+  // LIKE fallback (pre-FTS DBs / malformed MATCH).
   const clauses: string[] = [];
   const params: string[] = [];
   for (const raw of tokens) {
@@ -3745,8 +3841,8 @@ function scoreLocalSearchHit(query: string, t: TrackRow): number {
 }
 
 /**
- * Library files matching a free-text query. Token AND across title/artist/album
- * + match_key, ranked by the same scorer as catalog search.
+ * Library files matching a free-text query. FTS5 prefix match (token AND)
+ * with LIKE fallback, ranked by the same scorer as catalog search.
  */
 export function searchTracksLocal(q: string, limit = 50): TrackRow[] {
   const term = q.trim().replace(/\s+/g, " ");

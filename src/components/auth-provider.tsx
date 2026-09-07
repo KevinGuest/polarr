@@ -17,6 +17,7 @@ import {
   setDesktopOfflineSession,
   startDesktopOfflineSync,
 } from "@/lib/desktop-offline";
+import { startLibraryMetaSync } from "@/lib/library-meta-cache";
 import { clearNativeSessionToken, nativeAssetUrl, nativeSessionToken } from "@/lib/native-client";
 
 export type BanStatus = {
@@ -117,6 +118,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     return startDesktopOfflineSync(() => user?.publicId ?? null);
   }, [user?.publicId]);
+
+  useEffect(() => {
+    if (loading || !user) return;
+    return startLibraryMetaSync();
+  }, [loading, user?.publicId]);
 
   useEffect(() => {
     function onAvatarUpdated() {

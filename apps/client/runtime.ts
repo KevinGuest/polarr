@@ -17,6 +17,7 @@ import {
   updateMutationAttempts,
   type QueuedMutation,
 } from "./offline-store";
+import { syncLibraryMeta } from "../../src/lib/library-meta-cache";
 
 type NativePlatform = "ios" | "desktop";
 type CachedResponse = {
@@ -684,6 +685,8 @@ async function warmOfflineLibrary() {
       }),
     );
     if (successful > 0) localStorage.setItem(warmKey, String(Date.now()));
+    // Keep the searchable on-device library index warm (not throttled with HTTP cache).
+    void syncLibraryMeta();
   } finally {
     warming = false;
   }

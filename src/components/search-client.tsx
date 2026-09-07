@@ -36,6 +36,7 @@ import {
 } from "@/lib/track-match";
 import type { LocalSourceBadge } from "@/lib/track-source-badge";
 import { RECENT_PLAYED_CHANGED_EVENT } from "@/lib/ui-events";
+import { searchCachedLibraryTracks } from "@/lib/library-meta-cache";
 import { MobileSearchHeader } from "@/components/mobile-search-header";
 import { MobileSaveButton } from "@/components/saved-in-drawer";
 import {
@@ -292,13 +293,27 @@ export function SearchClient() {
     }
 
     const handle = setTimeout(() => {
+      // Instant paint from on-device library cache (Spotify-style).
+      const cached = searchCachedLibraryTracks(term, 48);
+      if (cached.length) {
+        applySearch({ tracks: cached }, false);
+      }
+
       void fetch(
         `/api/search?q=${encodeURIComponent(term)}&library=1`,
         { cache: "no-store" },
       )
         .then(async (r) => (r.ok ? r.json() : null))
         .then((data) => {
-          if (data) applySearch(data, false);
+          if (!data) return;
+          // Don't clobber a warm local cache paint with an empty network miss.
+          if (
+            !(data.tracks?.length) &&
+            searchCachedLibraryTracks(term, 1).length > 0
+          ) {
+            return;
+          }
+          applySearch(data, false);
         })
         .catch(() => {
           /* full search still coming */

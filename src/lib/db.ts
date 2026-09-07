@@ -421,6 +421,16 @@ function purgeArtworkNamedTracks(database: Database.Database) {
       /* table may not exist yet on older paths */
     }
     database.prepare(`DELETE FROM tracks WHERE id = ?`).run(id);
+    try {
+      database
+        .prepare(
+          `INSERT INTO track_deletions(id, deleted_at) VALUES (?, ?)
+           ON CONFLICT(id) DO UPDATE SET deleted_at = excluded.deleted_at`,
+        )
+        .run(id, nowIso());
+    } catch {
+      /* track_deletions may not exist on very old migrate paths */
+    }
   });
 
   const repair = database.prepare(
@@ -1063,6 +1073,12 @@ function migrate(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_taste_excludes_user ON taste_excludes(user_id);
     CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, read_at);
+
+    CREATE TABLE IF NOT EXISTS track_deletions (
+      id TEXT PRIMARY KEY,
+      deleted_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_track_deletions_deleted ON track_deletions(deleted_at);
   `);
 
   migrateTracksFts(database);
@@ -3978,6 +3994,7 @@ export function deleteTrack(
   db.prepare(`DELETE FROM offline_marks WHERE track_id = ?`).run(id);
   db.prepare(`DELETE FROM playlist_tracks WHERE track_id = ?`).run(id);
   db.prepare(`DELETE FROM tracks WHERE id = ?`).run(id);
+  recordTrackDeletion(id);
 
   if (options?.deleteFiles) {
     const settings = getSettings();
@@ -3985,6 +4002,117 @@ export function deleteTrack(
   }
 
   return track;
+}
+
+function recordTrackDeletion(id: string) {
+  getDb()
+    .prepare(
+      `INSERT INTO track_deletions(id, deleted_at) VALUES (?, ?)
+       ON CONFLICT(id) DO UPDATE SET deleted_at = excluded.deleted_at`,
+    )
+    .run(id, nowIso());
+}
+
+export type LibrarySyncTrack = {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  coverPath: string | null;
+  source: TrackRow["source"];
+  updatedAt: string;
+  addedAt: string;
+};
+
+/** Incremental library metadata for client-side cache (Spotify-style). */
+export function listLibrarySync(opts: {
+  since?: string | null;
+  limit?: number;
+}): {
+  tracks: LibrarySyncTrack[];
+  deletedIds: string[];
+  version: string;
+  complete: boolean;
+  nextSince: string | null;
+  total: number;
+} {
+  const limit = Math.max(1, Math.min(opts.limit ?? 2000, 5000));
+  const since = (opts.since || "").trim();
+  const db = getDb();
+  const total = countTracks();
+
+  const tracks = (
+    since
+      ? (db
+          .prepare(
+            `SELECT id, title, artist, album, duration,
+                    cover_path as coverPath, source,
+                    updated_at as updatedAt, added_at as addedAt
+             FROM tracks
+             WHERE (${LIBRARY_TRACK_FILTER})
+               AND updated_at > ?
+             ORDER BY updated_at ASC, id ASC
+             LIMIT ?`,
+          )
+          .all(since, limit) as LibrarySyncTrack[])
+      : (db
+          .prepare(
+            `SELECT id, title, artist, album, duration,
+                    cover_path as coverPath, source,
+                    updated_at as updatedAt, added_at as addedAt
+             FROM tracks
+             WHERE (${LIBRARY_TRACK_FILTER})
+             ORDER BY updated_at ASC, id ASC
+             LIMIT ?`,
+          )
+          .all(limit) as LibrarySyncTrack[])
+  ).map((t) => ({
+    ...t,
+    coverPath: t.coverPath || null,
+    duration: Number(t.duration) || 0,
+  }));
+
+  const deletedIds = since
+    ? (
+        db
+          .prepare(
+            `SELECT id FROM track_deletions WHERE deleted_at > ? ORDER BY deleted_at ASC LIMIT ?`,
+          )
+          .all(since, limit) as { id: string }[]
+      ).map((r) => r.id)
+    : [];
+
+  const lastTrackAt = tracks.length ? tracks[tracks.length - 1]!.updatedAt : since;
+  const lastDel = since
+    ? (db
+        .prepare(
+          `SELECT deleted_at as at FROM track_deletions WHERE deleted_at > ? ORDER BY deleted_at DESC LIMIT 1`,
+        )
+        .get(since) as { at: string } | undefined)
+    : undefined;
+
+  const maxUpdated = (
+    db
+      .prepare(
+        `SELECT MAX(updated_at) as at FROM tracks WHERE (${LIBRARY_TRACK_FILTER})`,
+      )
+      .get() as { at: string | null } | undefined
+  )?.at;
+
+  const version =
+    [maxUpdated, lastDel?.at, lastTrackAt].filter(Boolean).sort().at(-1) ||
+    nowIso();
+
+  const complete = tracks.length < limit;
+  return {
+    tracks,
+    deletedIds,
+    version,
+    complete,
+    nextSince: complete ? null : lastTrackAt || null,
+    total,
+  };
 }
 
 /** Remove all indexed tracks for an album (artist + album title). */

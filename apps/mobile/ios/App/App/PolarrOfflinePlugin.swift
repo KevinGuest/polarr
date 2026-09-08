@@ -48,6 +48,22 @@ public class PolarrOfflinePlugin: CAPPlugin, CAPBridgedPlugin, URLSessionDownloa
 
     static var backgroundCompletionHandler: (() -> Void)?
 
+    /// Offline audio may only be fetched from the configured Polarr server.
+    private static func isAllowedOfflineDownloadURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = url.host, !host.isEmpty else {
+            return false
+        }
+        // Capacitor Preferences stores the connect URL under this key.
+        let raw = UserDefaults.standard.string(forKey: "polarr_server_url")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let raw, !raw.isEmpty, let server = URL(string: raw), let allowed = server.host else {
+            return false
+        }
+        return host.caseInsensitiveCompare(allowed) == .orderedSame
+    }
+
     private let stateLock = NSLock()
     private var authorizedUserId: String?
     private var session: URLSession!
@@ -212,6 +228,10 @@ public class PolarrOfflinePlugin: CAPPlugin, CAPBridgedPlugin, URLSessionDownloa
         }
         guard authorizedUserId == userId else {
             call.reject("Sign in to download offline")
+            return
+        }
+        guard Self.isAllowedOfflineDownloadURL(url) else {
+            call.reject("Offline downloads must come from your Polarr server")
             return
         }
 

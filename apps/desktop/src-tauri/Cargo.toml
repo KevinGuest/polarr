@@ -1,6 +1,6 @@
 [package]
 name = "polarr-desktop"
-version = "0.2.18"
+version = "0.2.21"
 description = "Polarr desktop shell"
 authors = ["Polarr"]
 edition = "2021"
@@ -29,3 +29,11 @@ tiny_http = "0.12"
 uuid = { version = "1", features = ["v4"] }
 http = "1"
 reqwest = { version = "0.13", features = ["json", "cookies"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Media_Audio",
+  "Win32_System_Com",
+  "Win32_UI_Shell",
+] }

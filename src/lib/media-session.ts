@@ -18,6 +18,7 @@ import {
   setNativeNowPlayingMetadata,
   setNativeNowPlayingPlayback,
 } from "@/lib/ios-now-playing";
+import { isEphemeralCoverUrl } from "@/lib/player-cover";
 
 export type MediaSessionTrackInfo = {
   title: string;
@@ -55,7 +56,8 @@ export function mediaSessionArtworkUrl(
   coverPath: string | null | undefined,
 ): string | null {
   if (!coverPath) return null;
-  if (coverPath.startsWith("blob:") || coverPath.startsWith("data:")) return null;
+  // The OS fetches artwork itself, so object/data URLs can never reach it.
+  if (isEphemeralCoverUrl(coverPath)) return null;
 
   let candidate = coverPath.trim();
   if (!candidate) return null;

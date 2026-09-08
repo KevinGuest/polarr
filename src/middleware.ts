@@ -45,11 +45,20 @@ function isNativeMediaRequest(req: NextRequest): boolean {
 }
 
 function hasAuthCredential(req: NextRequest): boolean {
-  const token = req.cookies.get(SESSION_COOKIE_NAME)?.value?.trim();
-  if (token) return true;
+  const cookie = req.cookies.get(SESSION_COOKIE_NAME)?.value?.trim();
+  if (cookie && isSessionTokenShape(cookie)) return true;
   const auth = req.headers.get("authorization");
   if (!auth?.toLowerCase().startsWith("bearer ")) return false;
-  return auth.slice(7).trim().length > 0;
+  const token = auth.slice(7).trim();
+  // Session tokens are 32 random bytes hex-encoded (64 chars). Rejecting
+  // garbage here closes the "Authorization: Bearer x" presence-only hole;
+  // handlers still call getUserByToken for real validation.
+  return isSessionTokenShape(token);
+}
+
+/** Polarr session tokens are always 64 lowercase/upper hex chars. */
+function isSessionTokenShape(token: string): boolean {
+  return /^[a-f0-9]{64}$/i.test(token);
 }
 
 export function middleware(req: NextRequest) {

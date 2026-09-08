@@ -15,7 +15,7 @@ import {
   updateUserPassword,
 } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH } from "@/lib/auth-password";
-import { resolvePublicBaseUrl } from "@/lib/public-url";
+import { requireTrustedPublicBaseUrl } from "@/lib/public-url";
 import { sendEmailChangeConfirmation } from "@/lib/email-change-email";
 
 export const dynamic = "force-dynamic";
@@ -110,7 +110,20 @@ export async function PATCH(req: Request) {
     }
     const result = createEmailChangeToken(user.id, body.email);
     if (!result.ok) return json({ error: result.error }, { status: 400 });
-    const base = resolvePublicBaseUrl(settings, req) || "http://localhost:3000";
+    let base: string;
+    try {
+      base = requireTrustedPublicBaseUrl(settings);
+    } catch (error) {
+      return json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Set Public URL under Admin → Settings before changing email.",
+        },
+        { status: 503 },
+      );
+    }
     try {
       await sendEmailChangeConfirmation({
         to: result.email,

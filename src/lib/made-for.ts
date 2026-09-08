@@ -1,9 +1,13 @@
 import fs from "node:fs";
 import {
+  getTrack,
   listLikedTracks,
   listRecentPlays,
   listTasteExcludeIds,
   listTracks,
+  listTracksByArtist,
+  listTracksForAlbum,
+  searchTracksLocal,
   type TrackRow,
 } from "@/lib/db";
 import { primaryArtistName } from "@/lib/artist-portrait";
@@ -40,14 +44,21 @@ const DAILY_ACCENTS = [
   "#c4b5fd", // purple
 ];
 
+/** Share of autoplay slots allowed for unfamiliar library artists when taste exists. */
+const AUTOPLAY_NOVELTY_SHARE = 0.15;
+
+function isOnDisk(t: TrackRow): boolean {
+  try {
+    return Boolean(t.path && fs.existsSync(t.path));
+  } catch {
+    return false;
+  }
+}
+
 function streamableCatalog(limit = 400, excludeIds?: Set<string>): TrackRow[] {
   return listTracks(limit).filter((t) => {
     if (excludeIds?.has(t.id)) return false;
-    try {
-      return Boolean(t.path && fs.existsSync(t.path));
-    } catch {
-      return false;
-    }
+    return isOnDisk(t);
   });
 }
 
@@ -82,6 +93,132 @@ function seededShuffle<T>(items: T[], seed: string): T[] {
 
 function artistKey(artist: string) {
   return primaryArtistName(artist).trim().toLowerCase() || artist.trim().toLowerCase();
+}
+
+function albumKey(artist: string, album: string) {
+  const ak = artistKey(artist);
+  const al = album.trim().toLowerCase();
+  return ak && al ? `${ak}::${al}` : "";
+}
+
+/** Pull library rows for an artist (exact + soft search fallback). */
+function libraryTracksForArtist(name: string, limit: number): TrackRow[] {
+  const exact = listTracksByArtist(name, limit);
+  if (exact.length >= Math.min(8, limit)) return exact;
+  const seen = new Set(exact.map((t) => t.id));
+  const out = [...exact];
+  const needle = artistKey(name);
+  for (const hit of searchTracksLocal(name, limit * 2)) {
+    if (seen.has(hit.id)) continue;
+    if (artistKey(hit.artist) !== needle) {
+      const hay = hit.artist.toLowerCase();
+      if (!needle || !hay.includes(needle)) continue;
+    }
+    seen.add(hit.id);
+    out.push(hit);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * Candidate universe for taste queues: artists/albums you actually play + likes,
+ * seed neighborhood first, then a thin novelty slice from recent adds.
+ */
+function buildTasteCandidatePool(
+  userId: string,
+  opts: {
+    excludeIds: Set<string>;
+    scores: Map<string, number>;
+    labels: Map<string, string>;
+    heardAlbums: Set<string>;
+    seedArtistLabel?: string;
+    seedAlbum?: string;
+    noveltyLimit?: number;
+  },
+): TrackRow[] {
+  const byId = new Map<string, TrackRow>();
+  const add = (tracks: TrackRow[]) => {
+    for (const t of tracks) {
+      if (opts.excludeIds.has(t.id)) continue;
+      if (!isOnDisk(t)) continue;
+      if (!byId.has(t.id)) byId.set(t.id, t);
+    }
+  };
+
+  // 1) Seed neighborhood — stay close to what’s playing
+  if (opts.seedArtistLabel) {
+    add(libraryTracksForArtist(opts.seedArtistLabel, 120));
+    if (opts.seedAlbum) {
+      add(listTracksForAlbum(opts.seedArtistLabel, opts.seedAlbum, 40));
+      // Also try raw seed artist string if it differed from primary label
+    }
+  }
+
+  // 2) Top affinity artists (what you listen to)
+  const topArtists = [...opts.scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 28);
+  for (const [k] of topArtists) {
+    const label = opts.labels.get(k) || k;
+    add(libraryTracksForArtist(label, 55));
+  }
+
+  // 3) Albums you’ve actually heard — deeper cuts from familiar records
+  const albumPairs = new Map<string, { artist: string; album: string }>();
+  for (const t of [
+    ...listRecentPlays(userId, 120),
+    ...listLikedTracks(userId, 200),
+  ]) {
+    const ak = albumKey(t.artist, t.album);
+    if (!ak || !opts.heardAlbums.has(ak)) continue;
+    if (!albumPairs.has(ak)) {
+      albumPairs.set(ak, {
+        artist: primaryArtistName(t.artist).trim() || t.artist.trim(),
+        album: t.album.trim(),
+      });
+    }
+  }
+  for (const pair of albumPairs.values()) {
+    add(listTracksForAlbum(pair.artist, pair.album, 28));
+  }
+
+  // 4) Liked songs on disk
+  add(listLikedTracks(userId, 250).filter((t) => Boolean(t.path)));
+
+  // 5) Thin novelty slice from newest library adds (discovery spice only)
+  const noveltyBudget = Math.max(16, opts.noveltyLimit ?? 36);
+  let noveltyAdded = 0;
+  for (const t of listTracks(350)) {
+    if (byId.has(t.id)) continue;
+    if (opts.excludeIds.has(t.id)) continue;
+    if (!isOnDisk(t)) continue;
+    const ak = artistKey(t.artist);
+    // Prefer artists outside the core taste set for true novelty
+    if (opts.scores.has(ak) && (opts.scores.get(ak) || 0) > 0) continue;
+    byId.set(t.id, t);
+    noveltyAdded += 1;
+    if (noveltyAdded >= noveltyBudget) break;
+  }
+
+  // Cold start: no taste yet — fall back to newest streamable catalog
+  if (byId.size === 0) {
+    add(streamableCatalog(400, opts.excludeIds));
+  }
+
+  return [...byId.values()];
+}
+
+/** Artists blocked via taste excludes (track exclude demotes the whole artist). */
+function excludedArtistKeys(excludeTrackIds: Iterable<string>): Set<string> {
+  const out = new Set<string>();
+  for (const id of excludeTrackIds) {
+    const t = getTrack(id);
+    if (!t) continue;
+    const k = artistKey(t.artist);
+    if (k) out.add(k);
+  }
+  return out;
 }
 
 /** Play + like weighted artist affinity for home Explore ranking. */
@@ -187,41 +324,39 @@ export function buildMadeForMixes(
 ): { username: string; mixes: MadeForMix[] } {
   const day = new Date().toISOString().slice(0, 10);
   const excluded = new Set(listTasteExcludeIds(userId));
-  const catalog = streamableCatalog(400, excluded);
+  const blockedArtists = excludedArtistKeys(excluded);
+  const { scores, labels, heardAlbums } = listenArtistAffinity(userId);
+
+  const catalog = buildTasteCandidatePool(userId, {
+    excludeIds: excluded,
+    scores,
+    labels,
+    heardAlbums,
+    noveltyLimit: 80,
+  }).filter((t) => {
+    const k = artistKey(t.artist);
+    return !k || !blockedArtists.has(k);
+  });
+
   const recent = listRecentPlays(userId, 100).filter((t) => !excluded.has(t.id));
   const liked = listLikedTracks(userId, 200).filter((t) => !excluded.has(t.id));
-  const likedPlayable = liked.filter((t) => Boolean(t.path));
+  const likedPlayable = liked.filter((t) => Boolean(t.path) && isOnDisk(t));
+  const playedIds = new Set(recent.map((t) => t.id));
 
   if (catalog.length === 0) {
     return { username, mixes: [] };
   }
 
-  // Artist scores from plays (recency-weighted) + likes
-  const artistScore = new Map<string, number>();
-  const artistLabel = new Map<string, string>();
-  const playedIds = new Set(recent.map((t) => t.id));
+  const artistScore = new Map(scores);
+  const artistLabel = new Map(labels);
 
-  recent.forEach((t, i) => {
-    const k = artistKey(t.artist);
-    if (!k) return;
-    artistLabel.set(k, t.artist);
-    const weight = Math.max(1, 20 - i * 0.15);
-    artistScore.set(k, (artistScore.get(k) || 0) + weight);
-  });
-  for (const t of liked) {
-    const k = artistKey(t.artist);
-    if (!k) continue;
-    artistLabel.set(k, t.artist);
-    artistScore.set(k, (artistScore.get(k) || 0) + 8);
-  }
-
-  // Cold start: invent taste from catalog diversity
+  // Cold start: invent taste from catalog diversity when affinity empty
   if (artistScore.size === 0) {
     const byArtist = new Map<string, number>();
     for (const t of catalog) {
       const k = artistKey(t.artist);
       if (!k) continue;
-      artistLabel.set(k, t.artist);
+      artistLabel.set(k, primaryArtistName(t.artist).trim() || t.artist.trim());
       byArtist.set(k, (byArtist.get(k) || 0) + 1);
     }
     for (const [k, c] of byArtist) {
@@ -239,14 +374,18 @@ export function buildMadeForMixes(
   // Discover Weekly — underplayed / less familiar artists + newer adds
   {
     const familiar = new Set(rankedArtists.slice(0, 8));
+    // Prefer mid-tier taste artists (known-ish) over pure random newest files
+    const midTier = new Set(rankedArtists.slice(8, 40));
     const pool = catalog.filter((t) => {
       const k = artistKey(t.artist);
       if (familiar.has(k) && playedIds.has(t.id)) return false;
       return true;
     });
     const scored = [...pool].sort((a, b) => {
-      const fa = familiar.has(artistKey(a.artist)) ? 0 : 2;
-      const fb = familiar.has(artistKey(b.artist)) ? 0 : 2;
+      const ka = artistKey(a.artist);
+      const kb = artistKey(b.artist);
+      const fa = familiar.has(ka) ? 0 : midTier.has(ka) ? 3 : 1;
+      const fb = familiar.has(kb) ? 0 : midTier.has(kb) ? 3 : 1;
       const sa = (a.source === "fallback" ? 1 : 0) + fa + a.mtimeMs / 1e15;
       const sb = (b.source === "fallback" ? 1 : 0) + fb + b.mtimeMs / 1e15;
       return sb - sa;
@@ -299,7 +438,7 @@ export function buildMadeForMixes(
     if (filled.length < 3) continue;
     for (const t of filled) usedInDaily.add(t.id);
 
-    const labels = cluster
+    const clusterLabels = cluster
       .map((k) => artistLabel.get(k) || k)
       .filter(Boolean);
     const n = String(i + 1).padStart(2, "0");
@@ -307,10 +446,10 @@ export function buildMadeForMixes(
       id: `daily-mix-${i + 1}`,
       kind: "daily_mix",
       title: `Daily Mix ${i + 1}`,
-      description: formatArtistList(labels),
+      description: formatArtistList(clusterLabels),
       accent: DAILY_ACCENTS[i % DAILY_ACCENTS.length],
       badge: n,
-      coverSeed: `daily-mix-${i + 1}-${labels[0] || username}`,
+      coverSeed: `daily-mix-${i + 1}-${clusterLabels[0] || username}`,
       tracks: filled.map(toDto),
     });
   }
@@ -395,17 +534,16 @@ export function buildTasteAutoplay(
     excluded.add(recent.id);
   }
 
-  const catalog = streamableCatalog(500, excluded);
-  if (catalog.length === 0) return [];
-
-  const { scores, heardAlbums } = listenArtistAffinity(userId);
+  const blockedArtists = excludedArtistKeys(listTasteExcludeIds(userId));
+  const { scores, labels, heardAlbums } = listenArtistAffinity(userId);
   let maxTaste = 1;
   for (const v of scores.values()) if (v > maxTaste) maxTaste = v;
   const hasTaste = scores.size > 0 && maxTaste > 1;
 
-  const seedArtist = artistKey(
-    opts?.seed?.artist || opts?.seedArtist || "",
-  );
+  const seedArtistRaw = opts?.seed?.artist || opts?.seedArtist || "";
+  const seedArtist = artistKey(seedArtistRaw);
+  const seedArtistLabel =
+    primaryArtistName(seedArtistRaw).trim() || seedArtistRaw.trim() || "";
   const seedAlbum = (
     opts?.seed?.album ||
     opts?.seedAlbum ||
@@ -415,8 +553,16 @@ export function buildTasteAutoplay(
     .toLowerCase();
   const seedAlbumKey = seedArtist && seedAlbum ? `${seedArtist}::${seedAlbum}` : "";
 
-  // Soft co-listen: albums you've actually finished tracks from.
-  const familiarAlbums = heardAlbums;
+  const catalog = buildTasteCandidatePool(userId, {
+    excludeIds: excluded,
+    scores,
+    labels,
+    heardAlbums,
+    seedArtistLabel: seedArtistLabel || undefined,
+    seedAlbum: opts?.seed?.album || opts?.seedAlbum || undefined,
+    noveltyLimit: Math.max(20, Math.ceil(limit * 2.5)),
+  });
+  if (catalog.length === 0) return [];
 
   const day = new Date().toISOString().slice(0, 10);
   // Stable jitter so the same session isn’t identical every fill, but not pure random.
@@ -428,17 +574,27 @@ export function buildTasteAutoplay(
     const albumK = ak && albumNorm ? `${ak}::${albumNorm}` : "";
     const tasteRaw = scores.get(ak) || 0;
     const tasteNorm = hasTaste ? Math.min(1, tasteRaw / maxTaste) : 0;
-    // Taste is a prior, not the whole decision — leave room for continuity + discovery.
-    let score = hasTaste ? tasteNorm * 0.48 : 0.18;
+    const isSeedArtist = Boolean(seedArtist && ak === seedArtist);
+    const familiar = tasteRaw > 0 || isSeedArtist;
 
-    if (seedArtist && ak === seedArtist) score += 0.22;
-    if (seedAlbum && albumNorm === seedAlbum && seedArtist && ak === seedArtist) {
+    let score: number;
+    if (hasTaste && !familiar) {
+      // Novelty candidates stay low — hard floor keeps them out of most slots
+      score = 0.04;
+    } else if (hasTaste) {
+      score = tasteNorm * 0.55;
+    } else {
+      score = 0.18;
+    }
+
+    if (isSeedArtist) score += 0.22;
+    if (seedAlbum && albumNorm === seedAlbum && isSeedArtist) {
       // Stay on the seed album for a few songs (radio continuity).
       score += 0.34;
-    } else if (seedAlbumKey && albumK && familiarAlbums.has(albumK)) {
+    } else if (seedAlbumKey && albumK && heardAlbums.has(albumK)) {
       score += 0.16;
-    } else if (albumK && familiarAlbums.has(albumK)) {
-      score += 0.1;
+    } else if (albumK && heardAlbums.has(albumK)) {
+      score += 0.12;
     }
 
     // Mild position-stable jitter (not Math.random each request)
@@ -448,9 +604,9 @@ export function buildTasteAutoplay(
       h ^= key.charCodeAt(c);
       h = Math.imul(h, 16777619);
     }
-    score += (Math.abs(h) % 1000) / 1000 * 0.1;
+    score += ((Math.abs(h) % 1000) / 1000) * 0.08;
 
-    return { t, score, ak, albumK };
+    return { t, score, ak, albumK, familiar };
   });
 
   scored.sort((a, b) => b.score - a.score);
@@ -458,7 +614,16 @@ export function buildTasteAutoplay(
   const out: TrackRow[] = [];
   const perArtist = new Map<string, number>();
   const perAlbum = new Map<string, number>();
+  let noveltyCount = 0;
+  const noveltyCap = Math.max(1, Math.floor(limit * AUTOPLAY_NOVELTY_SHARE));
+
   for (const row of scored) {
+    if (row.ak && blockedArtists.has(row.ak) && row.ak !== seedArtist) continue;
+
+    if (hasTaste && !row.familiar) {
+      if (noveltyCount >= noveltyCap) continue;
+    }
+
     const n = perArtist.get(row.ak) || 0;
     // Keep variety — seed artist can appear a bit more
     const artistCap = row.ak && row.ak === seedArtist ? 5 : 2;
@@ -471,13 +636,13 @@ export function buildTasteAutoplay(
           ? 2
           : 1;
     if (row.albumK && albumCount >= albumCap) continue;
+
     perArtist.set(row.ak, n + 1);
     if (row.albumK) perAlbum.set(row.albumK, albumCount + 1);
+    if (hasTaste && !row.familiar) noveltyCount += 1;
     out.push(row.t);
     if (out.length >= limit) break;
   }
 
   return out.map(toDto);
 }
-
-

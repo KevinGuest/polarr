@@ -2,8 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { requireAuthFromRequest, json } from "@/lib/api";
 import { isRickrollTrack, streamPolicy } from "@/lib/bans";
-import { getTrack } from "@/lib/db";
+import { getSettings, getTrack } from "@/lib/db";
 import { resolvePlayableAudioPath } from "@/lib/audio-path";
+import { isManagedMusicPath } from "@/lib/paths";
 import {
   IOS_NATIVE_EXTS,
   IOS_TRANSCODE_EXTS,
@@ -72,6 +73,13 @@ export async function GET(
         { name: "Path", value: (track.path || "").slice(0, 200) },
       ],
     });
+    return json({ error: "Audio file missing on disk" }, { status: 404 });
+  }
+
+  const settings = getSettings();
+  if (
+    !isManagedMusicPath(filePath, [settings.musicRoot].filter(Boolean))
+  ) {
     return json({ error: "Audio file missing on disk" }, { status: 404 });
   }
 

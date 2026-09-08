@@ -152,11 +152,10 @@ export async function POST(req: Request) {
   const body = parsed.data;
   const settings = getSettings();
   const user = await getAuthUser();
-  if (user) {
-    const dl = downloadPolicy(user.id);
-    if (!dl.ok) {
-      return json({ error: dl.error || "Downloads banned" }, { status: 403 });
-    }
+  if (!user) return json({ error: "Unauthorized" }, { status: 401 });
+  const dl = downloadPolicy(user.id);
+  if (!dl.ok) {
+    return json({ error: dl.error || "Downloads banned" }, { status: 403 });
   }
   const query =
     body.type === "track"
@@ -200,7 +199,7 @@ export async function POST(req: Request) {
     mediaType: body.type as "artist" | "album" | "track",
     foreignArtistId: foreignArtistId ?? null,
     foreignAlbumId: foreignAlbumId ?? null,
-    requestedBy: user?.username ?? null,
+    requestedBy: user.username,
     imageUrl: body.image?.trim() || null,
   };
 

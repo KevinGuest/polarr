@@ -59,7 +59,7 @@ export function listenArtistAffinity(userId: string): {
   const heardAlbums = new Set<string>();
   const excluded = new Set(listTasteExcludeIds(userId));
 
-  const signals = listUserListenSignals(userId, 250);
+  const signals = listUserListenSignals(userId, 400);
   signals.forEach((s, i) => {
     if (s.trackId && excluded.has(s.trackId)) return;
     const k = artistKey(s.artist);

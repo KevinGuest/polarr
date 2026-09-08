@@ -66,6 +66,63 @@ export function detectPlaylistService(url: string): PlaylistService | null {
   return null;
 }
 
+/** Hostnames yt-dlp / HTTP fetch may contact for playlist import. */
+function isAllowedPlaylistHost(hostname: string, service: PlaylistService): boolean {
+  const h = hostname.trim().toLowerCase().replace(/\.$/, "");
+  if (!h) return false;
+  if (service === "spotify") {
+    return (
+      h === "open.spotify.com" ||
+      h === "spotify.com" ||
+      h.endsWith(".spotify.com")
+    );
+  }
+  if (service === "youtube") {
+    return (
+      h === "youtube.com" ||
+      h === "www.youtube.com" ||
+      h === "m.youtube.com" ||
+      h === "music.youtube.com" ||
+      h === "youtu.be" ||
+      h === "www.youtu.be"
+    );
+  }
+  if (service === "deezer") {
+    return h === "deezer.com" || h === "www.deezer.com" || h.endsWith(".deezer.com");
+  }
+  if (service === "apple") {
+    return (
+      h === "music.apple.com" ||
+      h === "itunes.apple.com" ||
+      h.endsWith(".apple.com")
+    );
+  }
+  return false;
+}
+
+function assertSafePlaylistUrl(
+  service: PlaylistService,
+  url: string,
+): string | null {
+  const trimmed = url.trim();
+  if (service === "spotify" && trimmed.toLowerCase().startsWith("spotify:")) {
+    return null;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return "That playlist link isn’t a valid URL.";
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return "Playlist links must be http(s).";
+  }
+  if (!isAllowedPlaylistHost(parsed.hostname, service)) {
+    return `That host isn’t allowed for ${service} imports.`;
+  }
+  return null;
+}
+
 function spotifyPlaylistId(url: string): string | null {
   const trimmed = url.trim();
   const uri = trimmed.match(/spotify:playlist:([a-zA-Z0-9]+)/i);
@@ -392,11 +449,20 @@ export async function fetchRemotePlaylist(
   if (!trimmed) return { error: "Paste a playlist link." };
 
   const detected = detectPlaylistService(trimmed);
-  if (detected && detected !== service) {
+  if (detected !== service) {
+    if (detected) {
+      return {
+        error: `That link looks like ${detected}, not ${service}. Pick the matching service.`,
+      };
+    }
     return {
-      error: `That link looks like ${detected}, not ${service}. Pick the matching service.`,
+      error:
+        "Paste a recognized Spotify, YouTube / YouTube Music, Deezer, or Apple Music playlist link.",
     };
   }
+
+  const unsafe = assertSafePlaylistUrl(service, trimmed);
+  if (unsafe) return { error: unsafe };
 
   switch (service) {
     case "spotify":

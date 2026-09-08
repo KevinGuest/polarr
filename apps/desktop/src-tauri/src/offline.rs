@@ -301,6 +301,15 @@ pub struct BeginDownloadResponse {
     pub track_id: String,
 }
 
+fn authorized_user_id(state: &OfflineState) -> Result<String, String> {
+    state
+        .authorized_user_id
+        .lock()
+        .map_err(|_| "lock poisoned".to_string())?
+        .clone()
+        .ok_or_else(|| "Sign in to use offline downloads".into())
+}
+
 #[tauri::command]
 pub fn offline_set_session(
     state: State<'_, OfflineState>,
@@ -317,26 +326,67 @@ pub fn offline_set_session(
 }
 
 #[tauri::command]
-pub fn offline_list(app: AppHandle) -> Result<Vec<OfflineTrackMeta>, String> {
-    Ok(read_index(&app)?.tracks)
+pub fn offline_list(
+    app: AppHandle,
+    state: State<'_, OfflineState>,
+) -> Result<Vec<OfflineTrackMeta>, String> {
+    let user = authorized_user_id(&state)?;
+    Ok(read_index(&app)?
+        .tracks
+        .into_iter()
+        .filter(|t| t.user_id == user)
+        .collect())
 }
 
 #[tauri::command]
-pub fn offline_has(app: AppHandle, track_id: String) -> Result<bool, String> {
+pub fn offline_has(
+    app: AppHandle,
+    state: State<'_, OfflineState>,
+    track_id: String,
+) -> Result<bool, String> {
+    let user = authorized_user_id(&state)?;
+    let Some(meta) = read_index(&app)?
+        .tracks
+        .into_iter()
+        .find(|t| t.track_id == track_id)
+    else {
+        return Ok(false);
+    };
+    if meta.user_id != user {
+        return Ok(false);
+    }
     Ok(blob_path(&app, &track_id)?.exists())
 }
 
 #[tauri::command]
-pub fn offline_ids(app: AppHandle) -> Result<Vec<String>, String> {
+pub fn offline_ids(
+    app: AppHandle,
+    state: State<'_, OfflineState>,
+) -> Result<Vec<String>, String> {
+    let user = authorized_user_id(&state)?;
     Ok(read_index(&app)?
         .tracks
         .into_iter()
+        .filter(|t| t.user_id == user)
         .map(|t| t.track_id)
         .collect())
 }
 
 #[tauri::command]
-pub fn offline_remove(app: AppHandle, track_id: String) -> Result<(), String> {
+pub fn offline_remove(
+    app: AppHandle,
+    state: State<'_, OfflineState>,
+    track_id: String,
+) -> Result<(), String> {
+    let user = authorized_user_id(&state)?;
+    let meta = read_index(&app)?
+        .tracks
+        .into_iter()
+        .find(|t| t.track_id == track_id)
+        .ok_or_else(|| "not found".to_string())?;
+    if meta.user_id != user {
+        return Err("unauthorized for this offline cache".into());
+    }
     let path = blob_path(&app, &track_id)?;
     if path.exists() {
         fs::remove_file(&path).map_err(|e| format!("remove blob: {e}"))?;
@@ -345,24 +395,24 @@ pub fn offline_remove(app: AppHandle, track_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn offline_clear_all(app: AppHandle) -> Result<(), String> {
-    let dir = offline_dir(&app)?;
-    if dir.exists() {
-        for entry in fs::read_dir(&dir).map_err(|e| format!("read offline dir: {e}"))? {
-            let entry = entry.map_err(|e| format!("dir entry: {e}"))?;
-            let path = entry.path();
-            let is_blob = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.eq_ignore_ascii_case("polarr"))
-                .unwrap_or(false);
-            let is_index = path.file_name().and_then(|n| n.to_str()) == Some(INDEX_FILE);
-            if is_blob || is_index {
-                let _ = fs::remove_file(path);
-            }
+pub fn offline_clear_all(
+    app: AppHandle,
+    state: State<'_, OfflineState>,
+) -> Result<(), String> {
+    let user = authorized_user_id(&state)?;
+    let mut index = read_index(&app)?;
+    let (keep, drop): (Vec<_>, Vec<_>) = index
+        .tracks
+        .into_iter()
+        .partition(|t| t.user_id != user);
+    for meta in &drop {
+        let path = blob_path(&app, &meta.track_id)?;
+        if path.exists() {
+            let _ = fs::remove_file(path);
         }
     }
-    write_index(&app, &OfflineIndex::default())
+    index.tracks = keep;
+    write_index(&app, &index)
 }
 
 #[tauri::command]

@@ -48,6 +48,11 @@ import {
   duoArtists,
   isDualLyricLayout,
 } from "@/lib/lyrics/lyric-sides";
+import {
+  durableCoverPath,
+  needsDurableCover,
+  playerCoverUrl,
+} from "@/lib/player-cover";
 import { LISTEN_CREDITED_EVENT } from "@/lib/ui-events";
 import { cn, formatDuration } from "@/lib/utils";
 import { KaraokeLyricLine } from "@/components/karaoke-lyric-line";
@@ -57,16 +62,6 @@ import { isPolarrDesktop } from "@/lib/desktop-shell";
 function formatRemaining(progress: number, duration: number): string {
   const rem = Math.max(0, duration - progress);
   return `-${formatDuration(rem)}`;
-}
-
-/** Absolute CDN URLs or root-relative server paths (CoverArt authenticates natives). */
-function playerCoverUrl(coverPath: string | null | undefined): string | undefined {
-  if (!coverPath) return undefined;
-  const value = coverPath.trim();
-  if (!value) return undefined;
-  if (value.startsWith("blob:") || value.startsWith("data:")) return undefined;
-  if (/^https?:\/\//i.test(value) || value.startsWith("/")) return value;
-  return undefined;
 }
 
 /** Apple Music Sing–style mic with sparkles. */
@@ -851,7 +846,7 @@ function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
           !t.id.startsWith("live:") &&
           !t.id.startsWith("stream:") &&
           !t.id.startsWith("catalog:") &&
-          !playerCoverUrl(t.coverPath),
+          needsDurableCover(t.coverPath),
       )
       .slice(0, 16);
     if (missing.length === 0) return;
@@ -868,7 +863,7 @@ function QueuePanel({ variant = "rail" }: { variant?: "rail" | "sheet" }) {
           if (!res.ok) return null;
           const data = await res.json();
           const cover = data?.track?.coverUrl || data?.track?.coverPath;
-          const resolved = playerCoverUrl(cover);
+          const resolved = durableCoverPath(cover);
           if (resolved) {
             return [t.id, resolved] as const;
           }

@@ -13,6 +13,8 @@ mod discord_presence;
 mod macos_window;
 mod offline;
 mod server_webview;
+#[cfg(windows)]
+mod windows_identity;
 
 const CONFIG_FILE: &str = "server.json";
 const DESKTOP_PROTOCOL_VERSION: u32 = 1;
@@ -353,6 +355,14 @@ fn get_desktop_device_name() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(windows)]
+    {
+        // Must run before any window / WebView2 is created so taskbar + audio
+        // sessions group under Polarr instead of MSEDGEWEBVIEW2.
+        windows_identity::set_process_aumid();
+        windows_identity::spawn_audio_session_relabeler();
+    }
+
     let presence = discord_presence::DiscordPresenceState::default();
     let desktop_api = desktop_api::DesktopApiState::default();
     let offline_state = offline::OfflineState::default();

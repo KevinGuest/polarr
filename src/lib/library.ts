@@ -3,8 +3,10 @@ import path from "node:path";
 import { randomBytes } from "node:crypto";
 import {
   cleanAudioTag,
+  displayTitleFromStem,
   isArtworkAudioPath,
   isArtworkFilename,
+  looksLikeFilenameTitle,
   readAudioTags,
 } from "./audio-tags";
 import {
@@ -33,9 +35,15 @@ const PROBE_CONCURRENCY = 4;
 function walk(dir: string, out: string[] = []): string[] {
   if (!fs.existsSync(dir)) return out;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    // Never follow symlinks — shared Umbrel Downloads mounts can plant
+    // evil.mp3 → /immich/... links that would otherwise be indexed+streamed.
+    if (entry.isSymbolicLink()) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) walk(full, out);
-    else if (AUDIO_EXT.has(path.extname(entry.name).toLowerCase())) {
+    else if (
+      entry.isFile() &&
+      AUDIO_EXT.has(path.extname(entry.name).toLowerCase())
+    ) {
       out.push(full);
     }
   }
@@ -56,9 +64,12 @@ function parseTagsFromPath(filePath: string): {
   const parts = filePath.split(path.sep).filter(Boolean);
   const file = parts[parts.length - 1] || "Unknown";
   const base = path.basename(file, path.extname(file));
-  const album = parts.length >= 2 ? parts[parts.length - 2] : "Unknown Album";
+  const albumRaw = parts.length >= 2 ? parts[parts.length - 2] : "Unknown Album";
   const artist =
     parts.length >= 3 ? parts[parts.length - 3] : "Unknown Artist";
+  const album = looksLikeFilenameTitle(albumRaw)
+    ? displayTitleFromStem(albumRaw) || albumRaw
+    : albumRaw;
 
   if (base.includes(" - ")) {
     const [a, ...rest] = base.split(" - ");
@@ -67,17 +78,28 @@ function parseTagsFromPath(filePath: string): {
     if (/^\d{1,3}$/.test(maybeArtist)) {
       return {
         artist,
-        title: stripTrackNumber(rest.join(" - ").trim() || base),
+        title: displayTitleFromStem(
+          stripTrackNumber(rest.join(" - ").trim() || base),
+          artist,
+        ),
         album,
       };
     }
     return {
       artist: maybeArtist || artist,
-      title: stripTrackNumber(rest.join(" - ").trim() || base),
+      title: displayTitleFromStem(
+        stripTrackNumber(rest.join(" - ").trim() || base),
+        maybeArtist || artist,
+      ),
       album,
     };
   }
-  return { title: stripTrackNumber(base), artist, album };
+
+  return {
+    title: displayTitleFromStem(stripTrackNumber(base), artist),
+    artist,
+    album,
+  };
 }
 
 async function mapPool<T>(
@@ -137,6 +159,7 @@ export async function scanMusicLibrary(): Promise<{
 
     const existing = getTrackByPath(file);
     const junkTitle = isArtworkFilename(existing?.title);
+    const slugTitle = looksLikeFilenameTitle(existing?.title);
     const unchanged =
       existing &&
       existing.fileSize === fileSize &&
@@ -144,7 +167,9 @@ export async function scanMusicLibrary(): Promise<{
       // Old path-only scans left duration 0 — re-probe once for real tags.
       existing.duration > 0 &&
       // Thumbnail stream tags used to overwrite titles as cover.jpg.
-      !junkTitle;
+      !junkTitle &&
+      // Download-filename titles need a one-shot humanize pass.
+      !slugTitle;
 
     const pathTags = parseTagsFromPath(file);
     let title = unchanged ? existing.title : pathTags.title;
@@ -166,6 +191,14 @@ export async function scanMusicLibrary(): Promise<{
     title = cleanAudioTag(title) || pathTags.title;
     artist = cleanAudioTag(artist) || pathTags.artist;
     album = cleanAudioTag(album) || pathTags.album;
+
+    // Embedded tags sometimes store the raw download filename — humanize it.
+    if (looksLikeFilenameTitle(title)) {
+      title = displayTitleFromStem(title, artist) || pathTags.title || title;
+    }
+    if (looksLikeFilenameTitle(album)) {
+      album = displayTitleFromStem(album) || pathTags.album || album;
+    }
 
     // Final guard: never write artwork filenames into the catalog.
     if (isArtworkFilename(title) || isArtworkAudioPath(file)) {

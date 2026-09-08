@@ -3,7 +3,7 @@
  * Albums (Lidarr + library), singles (orphan / 1-track), and featured appearances.
  */
 
-import { listTracks, listTracksByArtist, type TrackRow } from "@/lib/db";
+import { listTracks, listTracksByArtist, searchTracksLocal, type TrackRow } from "@/lib/db";
 import { isArtworkFilename } from "@/lib/audio-tags";
 import {
   artistCoverKey,
@@ -92,15 +92,18 @@ export function listTracksFeaturingArtist(
   if (!target) return [];
   const primary = artistKey(target);
   const out: TrackRow[] = [];
-  for (const t of listTracks(500)) {
+  const seen = new Set<string>();
+
+  for (const t of searchTracksLocal(target, Math.max(limit * 8, 120))) {
+    if (seen.has(t.id)) continue;
     if (artistKey(t.artist) === primary) continue;
     const feats = extractFeaturedArtists(t.title);
     if (feats.some((f) => namesMatch(f, target))) {
+      seen.add(t.id);
       out.push(t);
       if (out.length >= limit) break;
       continue;
     }
-    // Multi-artist credit in the artist field: "A, B" / "A & B" / "A feat. B"
     const line = formatTrackArtistLine(t.artist, t.title);
     const parts = line.split(",").map((s) => s.trim());
     if (
@@ -108,6 +111,7 @@ export function listTracksFeaturingArtist(
       parts.some((p) => namesMatch(p, target)) &&
       !namesMatch(parts[0] || "", target)
     ) {
+      seen.add(t.id);
       out.push(t);
       if (out.length >= limit) break;
     }

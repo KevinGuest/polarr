@@ -7,7 +7,7 @@ import {
   smtpConfigured,
 } from "@/lib/db";
 import { sendPasswordResetEmail } from "@/lib/password-reset-email";
-import { resolvePublicBaseUrl } from "@/lib/public-url";
+import { requireTrustedPublicBaseUrl } from "@/lib/public-url";
 import { getRequestIpFromRequest } from "@/lib/request-client";
 import {
   loginBlockedForMs,
@@ -58,8 +58,20 @@ export async function POST(req: Request) {
     return json({ ok: true, message: OK_MSG });
   }
 
-  const base =
-    resolvePublicBaseUrl(settings, req) || "http://localhost:3000";
+  let base: string;
+  try {
+    base = requireTrustedPublicBaseUrl(settings);
+  } catch (err) {
+    return json(
+      {
+        error:
+          err instanceof Error
+            ? err.message
+            : "Set Public URL under Admin → Settings before sending reset emails.",
+      },
+      { status: 503 },
+    );
+  }
   try {
     const token = createPasswordResetToken(user.id);
     await sendPasswordResetEmail({

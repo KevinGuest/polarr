@@ -121,10 +121,11 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
           releaseBody: |
-            - **Instant library search** — your catalog caches on-device for Spotify-style typeahead
-            - **Faster Connect** — pause/skip/volume sync across devices over realtime SSE
-            - **Player covers & volume** — Lock Screen art and hardware volume stay in sync on iOS
-            - **Smarter auto-queue** — radio stays on the album longer and skips recent repeats
+            - **Faster YouTube playback** — one-shot resolve cuts cold-start stream lag
+            - **Smarter library matching** — filename downloads get real titles; collabs play from disk
+            - **Taste autoplay** — queues prefer artists you actually listen to
+            - **Player covers** — expanded player, Lock Screen, and Dynamic Island art fixed on iOS
+            - **Security harden** — API auth gates, playlist SSRF allowlist, stream path containment
 
             ## Downloads
 

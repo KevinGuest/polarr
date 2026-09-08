@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useNativeMediaDisplaySrc } from "@/lib/use-native-media-src";
 import { cn } from "@/lib/utils";
 
 type PlayerGlassBackdropProps = {
@@ -23,13 +24,16 @@ function seedHue(seed: string): number {
  * with a frosted glass wash so UI reads as see-through over moving color.
  */
 export function PlayerGlassBackdrop({
-  image,
+  image: rawImage,
   seed,
   className,
 }: PlayerGlassBackdropProps) {
   const [ready, setReady] = useState(false);
   const hue = seedHue(seed);
   const hue2 = (hue + 48) % 360;
+  // Root-relative server covers resolve against capacitor://localhost in the
+  // native WebView; the bridge turns them into loadable, authenticated URLs.
+  const image = useNativeMediaDisplaySrc(rawImage);
 
   useEffect(() => {
     setReady(false);

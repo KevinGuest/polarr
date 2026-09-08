@@ -80,7 +80,17 @@ export function isManagedMusicPath(
   const abs = path.resolve(filePath);
   const roots = Array.from(
     new Set(
-      [musicDir(), downloadsDir(), ...extraRoots]
+      [
+        musicDir(),
+        downloadsDir(),
+        // Umbrel / Lidarr aliases that resolvePlayableAudioPath may return
+        "/music",
+        "/downloads/media/music",
+        "/downloads/music",
+        "/downloads/complete/music",
+        "/data/media/music",
+        ...extraRoots,
+      ]
         .filter(Boolean)
         .map((r) => path.resolve(r)),
     ),

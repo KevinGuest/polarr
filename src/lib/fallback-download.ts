@@ -416,11 +416,32 @@ export async function processDownloadJob(id: string) {
     return;
   }
 
-  const outDir = path.join(
-    downloadsDir(),
-    job.artist.replace(/[<>:"/\\|?*]/g, "_") || "Unknown",
-  );
-  fs.mkdirSync(outDir, { recursive: true });
+  const artistDir = safeFilenamePart(job.artist, "Unknown");
+  const downloadsRoot = path.resolve(downloadsDir());
+  const outDir = path.resolve(path.join(downloadsRoot, artistDir));
+  if (outDir !== downloadsRoot && !outDir.startsWith(downloadsRoot + path.sep)) {
+    clearTimeoutTimer(id);
+    updateDownloadJob(id, {
+      status: "failed",
+      error: "Invalid download path.",
+      progress: 0,
+    });
+    return;
+  }
+  try {
+    fs.mkdirSync(outDir, { recursive: true });
+  } catch (err) {
+    clearTimeoutTimer(id);
+    updateDownloadJob(id, {
+      status: "failed",
+      error:
+        err instanceof Error
+          ? `Couldn’t create download folder: ${err.message}`
+          : "Couldn’t create download folder.",
+      progress: 0,
+    });
+    return;
+  }
 
   // Known metadata filenames — avoid yt-dlp %(artist)s → "NA" mess from MVs
   const artistPart = safeFilenamePart(job.artist, "Unknown Artist");

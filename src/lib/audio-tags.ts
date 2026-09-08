@@ -55,6 +55,89 @@ export function cleanAudioTag(value: string | null | undefined): string {
   return t;
 }
 
+/** True when a title still looks like a download filename / slug. */
+export function looksLikeFilenameTitle(value: string | null | undefined): boolean {
+  const t = String(value || "").trim();
+  if (!t) return false;
+  if (t.includes("_")) return true;
+  // artist-title_with_words or long hyphenated slug without spaces
+  if (!/\s/.test(t) && (t.match(/-/g) || []).length >= 2) return true;
+  return false;
+}
+
+function slugifyArtistForPrefix(artist: string): string {
+  return artist
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "[-_]+")
+    .replace(/^\[-_\]\+|\[-_\]\+$/g, "");
+}
+
+/**
+ * Turn `metro_boomin-niagara_falls_(feat_travis)` into a real display title
+ * using the folder/tag artist when present.
+ */
+export function humanizeFilenameTitle(
+  stem: string,
+  folderArtist?: string,
+): string {
+  let s = String(stem || "").trim();
+  if (!s) return "";
+  s = s.replace(/^\d{1,3}[-_.\s]+/, "");
+
+  if (folderArtist) {
+    const slug = slugifyArtistForPrefix(folderArtist);
+    if (slug) {
+      try {
+        s = s.replace(new RegExp(`^${slug}[-_]+`, "i"), "");
+      } catch {
+        /* ignore bad regex */
+      }
+    }
+  }
+
+  // artist_name-rest_of_title (leading underscored token before first hyphen)
+  if (/^[a-z0-9]+(?:_[a-z0-9]+)+-/i.test(s)) {
+    s = s.replace(/^[^-]+-/, "");
+  }
+
+  s = s
+    .replace(/_/g, " ")
+    .replace(/\(\s*feat\.?\s+/gi, "(feat. ")
+    .replace(/\(\s*ft\.?\s+/gi, "(ft. ")
+    .replace(/\(\s*featuring\s+/gi, "(featuring ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Light title-case for all-lowercase slugs
+  if (s && s === s.toLowerCase()) {
+    s = s.replace(/\b([a-z])/g, (ch) => ch.toUpperCase());
+    s = s.replace(/\bFeat\./g, "feat.").replace(/\bFt\./g, "ft.");
+  }
+
+  return cleanAudioTag(s) || s;
+}
+
+/** Prefer embedded tags; otherwise humanize path stems that look like filenames. */
+export function displayTitleFromStem(
+  stem: string,
+  folderArtist?: string,
+): string {
+  const raw = String(stem || "").trim();
+  if (!raw) return "";
+  if (!looksLikeFilenameTitle(raw) && raw.includes(" - ")) {
+    const [, ...rest] = raw.split(" - ");
+    const title = rest.join(" - ").trim();
+    return cleanAudioTag(title) || title || raw;
+  }
+  if (looksLikeFilenameTitle(raw)) {
+    return humanizeFilenameTitle(raw, folderArtist) || raw;
+  }
+  return cleanAudioTag(raw) || raw;
+}
+
 function tagGet(
   tags: Record<string, string> | undefined,
   ...keys: string[]

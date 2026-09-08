@@ -5,6 +5,7 @@
  * Title-only Topic collisions (same song name, different artist) are rejected.
  */
 import { spawn } from "node:child_process";
+import { getDb } from "./db";
 import {
   namesMatch,
   normalizeArtistName,
@@ -13,10 +14,14 @@ import {
 } from "./track-match";
 import { ensureYtDlp } from "./tools";
 
-const SEARCH_LIMIT = 10;
+const SEARCH_LIMIT = 5;
 
 /** Minimum artist token overlap (or namesMatch) to accept a hit. */
 const MIN_ARTIST_AGREE = 0.4;
+
+/** Persist videoId matches so cold plays don't re-run the search ladder. */
+const YTM_MATCH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const YTM_NEG_TTL_MS = 6 * 60 * 60 * 1000;
 
 const JUNK_IN_TITLE =
   /\b(official\s*(music\s*)?video|music\s*video|\bm\/?v\b|lyric\s*video|\blyrics?\b|\blive\b|concert|performance|visualizer|vevo\s*visual|react(ion)?s?|cover|karaoke|instrumental|slowed|reverb|8d\s*audio|sped\s*up|nightcore|bass\s*boost|1\s*hour|hour\s*loop|full\s*album|mashup|bootleg)\b/i;
@@ -30,7 +35,7 @@ export const YTM_AUDIO_FORMAT =
   "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best";
 
 /** Cap concurrent yt-dlp children so multi-user cold resolves don't melt the host. */
-const YTDLP_MAX_CONCURRENT = 2;
+const YTDLP_MAX_CONCURRENT = 4;
 let ytdlpActive = 0;
 const ytdlpWait: Array<() => void> = [];
 
@@ -77,7 +82,7 @@ type FlatEntry = {
 function runYtDlp(
   ytDlp: string,
   args: string[],
-  timeoutMs = 28_000,
+  timeoutMs = 12_000,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return withYtDlpSlot(
     () =>
@@ -325,20 +330,171 @@ async function dumpSearchList(
   ytDlp: string,
   querySpec: string,
 ): Promise<FlatEntry[]> {
-  const result = await runYtDlp(ytDlp, [
-    querySpec,
-    "--flat-playlist",
-    "-J",
-    "--no-warnings",
-    "--skip-download",
-    "--playlist-end",
-    String(SEARCH_LIMIT),
-  ]);
+  const result = await runYtDlp(
+    ytDlp,
+    [
+      querySpec,
+      "--flat-playlist",
+      "-J",
+      "--no-warnings",
+      "--skip-download",
+      "--socket-timeout",
+      "6",
+      "--playlist-end",
+      String(SEARCH_LIMIT),
+    ],
+    7_000,
+  );
   if (!result.stdout.trim()) return [];
   try {
     return normalizeEntries(JSON.parse(result.stdout));
   } catch {
     return [];
+  }
+}
+
+/**
+ * One yt-dlp process: ytsearch1 + format pick + stream URL.
+ * Typical cold path ~2–5s instead of search-then-resolve.
+ */
+async function singleShotStream(
+  ytDlp: string,
+  searchQuery: string,
+  artist: string,
+  title: string,
+  expectedDurationSec?: number | null,
+): Promise<{ candidate: YtmCandidate; mediaUrl: string } | null> {
+  const result = await runYtDlp(
+    ytDlp,
+    [
+      `ytsearch1:${searchQuery}`,
+      "-f",
+      YTM_AUDIO_FORMAT,
+      "--print",
+      "%(id)s\t%(title)s\t%(channel)s\t%(duration)s\t%(url)s",
+      "--no-playlist",
+      "--no-warnings",
+      "--socket-timeout",
+      "6",
+      "--extractor-args",
+      "youtube:player_client=android,web",
+    ],
+    9_000,
+  );
+  if (result.code !== 0 || !result.stdout.trim()) return null;
+
+  const line = result.stdout
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => l.includes("\t") && /https?:\/\//i.test(l));
+  if (!line) return null;
+
+  const [id = "", name = "", channel = "", durationRaw = "", mediaUrl = ""] =
+    line.split("\t");
+  if (!id || !/^https?:\/\//i.test(mediaUrl)) return null;
+
+  const durationSec = Number(durationRaw);
+  const candidate = toCandidate(
+    {
+      id,
+      title: name,
+      channel,
+      duration: Number.isFinite(durationSec) ? durationSec : undefined,
+    },
+    artist,
+    title,
+    expectedDurationSec,
+  );
+  if (!candidate) return null;
+  if (candidate.artistAgree < MIN_ARTIST_AGREE) return null;
+  if (!ytmTitlesAgree(title, candidate.title)) return null;
+  if (JUNK_IN_TITLE.test(candidate.title) && !candidate.isOfficialAudio) {
+    return null;
+  }
+  // Reject obviously weak picks from ytsearch1
+  if (candidate.score < 25) return null;
+
+  return { candidate, mediaUrl };
+}
+
+function strongEnough(hit: YtmCandidate): boolean {
+  return (
+    hit.artistAgree >= 0.55 &&
+    hit.score >= 70 &&
+    (hit.isOfficialAudio || hit.artistAgree >= 0.75)
+  );
+}
+
+function ytmMatchKey(artist: string, title: string): string {
+  return `v1|${normalizeArtistName(primaryArtistName(artist))}|${title
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")}`;
+}
+
+function ensureYtmMatchTable() {
+  try {
+    getDb().exec(`
+      CREATE TABLE IF NOT EXISTS ytm_match_cache (
+        query_key TEXT PRIMARY KEY,
+        video_id TEXT,
+        page_url TEXT,
+        expires_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ytm_match_expires ON ytm_match_cache(expires_at);
+    `);
+  } catch {
+    /* best-effort */
+  }
+}
+
+function readYtmMatchCache(key: string): { videoId: string; pageUrl: string } | null | undefined {
+  // undefined = miss; null = negative cached
+  try {
+    ensureYtmMatchTable();
+    const row = getDb()
+      .prepare(
+        `SELECT video_id as videoId, page_url as pageUrl, expires_at as expiresAt
+         FROM ytm_match_cache WHERE query_key = ?`,
+      )
+      .get(key) as
+      | { videoId: string | null; pageUrl: string | null; expiresAt: number }
+      | undefined;
+    if (!row) return undefined;
+    if (row.expiresAt <= Date.now()) {
+      getDb().prepare(`DELETE FROM ytm_match_cache WHERE query_key = ?`).run(key);
+      return undefined;
+    }
+    if (!row.videoId) return null;
+    return { videoId: row.videoId, pageUrl: row.pageUrl || `https://www.youtube.com/watch?v=${row.videoId}` };
+  } catch {
+    return undefined;
+  }
+}
+
+function writeYtmMatchCache(
+  key: string,
+  hit: { videoId: string; pageUrl: string } | null,
+) {
+  try {
+    ensureYtmMatchTable();
+    getDb()
+      .prepare(
+        `INSERT INTO ytm_match_cache(query_key, video_id, page_url, expires_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(query_key) DO UPDATE SET
+           video_id = excluded.video_id,
+           page_url = excluded.page_url,
+           expires_at = excluded.expires_at`,
+      )
+      .run(
+        key,
+        hit?.videoId ?? null,
+        hit?.pageUrl ?? null,
+        Date.now() + (hit ? YTM_MATCH_TTL_MS : YTM_NEG_TTL_MS),
+      );
+  } catch {
+    /* ignore */
   }
 }
 
@@ -377,8 +533,8 @@ function pickBest(
 }
 
 /**
- * Match Official Audio first, then YT Music, then plain YT.
- * Returns null when no hit clears the artist gate (no wrong-artist fallback).
+ * Find a ranked YouTube Music / Official Audio match (watch URL).
+ * Downloads use this; live play prefers {@link resolveYtmStreamRemote}.
  */
 export async function matchYtmAudio(input: {
   artist: string;
@@ -397,85 +553,104 @@ export async function matchYtmAudio(input: {
     `${artist} ${title}`.trim();
   if (!base || !artist || !title) return null;
 
-  const musicQ = encodeURIComponent(base);
+  const cacheKey = ytmMatchKey(artist, title);
+  const cached = readYtmMatchCache(cacheKey);
+  if (cached === null) return null;
+  if (cached) {
+    return {
+      videoId: cached.videoId,
+      title,
+      channel: "",
+      durationSec: null,
+      url: cached.pageUrl,
+      score: 100,
+      isOfficialAudio: true,
+      artistAgree: 1,
+    };
+  }
 
-  const tiers: {
-    kind: "official" | "music" | "plain";
-    spec: string;
-    boost: number;
-  }[] = [
+  // One-shot metadata (same process as stream resolve, keeps caches warm)
+  for (const q of [`"${artist}" "${title}" official audio`, base]) {
+    const shot = await singleShotStream(
+      ytDlp,
+      q,
+      artist,
+      title,
+      input.expectedDurationSec,
+    );
+    if (!shot) continue;
+    writeYtmMatchCache(cacheKey, {
+      videoId: shot.candidate.videoId,
+      pageUrl:
+        shot.candidate.url ||
+        `https://www.youtube.com/watch?v=${shot.candidate.videoId}`,
+    });
+    return shot.candidate;
+  }
+
+  const best = await flatSearchBest(
+    ytDlp,
+    artist,
+    title,
+    base,
+    input.expectedDurationSec,
+  );
+  if (best) {
+    writeYtmMatchCache(cacheKey, {
+      videoId: best.videoId,
+      pageUrl: best.url || `https://www.youtube.com/watch?v=${best.videoId}`,
+    });
+  } else {
+    writeYtmMatchCache(cacheKey, null);
+  }
+  return best;
+}
+
+async function flatSearchBest(
+  ytDlp: string,
+  artist: string,
+  title: string,
+  base: string,
+  expectedDurationSec?: number | null,
+): Promise<YtmCandidate | null> {
+  const tiers = [
     {
-      kind: "official",
-      spec: `ytsearch${SEARCH_LIMIT}:${base} official audio`,
+      kind: "official" as const,
+      spec: `ytsearch${SEARCH_LIMIT}:"${artist}" "${title}" official audio`,
       boost: 35,
     },
     {
-      kind: "official",
-      spec: `ytsearch${SEARCH_LIMIT}:"${artist}" "${title}" official audio`,
-      boost: 32,
-    },
-    {
-      kind: "official",
-      spec: `ytsearch${SEARCH_LIMIT}:${artist} - ${title} (Official Audio)`,
-      boost: 28,
-    },
-    {
-      kind: "music",
-      spec: `https://music.youtube.com/search?q=${encodeURIComponent(`${base} official audio`)}`,
-      boost: 18,
-    },
-    {
-      kind: "music",
-      spec: `https://music.youtube.com/search?q=${musicQ}`,
-      boost: 12,
-    },
-    {
-      kind: "plain",
+      kind: "plain" as const,
       spec: `ytsearch${SEARCH_LIMIT}:${base}`,
       boost: 0,
     },
   ];
 
-  const seen = new Set<string>();
   const hits: YtmCandidate[] = [];
+  const seen = new Set<string>();
+  let early: YtmCandidate | null = null;
 
-  for (const tier of tiers) {
-    if (
-      tier.kind === "plain" &&
-      hits.some(
-        (h) =>
-          h.isOfficialAudio &&
-          h.artistAgree >= MIN_ARTIST_AGREE &&
-          h.score >= 40,
-      )
-    ) {
-      break;
-    }
+  await Promise.all(
+    tiers.map(async (tier) => {
+      if (early) return;
+      const entries = await dumpSearchList(ytDlp, tier.spec);
+      if (early) return;
+      for (const e of entries) {
+        const c = toCandidate(e, artist, title, expectedDurationSec);
+        if (!c || seen.has(c.videoId)) continue;
+        c.score += tier.boost;
+        if (tier.kind === "official" && c.isOfficialAudio) c.score += 15;
+        seen.add(c.videoId);
+        hits.push(c);
+        if (strongEnough(c)) {
+          early = c;
+          break;
+        }
+      }
+    }),
+  );
 
-    const entries = await dumpSearchList(ytDlp, tier.spec);
-    for (const e of entries) {
-      const c = toCandidate(e, artist, title, input.expectedDurationSec);
-      if (!c || seen.has(c.videoId)) continue;
-      c.score += tier.boost;
-      if (tier.kind === "official" && c.isOfficialAudio) c.score += 15;
-      seen.add(c.videoId);
-      hits.push(c);
-    }
-
-    // Strong Official Audio that also matches the artist
-    if (
-      hits.some(
-        (h) =>
-          h.isOfficialAudio &&
-          h.artistAgree >= 0.55 &&
-          h.score >= 85,
-      )
-    ) {
-      break;
-    }
-  }
-
-  return pickBest(hits, title);
+  return early || pickBest(hits, title);
 }
 
 /** Progressive media URL for live streaming (may expire). */
@@ -495,11 +670,11 @@ export async function resolveYtmMediaUrl(
       "--no-playlist",
       "--no-warnings",
       "--socket-timeout",
-      "10",
+      "6",
       "--extractor-args",
       "youtube:player_client=android,web",
     ],
-    20_000,
+    12_000,
   );
   if (result.code !== 0) return null;
   return (
@@ -512,7 +687,7 @@ export async function resolveYtmMediaUrl(
 
 /**
  * Match → streamable media URL.
- * No blind ytsearch1 fallback — that was a common wrong-artist source.
+ * Fast path: one yt-dlp process (search + URL). Fallback: flat race + -g.
  */
 export async function resolveYtmStreamRemote(input: {
   artist: string;
@@ -520,17 +695,88 @@ export async function resolveYtmStreamRemote(input: {
   query?: string;
   expectedDurationSec?: number | null;
 }): Promise<string | null> {
-  const match = await matchYtmAudio(input);
-  if (!match) return null;
-  return resolveYtmMediaUrl(match.url);
+  const ytDlp = await ensureYtDlp();
+  if (!ytDlp) return null;
+
+  const artist = primaryArtistName(input.artist || "") || (input.artist || "").trim();
+  const title = (input.title || "").trim();
+  const base =
+    `${artist} ${title}`.trim() ||
+    (input.query || "").trim() ||
+    `${artist} ${title}`.trim();
+  if (!base || !artist || !title) return null;
+
+  const cacheKey = ytmMatchKey(artist, title);
+  const cached = readYtmMatchCache(cacheKey);
+  if (cached === null) return null;
+  if (cached) {
+    return resolveYtmMediaUrl(cached.pageUrl);
+  }
+
+  // 1) One-shot official audio (search + stream URL in a single process)
+  const officialShot = await singleShotStream(
+    ytDlp,
+    `"${artist}" "${title}" official audio`,
+    artist,
+    title,
+    input.expectedDurationSec,
+  );
+  if (officialShot) {
+    writeYtmMatchCache(cacheKey, {
+      videoId: officialShot.candidate.videoId,
+      pageUrl:
+        officialShot.candidate.url ||
+        `https://www.youtube.com/watch?v=${officialShot.candidate.videoId}`,
+    });
+    return officialShot.mediaUrl;
+  }
+
+  // 2) One-shot plain query
+  const plainShot = await singleShotStream(
+    ytDlp,
+    base,
+    artist,
+    title,
+    input.expectedDurationSec,
+  );
+  if (plainShot) {
+    writeYtmMatchCache(cacheKey, {
+      videoId: plainShot.candidate.videoId,
+      pageUrl:
+        plainShot.candidate.url ||
+        `https://www.youtube.com/watch?v=${plainShot.candidate.videoId}`,
+    });
+    return plainShot.mediaUrl;
+  }
+
+  // 3) Flat-search race, then one -g (no second one-shot pass)
+  const best = await flatSearchBest(
+    ytDlp,
+    artist,
+    title,
+    base,
+    input.expectedDurationSec,
+  );
+  if (!best) {
+    writeYtmMatchCache(cacheKey, null);
+    return null;
+  }
+
+  writeYtmMatchCache(cacheKey, {
+    videoId: best.videoId,
+    pageUrl: best.url || `https://www.youtube.com/watch?v=${best.videoId}`,
+  });
+  return resolveYtmMediaUrl(best.url);
 }
 
 /** Safe filesystem segment for known artist/title output names. */
 export function safeFilenamePart(s: string, fallback = "track"): string {
   const cleaned = s
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "")
+    .replace(/\.\./g, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120);
-  return cleaned || fallback;
+  if (!cleaned || cleaned === "." || cleaned === "..") return fallback;
+  return cleaned;
 }

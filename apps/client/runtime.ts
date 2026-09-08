@@ -409,7 +409,11 @@ function decorateJson(response: Response, token: string | null) {
   const originalJson = response.json.bind(response);
   response.json = async () => absolutizePayload(
     await originalJson(),
-    response.headers.get("X-Polarr-Offline-Cache") === "1",
+    // Cached JSON is served stale-first even while online, so "came from the
+    // cache" is not "offline". Swapping in `blob:` artwork when the server is
+    // reachable breaks every consumer that needs a real URL — the full player
+    // and the iOS Lock Screen / Dynamic Island discard object URLs.
+    response.headers.get("X-Polarr-Offline-Cache") === "1" && !navigator.onLine,
     token,
   );
   return response;

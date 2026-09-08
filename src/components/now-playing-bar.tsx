@@ -40,6 +40,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { albumHref } from "@/lib/album-ref";
+import { durableCoverPath, needsDurableCover } from "@/lib/player-cover";
 import {
   copyDocumentStyles,
   ensurePipMount,
@@ -170,11 +171,13 @@ export function NowPlayingBar() {
       })
       .then((data) => {
         if (cancelled || !data?.track) return;
-        const cover = data.track.coverUrl || data.track.coverPath;
-        if (!cover || typeof cover !== "string") return;
+        const cover = durableCoverPath(
+          data.track.coverUrl || data.track.coverPath,
+        );
+        if (!cover) return;
         setCoverUrl(cover);
         // Push into player state so Lock Screen / Dynamic Island get the same art.
-        if (!track.coverPath) {
+        if (needsDurableCover(track.coverPath)) {
           patchTrackCovers({ [track.id]: cover });
         }
       })

@@ -250,7 +250,11 @@ export function ArtistClient() {
               album={t.album}
               coverPath={t.coverPath}
               duration={t.duration}
-              onPolarr
+              onPolarr={
+                t.source !== "stream" &&
+                !t.id.startsWith("catalog:") &&
+                !t.id.startsWith("stream:")
+              }
             />
             {!mobile ? (
               <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">

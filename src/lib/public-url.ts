@@ -76,6 +76,9 @@ function originFromRequest(request?: Request | null): string | null {
 /**
  * Public site base for invite emails, OAuth redirects, and absolute asset URLs.
  * Prefer settings.publicUrl; never returns 0.0.0.0 / :: / blank.
+ *
+ * For emailed secrets (password reset, invites, email change) prefer
+ * {@link resolveTrustedPublicBaseUrl} so Host/Origin cannot poison links.
  */
 export function resolvePublicBaseUrl(
   settings: Pick<Settings, "publicUrl"> | { publicUrl?: string | null },
@@ -84,6 +87,16 @@ export function resolvePublicBaseUrl(
   const fromSettings = normalizePublicBaseUrl(settings.publicUrl ?? "");
   if (fromSettings) return fromSettings;
   return originFromRequest(request ?? null);
+}
+
+/**
+ * Only the admin-configured Public URL — never request Host/Origin.
+ * Use for password-reset / invite / email-change links.
+ */
+export function resolveTrustedPublicBaseUrl(
+  settings: Pick<Settings, "publicUrl"> | { publicUrl?: string | null },
+): string | null {
+  return normalizePublicBaseUrl(settings.publicUrl ?? "");
 }
 
 /**
@@ -98,5 +111,16 @@ export function requirePublicBaseUrl(
   if (base) return base;
   throw new Error(
     "Set Public URL under Admin → SMTP before sending invite emails. Without it, join links can point at an unreachable address (e.g. 0.0.0.0).",
+  );
+}
+
+/** Require admin-configured Public URL (no Host/Origin fallback). */
+export function requireTrustedPublicBaseUrl(
+  settings: Pick<Settings, "publicUrl"> | { publicUrl?: string | null },
+): string {
+  const base = resolveTrustedPublicBaseUrl(settings);
+  if (base) return base;
+  throw new Error(
+    "Set Public URL under Admin → Settings before sending password-reset or invite emails. Without it, reset links can be poisoned by a forged Host header.",
   );
 }

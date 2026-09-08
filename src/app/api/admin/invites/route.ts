@@ -11,7 +11,7 @@ import {
   smtpConfigured,
 } from "@/lib/db";
 import { sendInviteEmail } from "@/lib/mail";
-import { requirePublicBaseUrl } from "@/lib/public-url";
+import { requireTrustedPublicBaseUrl } from "@/lib/public-url";
 import { scrambleUserId } from "@/lib/user-id";
 
 export const dynamic = "force-dynamic";
@@ -57,7 +57,7 @@ export async function POST(req: Request) {
 
   let base: string;
   try {
-    base = requirePublicBaseUrl(settings, req);
+    base = requireTrustedPublicBaseUrl(settings);
   } catch (err) {
     return json(
       {
@@ -157,7 +157,7 @@ export async function PATCH(req: Request) {
 
   let base: string;
   try {
-    base = requirePublicBaseUrl(settings, req);
+    base = requireTrustedPublicBaseUrl(settings);
   } catch (err) {
     return json(
       {

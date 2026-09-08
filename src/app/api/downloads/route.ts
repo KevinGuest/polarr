@@ -12,6 +12,8 @@ import { z } from "zod";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const user = await getAuthUser();
+  if (!user) return json({ error: "Unauthorized" }, { status: 401 });
   failTimedOutDownloads();
   const covers = await getAlbumCoverMap();
   const downloads = listDownloads().map((d) => {
@@ -33,11 +35,10 @@ const schema = z.object({
 
 export async function POST(req: Request) {
   const user = await getAuthUser();
-  if (user) {
-    const dl = downloadPolicy(user.id);
-    if (!dl.ok) {
-      return json({ error: dl.error || "Downloads banned" }, { status: 403 });
-    }
+  if (!user) return json({ error: "Unauthorized" }, { status: 401 });
+  const dl = downloadPolicy(user.id);
+  if (!dl.ok) {
+    return json({ error: dl.error || "Downloads banned" }, { status: 403 });
   }
   const parsed = schema.safeParse(await req.json());
   if (!parsed.success) {

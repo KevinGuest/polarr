@@ -67,15 +67,38 @@ export function normalizeTitle(title: string): string {
 const TITLE_VERSION_TOKEN =
   /^(remix|remaster(?:ed)?|reprise|edit|version|mix|instrumental|acoustic|deluxe|extended|radio|mono|stereo|live|demo|bonus|interlude|intro|outro|official|audio|lyric|lyrics|video|visualizer|hq|hd|4k|topic)$/i;
 
-export function titlesMatch(a: string, b: string): boolean {
-  const na = normalizeTitle(a);
-  const nb = normalizeTitle(b);
+export function titlesMatch(a: string, b: string, artistHint?: string): boolean {
+  const stripArtist = (title: string) => {
+    let t = normalizeTitle(title);
+    if (!artistHint) return t;
+    const na = normalizeArtistName(primaryArtistName(artistHint));
+    if (na && t.startsWith(`${na} `)) t = t.slice(na.length).trim();
+    return t;
+  };
+  const na = artistHint ? stripArtist(a) : normalizeTitle(a);
+  const nb = artistHint ? stripArtist(b) : normalizeTitle(b);
   if (!na || !nb) return false;
   if (na === nb) return true;
+  // Also try without hint on both sides when hint didn't help
+  const ra = normalizeTitle(a);
+  const rb = normalizeTitle(b);
+  if (ra === rb) return true;
+  if (artistHint) {
+    if (na === rb || ra === nb) return true;
+  }
   // Prefix only at a word boundary, and only when the remainder is a
   // version/qualifier — never "Love" ≈ "Love Story".
   const [longer, shorter] = na.length >= nb.length ? [na, nb] : [nb, na];
-  if (!longer.startsWith(`${shorter} `)) return false;
+  if (!longer.startsWith(`${shorter} `)) {
+    const [l2, s2] = ra.length >= rb.length ? [ra, rb] : [rb, ra];
+    if (!l2.startsWith(`${s2} `)) return false;
+    const extra2 = l2
+      .slice(s2.length)
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    return extra2.length > 0 && extra2.every((t) => TITLE_VERSION_TOKEN.test(t));
+  }
   const extra = longer
     .slice(shorter.length)
     .trim()
@@ -96,7 +119,7 @@ export function scoreTrackMatch(
   wantTitle: string,
 ): number {
   let score = 0;
-  if (titlesMatch(hit.title, wantTitle)) score += 50;
+  if (titlesMatch(hit.title, wantTitle, wantArtist)) score += 50;
   else if (normalizeTitle(hit.title).includes(normalizeTitle(wantTitle)))
     score += 20;
   else if (normalizeTitle(wantTitle).includes(normalizeTitle(hit.title)))
@@ -292,7 +315,17 @@ export function isArtistNameQuery(query: string): boolean {
   const term = query.trim();
   if (!term) return false;
   const words = term.split(/\s+/).filter(Boolean);
-  return words.length >= 1 && words.length <= 3 && term.length >= 2;
+  if (words.length < 1 || words.length > 3 || term.length < 2) return false;
+  // Short lyric-ish phrases ("love me", "i want", "don't go")
+  if (
+    words.length >= 2 &&
+    /^(i|you|we|me|my|your|the|a|an|to|on|in|of|and|or|love|dont|don't|cant|can't|wont|won't|im|i'm|its|it's|let|get|got|wanna|gimme)\b/i.test(
+      words[0]!,
+    )
+  ) {
+    return false;
+  }
+  return true;
 }
 
 export function artistNameMatchesQuery(

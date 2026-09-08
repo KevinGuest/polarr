@@ -31,8 +31,10 @@ import {
 } from "./download-quality";
 import {
   cleanAudioTag,
+  displayTitleFromStem,
   isArtworkAudioPath,
   isArtworkFilename,
+  looksLikeFilenameTitle,
 } from "./audio-tags";
 import {
   parseEmailTemplatesJson,
@@ -180,7 +182,7 @@ export type RequestEvent = {
 
 let db: Database.Database | null = null;
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 function hashPassword(password: string, salt?: string): string {
   const s = salt || randomBytes(16).toString("hex");
@@ -383,16 +385,58 @@ function backfillTrackMatchKeys(database: Database.Database) {
   tx();
 }
 
-function titleFromAudioPath(filePath: string): string {
+function titleFromAudioPath(filePath: string, folderArtist?: string): string {
   const base = path.basename(filePath, path.extname(filePath)).trim();
   if (!base || isArtworkFilename(base)) return "";
+  const artist =
+    folderArtist ||
+    (() => {
+      const parts = filePath.split(path.sep).filter(Boolean);
+      return parts.length >= 3 ? parts[parts.length - 3] : "";
+    })();
   const cleaned = base.replace(/^\d{1,3}(\s*[-.]\s*|\s+)/, "").trim();
-  if (cleaned.includes(" - ")) {
-    const [, ...rest] = cleaned.split(" - ");
-    const title = rest.join(" - ").trim();
-    if (title && !isArtworkFilename(title)) return title;
-  }
-  return cleaned;
+  return displayTitleFromStem(cleaned, artist);
+}
+
+/**
+ * Repair slug/filename titles left by older scanners so match_key aligns with
+ * catalog names (fixes “available on Polarr” collab misses).
+ */
+function repairFilenameTitles(database: Database.Database) {
+  const applied = database
+    .prepare(`SELECT 1 as ok FROM schema_migrations WHERE version = 5`)
+    .get() as { ok: number } | undefined;
+  if (applied) return;
+
+  const rows = database
+    .prepare(`SELECT id, title, artist, path FROM tracks`)
+    .all() as { id: string; title: string; artist: string; path: string }[];
+  if (!rows.length) return;
+
+  const repair = database.prepare(
+    `UPDATE tracks SET title = ?, match_key = ?, updated_at = ? WHERE id = ?`,
+  );
+  const tx = database.transaction(() => {
+    for (const row of rows) {
+      if (!looksLikeFilenameTitle(row.title)) continue;
+      if (
+        row.path.startsWith("stream:") ||
+        row.path.startsWith("stream://") ||
+        row.path.startsWith("live:")
+      ) {
+        continue;
+      }
+      const fixed = titleFromAudioPath(row.path, row.artist);
+      if (!fixed || fixed === row.title) continue;
+      repair.run(
+        fixed,
+        trackMatchKey(row.artist, fixed),
+        new Date().toISOString(),
+        row.id,
+      );
+    }
+  });
+  tx();
 }
 
 /**
@@ -1020,6 +1064,9 @@ function migrate(database: Database.Database) {
   // Drop / repair cover.jpg etc. wrongly stored as tracks (one-shot + idempotent).
   purgeArtworkNamedTracks(database);
 
+  // v5: humanize leftover download-filename titles + refresh match_key.
+  repairFilenameTitles(database);
+
   // Single-user installs are the server owner
   const userCount = database
     .prepare(`SELECT COUNT(*) as c FROM users`)
@@ -1132,7 +1179,7 @@ function migrateTracksFts(database: Database.Database) {
   `);
 
   const applied = database
-    .prepare(`SELECT 1 as ok FROM schema_migrations WHERE version = 4`)
+    .prepare(`SELECT 1 as ok FROM schema_migrations WHERE version = 5`)
     .get() as { ok: number } | undefined;
   if (!applied) {
     try {
@@ -3625,7 +3672,13 @@ function findTrackByMatchKey(key: string): TrackRow | null {
  * (“Love” must not become “Love Story”).
  */
 function libraryHitAgrees(hit: TrackRow, artist: string, title: string): boolean {
-  return namesMatch(hit.artist, artist) && titlesMatch(hit.title, title);
+  if (!namesMatch(hit.artist, artist)) return false;
+  // Pass artist so filename titles like "metro boomin niagara falls" still
+  // match catalog "Niagara Falls".
+  return (
+    titlesMatch(hit.title, title, artist) ||
+    titlesMatch(hit.title, title, hit.artist)
+  );
 }
 
 /**
@@ -3810,6 +3863,7 @@ function queryLibraryByTokens(
            JOIN tracks_fts ON t.rowid = tracks_fts.rowid
            WHERE tracks_fts MATCH ?
              AND (${LIBRARY_TRACK_FILTER_T})
+           ORDER BY bm25(tracks_fts)
            LIMIT ?`,
         )
         .all(match, limit) as Record<string, unknown>[];
@@ -5873,16 +5927,43 @@ export function isTrackTasteExcluded(userId: string, trackId: string): boolean {
 export function listTracksByArtist(artist: string, limit = 100): TrackRow[] {
   const a = artist.trim().toLowerCase();
   if (!a) return [];
+  const like = `${a}%`;
+  const featLike = `%feat.%${a}%`;
+  const ftLike = `%ft.%${a}%`;
   return (
     getDb()
       .prepare(
         `${TRACK_SELECT}
-         WHERE lower(artist) = ?
+         WHERE (
+           lower(artist) = ?
+           OR lower(artist) LIKE ?
+           OR lower(artist) LIKE ? || ', %'
+           OR lower(artist) LIKE ? || ' & %'
+           OR lower(artist) LIKE ? || ' and %'
+           OR lower(artist) LIKE ? || ' x %'
+           OR lower(artist) LIKE ? || ' with %'
+           OR lower(title) LIKE ?
+           OR lower(title) LIKE ?
+         )
            AND ${LIBRARY_TRACK_FILTER}
-         ORDER BY album ASC, title ASC
+         ORDER BY
+           CASE WHEN lower(artist) = ? THEN 0 ELSE 1 END,
+           album ASC, title ASC
          LIMIT ?`,
       )
-      .all(a, limit) as Record<string, unknown>[]
+      .all(
+        a,
+        like,
+        a,
+        a,
+        a,
+        a,
+        a,
+        featLike,
+        ftLike,
+        a,
+        limit,
+      ) as Record<string, unknown>[]
   ).map(mapTrack);
 }
 
@@ -6121,7 +6202,7 @@ export function recordPlay(userId: string, trackId: string) {
              SELECT id FROM play_history
              WHERE user_id = ?
              ORDER BY played_at DESC
-             LIMIT -1 OFFSET 100
+             LIMIT -1 OFFSET 500
            )
          )`,
     )
@@ -6222,7 +6303,7 @@ export function creditTrackListen(
              SELECT id FROM play_history
              WHERE user_id = ?
              ORDER BY played_at DESC
-             LIMIT -1 OFFSET 100
+             LIMIT -1 OFFSET 500
            )
          )`,
     )

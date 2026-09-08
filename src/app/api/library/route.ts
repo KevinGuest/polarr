@@ -18,7 +18,8 @@ async function tracksWithCovers(): Promise<TrackRow[]> {
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const user = await getAuthUser();
-  const offlineIds = user ? listOfflineTrackIds(user.id) : [];
+  if (!user) return json({ error: "Unauthorized" }, { status: 401 });
+  const offlineIds = listOfflineTrackIds(user.id);
   if (searchParams.get("scan") === "1") {
     const result = await scanMusicLibrary();
     return json({
@@ -32,10 +33,11 @@ export async function GET(req: Request) {
 
 export async function POST() {
   const user = await getAuthUser();
+  if (!user) return json({ error: "Unauthorized" }, { status: 401 });
   const result = await scanMusicLibrary();
   return json({
     ...result,
     tracks: await tracksWithCovers(),
-    offlineIds: user ? listOfflineTrackIds(user.id) : [],
+    offlineIds: listOfflineTrackIds(user.id),
   });
 }

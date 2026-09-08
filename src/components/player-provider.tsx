@@ -23,6 +23,11 @@ import {
   usesSystemVolume,
   writeSystemVolume,
 } from "@/lib/ios-system-volume";
+import {
+  durableCoverPath,
+  isEphemeralCoverUrl,
+  needsDurableCover,
+} from "@/lib/player-cover";
 import { primaryArtistName } from "@/lib/track-match";
 import { pushRecentPlayedTrack } from "@/lib/recent-searches";
 import { formatDuration, titleLooksExplicit } from "@/lib/utils";
@@ -391,7 +396,8 @@ function trackToConnect(track: PlayerTrack): ConnectTrack {
     title: track.title,
     artist: track.artist,
     album: track.album,
-    coverPath: track.coverPath,
+    // An object URL means nothing on the receiving device.
+    coverPath: durableCoverPath(track.coverPath),
     streamUrl: track.streamUrl,
     explicit: track.explicit,
     quality: track.quality,
@@ -922,13 +928,38 @@ function replaceInQueue(
   return queue.map((t) => (t.id === fromId ? ready : t));
 }
 
+/**
+ * Object-URL covers from the native offline artwork cache are dead in the next
+ * document, and a restored one would still read as "has a cover" and block the
+ * backfill — leaving the full player and Lock Screen art-less for good.
+ */
+function withDurableCovers(payload: SyncPayload): SyncPayload {
+  const ephemeral = (t: PlayerTrack) => isEphemeralCoverUrl(t.coverPath);
+  if (
+    !(payload.track && ephemeral(payload.track)) &&
+    !payload.queue?.some(ephemeral)
+  ) {
+    return payload;
+  }
+  return {
+    ...payload,
+    track: payload.track
+      ? { ...payload.track, coverPath: durableCoverPath(payload.track.coverPath) }
+      : payload.track,
+    queue: payload.queue?.map((t) => ({
+      ...t,
+      coverPath: durableCoverPath(t.coverPath),
+    })) ?? payload.queue,
+  };
+}
+
 function readStored(): SyncPayload | null {
   try {
     const raw = localStorage.getItem(PLAYER_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as SyncPayload;
     if (!parsed || typeof parsed !== "object") return null;
-    return parsed;
+    return withDurableCovers(parsed);
   } catch {
     return null;
   }
@@ -936,7 +967,10 @@ function readStored(): SyncPayload | null {
 
 function writeStored(payload: SyncPayload) {
   try {
-    localStorage.setItem(PLAYER_STORAGE_KEY, JSON.stringify(payload));
+    localStorage.setItem(
+      PLAYER_STORAGE_KEY,
+      JSON.stringify(withDurableCovers(payload)),
+    );
   } catch {
     /* ignore quota / private mode */
   }
@@ -3927,7 +3961,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const nextQ = prev.map((t) => {
           const url = map.get(t.id);
           if (!url) return t;
-          if (t.coverPath) return t;
+          if (!needsDurableCover(t.coverPath)) return t;
           changed = true;
           return { ...t, coverPath: url };
         });
@@ -3940,7 +3974,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (!prev) return prev;
         const url = map.get(prev.id);
         if (!url) return prev;
-        if (prev.coverPath) return prev;
+        if (!needsDurableCover(prev.coverPath)) return prev;
         const next = { ...prev, coverPath: url };
         trackRef.current = next;
         return next;
@@ -3952,7 +3986,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // Resolve missing covers so the full player + Lock Screen/Dynamic Island get art.
   useEffect(() => {
     if (!track?.id || isRemotePlayback) return;
-    if (track.coverPath) return;
+    if (!needsDurableCover(track.coverPath)) return;
     if (
       track.id.startsWith("live:") ||
       track.id.startsWith("stream:") ||
@@ -3967,8 +4001,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       .then(async (res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (cancelled || !data?.track) return;
-        const cover = data.track.coverUrl || data.track.coverPath;
-        if (!cover || typeof cover !== "string") return;
+        const cover = durableCoverPath(
+          data.track.coverUrl || data.track.coverPath,
+        );
+        if (!cover) return;
         patchTrackCovers({ [track.id]: cover });
       })
       .catch(() => null);

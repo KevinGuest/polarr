@@ -191,7 +191,7 @@ async function fetchSpotifyFromEmbed(
 
   const html = await res.text();
   const match = html.match(
-    /<script id="__NEXT_DATA__"[^>]*>(.*?)<\/script>/s,
+    /<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/,
   );
   if (!match?.[1]) {
     return {

@@ -88,6 +88,7 @@ export async function POST(req: Request) {
       user.id,
       parsed.data.name?.trim() || remote.name,
       remote.tracks,
+      { coverUrl: remote.coverUrl },
     );
     if ("error" in result) {
       return json({ error: result.error }, { status: 400 });

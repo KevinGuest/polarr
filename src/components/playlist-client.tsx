@@ -146,7 +146,9 @@ function formatDateAdded(iso: string | undefined): string {
   return d.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
-    year: "numeric",
+    ...(d.getFullYear() === new Date().getFullYear()
+      ? {}
+      : { year: "numeric" as const }),
   });
 }
 
@@ -1430,20 +1432,20 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
             )}
           </div>
         ) : (
-          <div className="w-full overflow-x-auto">
-            <table className="w-full min-w-[640px] border-separate border-spacing-y-1 text-left text-sm">
+          <div className="w-full">
+            <table className="w-full table-fixed border-separate border-spacing-y-1 text-left text-sm">
               <thead>
                 <tr className="border-b border-border text-xs text-muted-foreground">
                   <th className="w-10 pb-3 pl-3 font-medium">#</th>
                   <th className="pb-3 pr-4 font-medium">Title</th>
-                  <th className="hidden pb-3 pr-4 font-medium sm:table-cell">
+                  <th className="hidden w-[26%] pb-3 pr-4 font-medium md:table-cell">
                     Album
                   </th>
-                  <th className="hidden pb-3 pr-4 font-medium lg:table-cell">
+                  <th className="hidden w-[7rem] pb-3 pr-4 font-medium xl:table-cell">
                     Date added
                   </th>
                   <th className="w-[5.5rem] pb-3 font-medium" aria-label="Actions" />
-                  <th className="w-16 pb-3 pr-3 text-right font-medium">
+                  <th className="w-14 pb-3 pr-3 text-right font-medium">
                     <Clock className="ml-auto size-3.5" aria-label="Duration" />
                   </th>
                 </tr>
@@ -1488,14 +1490,19 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                       >
                         <TrackRowIndex n={i + 1} isCurrent={isCurrent} playing={playing} />
                       </td>
-                      <td className={trackRowMidCell(isCurrent, "py-2.5 pr-4")}>
+                      <td
+                        className={trackRowMidCell(
+                          isCurrent,
+                          "overflow-hidden py-2.5 pr-4",
+                        )}
+                      >
                         <div className="flex min-w-0 items-center gap-3">
                           <CoverArt
                             seed={`${t.artist}-${t.title}`}
                             image={t.coverPath || playlist?.coverUrl}
                             className="size-10 shrink-0 rounded-sm"
                           />
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1 overflow-hidden">
                             <div className="flex min-w-0 items-center gap-2">
                               <div className="truncate font-medium text-foreground">
                                 {t.title}
@@ -1515,7 +1522,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                       <td
                         className={trackRowMidCell(
                           isCurrent,
-                          "hidden max-w-[14rem] py-2.5 pr-4 sm:table-cell",
+                          "hidden overflow-hidden py-2.5 pr-4 md:table-cell",
                         )}
                       >
                         {albumPath && t.album ? (
@@ -1535,10 +1542,12 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                       <td
                         className={trackRowMidCell(
                           isCurrent,
-                          "hidden py-2.5 pr-4 tabular-nums text-muted-foreground lg:table-cell",
+                          "hidden overflow-hidden py-2.5 pr-4 tabular-nums text-muted-foreground xl:table-cell",
                         )}
                       >
-                        {formatDateAdded(t.addedAt)}
+                        <span className="block truncate">
+                          {formatDateAdded(t.addedAt)}
+                        </span>
                       </td>
                       <td
                         className={trackRowMidCell(isCurrent, "py-2.5")}

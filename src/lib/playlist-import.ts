@@ -3,14 +3,19 @@
  * and resolve tracks into Polarr library / stream stubs.
  */
 
+import { mkdir, unlink, writeFile } from "node:fs/promises";
+import path from "node:path";
 import {
   addTrackToPlaylist,
   createPlaylist,
   ensureHistoryTrack,
   findTrack,
+  getPlaylistCoverPath,
   searchTracksLocal,
+  setPlaylistCoverPath,
   type TrackRow,
 } from "@/lib/db";
+import { playlistCoversDir } from "@/lib/paths";
 import {
   namesMatch,
   normalizeArtistName,
@@ -37,7 +42,109 @@ export type ImportResult = {
   unresolved: number;
   total: number;
   unresolvedSample: { title: string; artist: string }[];
+  coverImported?: boolean;
 };
+
+const COVER_MAX_BYTES = 5 * 1024 * 1024;
+const COVER_TYPES = new Map([
+  ["image/jpeg", "jpg"],
+  ["image/jpg", "jpg"],
+  ["image/png", "png"],
+  ["image/webp", "webp"],
+  ["image/gif", "gif"],
+]);
+
+function isAllowedCoverHost(hostname: string): boolean {
+  const h = hostname.trim().toLowerCase().replace(/\.$/, "");
+  if (!h) return false;
+  return (
+    h === "i.scdn.co" ||
+    h === "mosaic.scdn.co" ||
+    h.endsWith(".scdn.co") ||
+    h.endsWith(".spotifycdn.com") ||
+    h.endsWith(".dzcdn.net") ||
+    h === "e-cdns-images.dzcdn.net" ||
+    h === "cdn-images.dzcdn.net" ||
+    h === "i.ytimg.com" ||
+    h === "yt3.ggpht.com" ||
+    h.endsWith(".ggpht.com") ||
+    h.endsWith(".googleusercontent.com")
+  );
+}
+
+/** Download a remote playlist cover into playlist-covers/ (best-effort). */
+export async function importPlaylistCoverFromUrl(
+  userId: string,
+  playlistId: string,
+  coverUrl: string | null | undefined,
+): Promise<boolean> {
+  const raw = (coverUrl || "").trim();
+  if (!raw) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  if (!isAllowedCoverHost(parsed.hostname)) return false;
+
+  try {
+    const res = await fetch(parsed.toString(), {
+      headers: {
+        Accept: "image/*,*/*;q=0.8",
+        "User-Agent": "Polarr/1.0",
+      },
+      cache: "no-store",
+      redirect: "follow",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return false;
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0 || buf.length > COVER_MAX_BYTES) return false;
+
+    const headerType = (res.headers.get("content-type") || "")
+      .split(";")[0]
+      ?.trim()
+      .toLowerCase();
+    let ext = headerType ? COVER_TYPES.get(headerType) : undefined;
+    if (!ext) {
+      const pathExt = path.extname(parsed.pathname).toLowerCase().replace(".", "");
+      if (pathExt === "jpeg") ext = "jpg";
+      else if (["jpg", "png", "webp", "gif"].includes(pathExt)) ext = pathExt;
+    }
+    if (!ext) {
+      // Spotify CDN often omits content-type / extension — sniff magic bytes.
+      if (buf[0] === 0xff && buf[1] === 0xd8) ext = "jpg";
+      else if (buf[0] === 0x89 && buf[1] === 0x50) ext = "png";
+      else if (buf[0] === 0x47 && buf[1] === 0x49) ext = "gif";
+      else if (
+        buf.length >= 12 &&
+        buf.toString("ascii", 0, 4) === "RIFF" &&
+        buf.toString("ascii", 8, 12) === "WEBP"
+      ) {
+        ext = "webp";
+      } else {
+        ext = "jpg";
+      }
+    }
+
+    const dir = playlistCoversDir();
+    await mkdir(dir, { recursive: true });
+    const filename = `${playlistId}.${ext}`;
+    const abs = path.join(dir, filename);
+    await writeFile(abs, buf);
+
+    const previous = getPlaylistCoverPath(userId, playlistId);
+    if (previous && previous !== abs) {
+      await unlink(previous).catch(() => null);
+    }
+    return Boolean(setPlaylistCoverPath(userId, playlistId, filename));
+  } catch {
+    return false;
+  }
+}
 
 /** Minimal CSV line split respecting double-quoted fields. */
 function splitCsvLine(line: string): string[] {
@@ -253,6 +360,7 @@ export async function importPlaylistFromRows(
   userId: string,
   name: string,
   rows: ImportTrackRow[],
+  opts?: { coverUrl?: string | null },
 ): Promise<ImportResult | { error: string }> {
   if (rows.length === 0) {
     return { error: "No tracks found in that playlist." };
@@ -284,6 +392,12 @@ export async function importPlaylistFromRows(
     }
   }
 
+  const coverImported = await importPlaylistCoverFromUrl(
+    userId,
+    playlist.id,
+    opts?.coverUrl,
+  );
+
   return {
     playlistId: playlist.id,
     name: playlist.name,
@@ -291,6 +405,7 @@ export async function importPlaylistFromRows(
     unresolved: unresolved.length,
     total: capped.length,
     unresolvedSample: unresolved.slice(0, 12),
+    coverImported,
   };
 }
 

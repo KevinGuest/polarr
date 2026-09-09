@@ -20,6 +20,8 @@ export type RemotePlaylist = {
   name: string;
   tracks: ImportTrackRow[];
   service: PlaylistService;
+  /** Public cover image URL when the source playlist/album has one. */
+  coverUrl?: string | null;
 };
 
 function runYtDlp(
@@ -216,6 +218,12 @@ async function fetchSpotifyFromEmbed(
               entity?: {
                 name?: string;
                 title?: string;
+                coverArt?: {
+                  sources?: { url?: string; height?: number | null; width?: number | null }[];
+                };
+                visualIdentity?: {
+                  image?: { url?: string; maxHeight?: number; maxWidth?: number }[];
+                };
                 trackList?: {
                   title?: string;
                   subtitle?: string;
@@ -273,7 +281,22 @@ async function fetchSpotifyFromEmbed(
     entity?.title ||
     (kind === "album" ? "Spotify album" : "Spotify playlist")
   ).trim();
-  return { name, tracks, service: "spotify" };
+
+  const coverSources = [
+    ...(entity?.coverArt?.sources || []).map((s) => ({
+      url: s.url,
+      size: Math.max(s.height || 0, s.width || 0),
+    })),
+    ...(entity?.visualIdentity?.image || []).map((s) => ({
+      url: s.url,
+      size: Math.max(s.maxHeight || 0, s.maxWidth || 0),
+    })),
+  ]
+    .filter((s): s is { url: string; size: number } => Boolean(s.url?.trim()))
+    .sort((a, b) => b.size - a.size);
+  const coverUrl = coverSources[0]?.url?.trim() || null;
+
+  return { name, tracks, service: "spotify", coverUrl };
 }
 
 async function fetchSpotifyPlaylist(
@@ -298,6 +321,7 @@ async function fetchDeezerPlaylist(
 
   const tracks: ImportTrackRow[] = [];
   let name = "Deezer playlist";
+  let coverUrl: string | null = null;
   let index = 0;
 
   while (tracks.length < PLAYLIST_IMPORT_MAX) {
@@ -316,6 +340,10 @@ async function fetchDeezerPlaylist(
     const data = (await res.json()) as {
       error?: { message?: string };
       title?: string;
+      picture_xl?: string;
+      picture_big?: string;
+      picture_medium?: string;
+      picture?: string;
       tracks?: {
         data?: {
           title?: string;
@@ -335,6 +363,14 @@ async function fetchDeezerPlaylist(
       return { error: data.error.message };
     }
     if (data.title) name = data.title;
+    if (index === 0) {
+      coverUrl =
+        data.picture_xl?.trim() ||
+        data.picture_big?.trim() ||
+        data.picture_medium?.trim() ||
+        data.picture?.trim() ||
+        null;
+    }
 
     const items = data.tracks?.data || data.data || [];
     if (items.length === 0) break;
@@ -358,7 +394,7 @@ async function fetchDeezerPlaylist(
   if (tracks.length === 0) {
     return { error: "No tracks on that Deezer playlist." };
   }
-  return { name, tracks, service: "deezer" };
+  return { name, tracks, service: "deezer", coverUrl };
 }
 
 async function fetchYoutubePlaylist(
@@ -388,6 +424,8 @@ async function fetchYoutubePlaylist(
 
   let data: {
     title?: string;
+    thumbnail?: string;
+    thumbnails?: { url?: string; height?: number; width?: number }[];
     entries?: {
       title?: string;
       artist?: string;
@@ -436,10 +474,21 @@ async function fetchYoutubePlaylist(
   if (tracks.length === 0) {
     return { error: "No tracks found on that YouTube playlist." };
   }
+
+  const thumbs = [...(data.thumbnails || [])]
+    .filter((t) => t.url?.trim())
+    .sort(
+      (a, b) =>
+        Math.max(b.height || 0, b.width || 0) -
+        Math.max(a.height || 0, a.width || 0),
+    );
+  const coverUrl = thumbs[0]?.url?.trim() || data.thumbnail?.trim() || null;
+
   return {
     name: (data.title || "YouTube playlist").trim(),
     tracks,
     service: "youtube",
+    coverUrl,
   };
 }
 

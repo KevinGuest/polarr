@@ -192,7 +192,9 @@ Then select a simulator or device and Run. First launch: enter Server URL → WK
 Already configured in the Xcode project:
 
 - Dark launch / status bar styling
-- `UIBackgroundModes = audio` + `AVAudioSession` playback category (background/lock-screen audio when the web player uses HTMLAudio)
+- `UIBackgroundModes = audio` + `AVAudioSession` playback category (background/lock-screen audio)
+- Native **`PolarrPlayer`** plugin (`AVPlayer`) owns decode + `MPNowPlayingInfoCenter` + `MPRemoteCommandCenter` on iOS; the React player still owns queue / Connect / stream URL building. HTMLAudio remains the fallback (web, desktop, and if the plugin is missing).
+- CarPlay templates + Apple CarPlay Audio entitlement are the next slice on top of this native player
 - `NSAppTransportSecurity` allows cleartext HTTP for LAN / Umbrel
 - Safe-area aware setup screen (`viewport-fit=cover`; Polarr web already sets this)
 

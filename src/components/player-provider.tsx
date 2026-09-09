@@ -13,10 +13,23 @@ import { usePathname } from "next/navigation";
 import { nativeAssetUrl, ensureNativeMediaTicket, isNativeClient, nativeClientPlatform, nativeSessionToken } from "@/lib/native-client";
 import {
   bindMediaSessionActions,
+  mediaSessionArtworkUrl,
   setMediaSessionPlaybackState,
   setMediaSessionPositionState,
   updateMediaSessionMetadata,
 } from "@/lib/media-session";
+import {
+  isNativeIosPlayerAvailable,
+  isNativeIosPlayerOwning,
+  nativeIosPlayerLoad,
+  nativeIosPlayerPause,
+  nativeIosPlayerPlay,
+  nativeIosPlayerSeek,
+  nativeIosPlayerStop,
+  probeNativeIosPlayer,
+  setNativeIosPlayerOwning,
+  subscribeNativeIosPlayer,
+} from "@/lib/ios-player";
 import {
   readSystemVolume,
   subscribeSystemVolume,
@@ -632,6 +645,46 @@ function setAudioSrc(audio: HTMLAudioElement, src: string, force = false) {
     /* ignore */
   }
   return true;
+}
+
+/** Stop HTMLAudio so it cannot fight the native AVPlayer. */
+function silenceHtmlAudio(audio: HTMLAudioElement | null | undefined) {
+  if (!audio) return;
+  try {
+    audio.pause();
+    if (audio.src) {
+      audio.removeAttribute("src");
+      audio.load();
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function nativeLoadMeta(track: {
+  id: string;
+  title: string;
+  artist: string;
+  album?: string | null;
+  resolveArtist?: string | null;
+  coverPath?: string | null;
+  duration?: number | null;
+}) {
+  return {
+    id: track.id,
+    title: track.title?.trim() || "Unknown track",
+    artist:
+      track.resolveArtist?.trim() ||
+      primaryArtistName(track.artist) ||
+      track.artist?.trim() ||
+      "Unknown artist",
+    album: track.album?.trim() || "",
+    artworkUrl: mediaSessionArtworkUrl(track.coverPath),
+    durationHint:
+      typeof track.duration === "number" && track.duration > 0
+        ? track.duration
+        : undefined,
+  };
 }
 
 function seekAudioTo(audio: HTMLAudioElement, seconds: number) {
@@ -1432,6 +1485,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [applyOutputDevice, configureEffectsGraph]);
 
   const playBoth = useCallback(async () => {
+    if (isNativeIosPlayerOwning()) {
+      silenceHtmlAudio(audioRef.current);
+      silenceHtmlAudio(instAudioRef.current);
+      silenceHtmlAudio(nextAudioRef.current);
+      try {
+        return await nativeIosPlayerPlay();
+      } catch {
+        return false;
+      }
+    }
     const mix = audioRef.current;
     if (!mix) return false;
     if (playbackNeedsWebAudio(playbackSettingsRef.current)) {
@@ -1449,6 +1512,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [applyMixVolumes, ensureAudioEffects, ensureInstPlaying]);
 
   const pauseBoth = useCallback(() => {
+    if (isNativeIosPlayerOwning()) {
+      void nativeIosPlayerPause().catch(() => null);
+    }
     audioRef.current?.pause();
     instAudioRef.current?.pause();
     nextAudioRef.current?.pause();
@@ -1527,7 +1593,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       track: trackRef.current,
       queue: queueRef.current,
       playing: playingRef.current,
-      progress: audioRef.current?.currentTime ?? progressRef.current,
+      progress: isNativeIosPlayerOwning()
+        ? progressRef.current
+        : (audioRef.current?.currentTime ?? progressRef.current),
       duration: durationRef.current,
       volume: volumeRef.current,
       shuffle: shuffleRef.current,
@@ -1882,7 +1950,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       cancelTransition();
       transitionExhaustedTrackRef.current = null;
       const audio = audioRef.current;
-      if (!audio) return;
+      if (!audio && !isNativeIosPlayerAvailable()) return;
       const playGen = gen ?? ++playGenRef.current;
       if (playGen !== playGenRef.current) return;
 
@@ -1928,6 +1996,48 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           await ensureNativeMediaTicket();
         }
         if (!current()) return;
+
+        const useNative =
+          (await probeNativeIosPlayer()) && !followingRemoteRef.current;
+        if (useNative) {
+          silenceHtmlAudio(audio);
+          silenceHtmlAudio(instAudioRef.current);
+          silenceHtmlAudio(nextAudioRef.current);
+          try {
+            const loaded = await nativeIosPlayerLoad({
+              url: audioSrcFor(next),
+              track: nativeLoadMeta(next),
+              autoplay: true,
+              position: 0,
+            });
+            if (!current()) return;
+            if (!loaded) {
+              setNativeIosPlayerOwning(false);
+            } else {
+              if (loaded.duration > 0) {
+                durationRef.current = loaded.duration;
+                setDuration(loaded.duration);
+              }
+              playingRef.current = true;
+              setPlaying(true);
+              publish({
+                track: next,
+                queue: queueRef.current,
+                playing: true,
+                progress: 0,
+                ownerId: tabIdRef.current,
+              });
+              const q = queueRef.current;
+              const idx = q.findIndex((t) => t.id === next.id);
+              prefetchStream(idx >= 0 ? q[idx + 1] : undefined);
+              return;
+            }
+          } catch {
+            setNativeIosPlayerOwning(false);
+          }
+        }
+
+        if (!audio) return;
         setAudioSrc(audio, audioSrcFor(next));
         applyMixVolumes();
         // Start immediately — don't wait for canplay (saves buffer latency).
@@ -1960,6 +2070,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (payload.ownerId === tabIdRef.current) return;
     applyingRemoteRef.current = true;
     ownerIdRef.current = payload.ownerId;
+
+    if (isNativeIosPlayerOwning()) {
+      void nativeIosPlayerStop().catch(() => null);
+      setNativeIosPlayerOwning(false);
+    }
 
     const audio = audioRef.current;
     // UI-only follower: stop local media so we never compete for the stream
@@ -2941,15 +3056,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (!isOwner()) return;
     const audio = audioRef.current;
     const t = trackRef.current;
-    if (!audio || !t) return;
+    if (!t) return;
+    const position = isNativeIosPlayerOwning()
+      ? progressRef.current
+      : (audio?.currentTime ?? progressRef.current);
+    if (!isNativeIosPlayerOwning() && !audio) return;
     const anchor = listenAnchorRef.current;
     if (!anchor || anchor.trackId !== t.id) return;
     const delta = Math.max(
       0,
-      Math.min(3600, Math.floor(audio.currentTime - anchor.at)),
+      Math.min(3600, Math.floor(position - anchor.at)),
     );
     if (delta <= 0) return;
-    listenAnchorRef.current = { trackId: t.id, at: audio.currentTime };
+    listenAnchorRef.current = { trackId: t.id, at: position };
     postListenCredit(delta, t);
   }, [isOwner]);
 
@@ -3209,12 +3328,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     const audio = audioRef.current;
-    if (!audio || !track) return;
+    if (!track) return;
+    if (!audio && !isNativeIosPlayerOwning()) return;
 
-    // Remote followers are handled above. For the local owner, the media
-    // element is authoritative: restored/cross-tab state can say "playing"
-    // even when the browser has paused or rejected the element.
-    const shouldPause = !audio.paused;
+    // Remote followers are handled above. For the local owner, media is
+    // authoritative — except when native AVPlayer owns decode.
+    const shouldPause = isNativeIosPlayerOwning()
+      ? playingRef.current
+      : Boolean(audio && !audio.paused);
     ownerIdRef.current = tabIdRef.current;
 
     if (shouldPause) {
@@ -3223,13 +3344,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setPlaying(false);
       publish({
         playing: false,
-        progress: audio.currentTime,
+        progress: isNativeIosPlayerOwning()
+          ? progressRef.current
+          : (audio?.currentTime ?? progressRef.current),
         ownerId: tabIdRef.current,
       });
       return;
     }
 
-    const resumeAt = audio.currentTime || progressRef.current || 0;
+    const resumeAt =
+      (isNativeIosPlayerOwning() ? progressRef.current : audio?.currentTime) ||
+      progressRef.current ||
+      0;
 
     void (async () => {
       const gen = ++playGenRef.current;
@@ -3254,6 +3380,42 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (!currentGen()) return;
+
+      if (await probeNativeIosPlayer()) {
+        silenceHtmlAudio(audio);
+        silenceHtmlAudio(instAudioRef.current);
+        silenceHtmlAudio(nextAudioRef.current);
+        try {
+          const loaded = await nativeIosPlayerLoad({
+            url: audioSrcFor(ready),
+            track: nativeLoadMeta(ready),
+            autoplay: true,
+            position: resumeAt > 0.5 ? resumeAt : 0,
+          });
+          if (!currentGen()) return;
+          if (loaded) {
+            if (loaded.duration > 0) {
+              durationRef.current = loaded.duration;
+              setDuration(loaded.duration);
+            }
+            progressRef.current = loaded.position || resumeAt;
+            setProgress(progressRef.current);
+            playingRef.current = true;
+            setPlaying(true);
+            publish({
+              playing: true,
+              progress: progressRef.current,
+              ownerId: tabIdRef.current,
+            });
+            return;
+          }
+          setNativeIosPlayerOwning(false);
+        } catch {
+          setNativeIosPlayerOwning(false);
+        }
+      }
+
+      if (!audio) return;
       const nextSrc = audioSrcFor(ready);
       const alreadyReady =
         Boolean(audio.src) &&
@@ -3357,6 +3519,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         });
         setProgress(next);
         progressRef.current = next;
+        return;
+      }
+      if (isNativeIosPlayerOwning()) {
+        ownerIdRef.current = tabIdRef.current;
+        void nativeIosPlayerSeek(next).then((pos) => {
+          const landed = pos ?? next;
+          setProgress(landed);
+          progressRef.current = landed;
+          setPresenceRev((n) => n + 1);
+          publish({
+            progress: landed,
+            ownerId: tabIdRef.current,
+          });
+        });
         return;
       }
       if (!audio) return;
@@ -3743,11 +3919,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
     const audio = audioRef.current;
     ownerIdRef.current = tabIdRef.current;
-    if (audio && audio.currentTime > 3) {
-      audio.currentTime = 0;
-      setProgress(0);
-      publish({ progress: 0, ownerId: tabIdRef.current });
-      return;
+    const position = isNativeIosPlayerOwning()
+      ? progressRef.current
+      : (audio?.currentTime ?? 0);
+    if (position > 3) {
+      if (isNativeIosPlayerOwning()) {
+        void nativeIosPlayerSeek(0).then(() => {
+          setProgress(0);
+          progressRef.current = 0;
+          publish({ progress: 0, ownerId: tabIdRef.current });
+        });
+        return;
+      }
+      if (audio) {
+        audio.currentTime = 0;
+        setProgress(0);
+        publish({ progress: 0, ownerId: tabIdRef.current });
+        return;
+      }
     }
     const idx = queue.findIndex((t) => t.id === track.id);
     const p = queue[idx - 1];
@@ -3768,7 +3957,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       seekTo: (seconds) => {
         const dur = durationRef.current;
         if (dur > 0) seek(seconds / dur);
-        else {
+        else if (isNativeIosPlayerOwning()) {
+          void nativeIosPlayerSeek(Math.max(0, seconds)).then((pos) => {
+            const landed = pos ?? seconds;
+            progressRef.current = landed;
+            setProgress(landed);
+          });
+        } else {
           const audio = audioRef.current;
           if (!audio) return;
           audio.currentTime = Math.max(0, seconds);
@@ -3777,9 +3972,95 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
       },
       getPosition: () =>
-        audioRef.current?.currentTime ?? progressRef.current ?? 0,
+        isNativeIosPlayerOwning()
+          ? progressRef.current ?? 0
+          : (audioRef.current?.currentTime ?? progressRef.current ?? 0),
       getDuration: () => durationRef.current || 0,
     });
+  }, [next, prev, seek, toggle]);
+
+  // Native AVPlayer events (time/ended/remote). Queue stays in JS.
+  useEffect(() => {
+    if (nativeClientPlatform() !== "ios") return;
+    let cancelled = false;
+    const handles: Array<{ remove: () => void }> = [];
+
+    void (async () => {
+      if (!(await probeNativeIosPlayer()) || cancelled) return;
+
+      const add = async <K extends "timeupdate" | "playing" | "paused" | "ended" | "error" | "remote">(
+        event: K,
+        handler: Parameters<typeof subscribeNativeIosPlayer<K>>[1],
+      ) => {
+        const handle = await subscribeNativeIosPlayer(event, handler);
+        if (handle) handles.push(handle);
+      };
+
+      await add("timeupdate", (data) => {
+        if (followingRemoteRef.current || !isNativeIosPlayerOwning()) return;
+        const position = Number(data.position) || 0;
+        const duration = Number(data.duration) || 0;
+        progressRef.current = position;
+        setProgress(position);
+        if (duration > 0 && durationRef.current !== duration) {
+          durationRef.current = duration;
+          setDuration(duration);
+        }
+        setMediaSessionPositionState(position, duration || durationRef.current);
+      });
+
+      await add("playing", () => {
+        if (followingRemoteRef.current) return;
+        playingRef.current = true;
+        setPlaying(true);
+        setMediaSessionPlaybackState("playing");
+      });
+
+      await add("paused", () => {
+        if (followingRemoteRef.current) return;
+        playingRef.current = false;
+        setPlaying(false);
+        setMediaSessionPlaybackState("paused");
+      });
+
+      await add("ended", () => {
+        if (followingRemoteRef.current || !isOwner()) return;
+        void (async () => {
+          const current = trackRef.current;
+          if (!current) return;
+          const n = await advanceTargetRef.current(current);
+          if (n) playRef.current(n);
+        })();
+      });
+
+      await add("remote", (data) => {
+        if (followingRemoteRef.current) return;
+        if (data.action === "next") next();
+        else if (data.action === "previous") prev();
+        else if (data.action === "play" && !playingRef.current) toggle();
+        else if (data.action === "pause" && playingRef.current) toggle();
+        else if (data.action === "seek" && Number.isFinite(data.position)) {
+          const dur = durationRef.current;
+          if (dur > 0) seek(Number(data.position) / dur);
+        }
+      });
+
+      await add("error", () => {
+        // Fall back to HTMLAudio on the next claimAndPlay.
+        setNativeIosPlayerOwning(false);
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      handles.forEach((h) => {
+        try {
+          h.remove();
+        } catch {
+          /* ignore */
+        }
+      });
+    };
   }, [next, prev, seek, toggle]);
 
   useEffect(() => {

@@ -41,6 +41,7 @@ class BridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(PolarrOfflinePlugin())
         bridge?.registerPluginInstance(PolarrVolumePlugin())
         bridge?.registerPluginInstance(PolarrNowPlayingPlugin())
+        bridge?.registerPluginInstance(PolarrPlayerPlugin())
         let script = WKUserScript(
             source: Self.lockScript,
             injectionTime: .atDocumentStart,

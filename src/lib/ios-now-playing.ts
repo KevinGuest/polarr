@@ -1,4 +1,5 @@
 import { nativeClientPlatform, nativeServerUrl, nativeSessionToken } from "@/lib/native-client";
+import { isNativeIosPlayerOwning } from "@/lib/ios-player";
 
 type NativeNowPlayingPlugin = {
   setMetadata(options: {
@@ -53,6 +54,8 @@ export function setNativeNowPlayingMetadata(input: {
   album: string;
   artworkUrl: string | null;
 }) {
+  // Native AVPlayer path owns MPNowPlayingInfoCenter exclusively.
+  if (isNativeIosPlayerOwning()) return;
   const native = plugin();
   if (!native) return;
   const token = artworkToken(input.artworkUrl);
@@ -75,6 +78,7 @@ export function setNativeNowPlayingPlayback(input: {
   rate?: number;
   force?: boolean;
 }) {
+  if (isNativeIosPlayerOwning()) return;
   const native = plugin();
   if (!native) return;
   const now = Date.now();
@@ -104,6 +108,7 @@ export function setNativeNowPlayingPlayback(input: {
 export function clearNativeNowPlaying() {
   lastPlaybackSync = 0;
   lastPosition = -1;
+  if (isNativeIosPlayerOwning()) return;
   const native = plugin();
   if (!native) return;
   void native.clear().catch(() => null);

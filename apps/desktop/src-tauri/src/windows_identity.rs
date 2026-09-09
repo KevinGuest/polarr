@@ -40,7 +40,7 @@ pub fn spawn_audio_session_relabeler() {
 }
 
 fn relabel_webview_sessions() -> windows::core::Result<()> {
-    use windows::core::{Interface, PCWSTR};
+    use windows::core::Interface;
     use windows::Win32::Media::Audio::{
         eMultimedia, eRender, IAudioSessionControl, IAudioSessionControl2,
         IAudioSessionEnumerator, IAudioSessionManager2, IMMDeviceEnumerator,
@@ -94,7 +94,8 @@ fn relabel_webview_sessions() -> windows::core::Result<()> {
                     continue;
                 }
 
-                let _ = control.SetDisplayName(PCWSTR::from_raw(windows::core::w!("Polarr").as_ptr()), None);
+                // EventContext is a GUID*; null means "no event context" (not Option).
+                let _ = control.SetDisplayName(windows::core::w!("Polarr"), std::ptr::null());
             }
             Ok(())
         })();

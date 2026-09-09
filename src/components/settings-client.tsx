@@ -11,12 +11,6 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { AUTH_CONTROL, AUTH_SUBMIT, AuthFieldGroup } from "@/components/auth-screen";
 import { InsetGroup } from "@/components/media-shelf";
-import {
-  AppleMusicMark,
-  DeezerMark,
-  SpotifyMark,
-  YoutubeMusicMark,
-} from "@/components/service-brand-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -64,7 +58,6 @@ import { invalidateDiscordPresenceCache } from "@/components/player-provider";
 import { toastError, toastSaved, toastSuccess } from "@/lib/toast";
 import {
   ArrowLeft,
-  Check,
   ChevronRight,
   Info,
   Monitor,
@@ -95,53 +88,6 @@ type AudioOutputOption = {
 type AudioOutputMediaDevices = MediaDevices & {
   selectAudioOutput?: () => Promise<MediaDeviceInfo>;
 };
-
-type ImportSummary = {
-  playlistId: string;
-  name: string;
-  matched: number;
-  unresolved: number;
-  total: number;
-};
-
-type ServiceId = "spotify" | "youtube" | "deezer" | "apple";
-
-const SERVICES: {
-  id: ServiceId;
-  label: string;
-  hint: string;
-  placeholder: string;
-  Mark: typeof SpotifyMark;
-}[] = [
-  {
-    id: "spotify",
-    label: "Spotify",
-    hint: "Public playlist or album link",
-    placeholder: "https://open.spotify.com/playlist/…",
-    Mark: SpotifyMark,
-  },
-  {
-    id: "youtube",
-    label: "YouTube Music",
-    hint: "Playlist or mix link",
-    placeholder: "https://music.youtube.com/playlist?list=…",
-    Mark: YoutubeMusicMark,
-  },
-  {
-    id: "deezer",
-    label: "Deezer",
-    hint: "Public playlist link",
-    placeholder: "https://www.deezer.com/playlist/…",
-    Mark: DeezerMark,
-  },
-  {
-    id: "apple",
-    label: "Apple Music",
-    hint: "Coming soon",
-    placeholder: "https://music.apple.com/…/playlist/…",
-    Mark: AppleMusicMark,
-  },
-];
 
 function SettingsRow({
   title,
@@ -383,19 +329,6 @@ export function SettingsClient() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
 
-  const [importOpen, setImportOpen] = useState(false);
-  const [service, setService] = useState<ServiceId>("spotify");
-  const [playlistUrl, setPlaylistUrl] = useState("");
-  const [playlistName, setPlaylistName] = useState("");
-  const [serviceReady, setServiceReady] = useState<Record<string, boolean>>({
-    spotify: true,
-    youtube: true,
-    deezer: true,
-    apple: false,
-  });
-  const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<ImportSummary | null>(null);
-
   const [discordLinked, setDiscordLinked] = useState(false);
   const [discordUsername, setDiscordUsername] = useState<string | null>(null);
   const [discordDisplayName, setDiscordDisplayName] = useState<string | null>(
@@ -588,10 +521,7 @@ export function SettingsClient() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [accountRes, servicesRes] = await Promise.all([
-        fetch("/api/account", { cache: "no-store" }),
-        fetch("/api/playlists/import", { cache: "no-store" }),
-      ]);
+      const accountRes = await fetch("/api/account", { cache: "no-store" });
       if (cancelled) return;
       if (accountRes.status === 401) {
         router.replace("/login");
@@ -602,10 +532,6 @@ export function SettingsClient() {
         setUsername(typeof data.username === "string" ? data.username : "");
         setEmail(typeof data.email === "string" ? data.email : "");
         applyDiscordAccount(data);
-      }
-      if (servicesRes.ok) {
-        const data = await servicesRes.json();
-        if (data.services) setServiceReady(data.services);
       }
       void fetch("/api/v1/status", { cache: "no-store" })
         .then((res) => res.json())
@@ -760,50 +686,7 @@ export function SettingsClient() {
     }
   }
 
-  async function runImport() {
-    const url = playlistUrl.trim();
-    if (!url) {
-      toastError("Paste a playlist link from the service you picked.");
-      return;
-    }
-    setImporting(true);
-    setImportResult(null);
-    try {
-      const res = await fetch("/api/playlists/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          service,
-          url,
-          name: playlistName.trim() || undefined,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toastError(
-          typeof data.error === "string" ? data.error : "Import failed",
-        );
-        return;
-      }
-      setImportResult({
-        playlistId: data.playlistId,
-        name: data.name,
-        matched: data.matched,
-        unresolved: data.unresolved,
-        total: data.total,
-      });
-      setPlaylistUrl("");
-      toastSuccess(
-        `Imported “${data.name || "playlist"}”`,
-        `${data.matched ?? 0}/${data.total ?? 0} matched`,
-      );
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  async function linkDiscord() {
-    setDiscordBusy(true);
+  async function linkDiscord() {    setDiscordBusy(true);
     try {
       const res = await fetch("/api/discord/oauth");
       const data = await res.json().catch(() => ({}));
@@ -943,7 +826,6 @@ export function SettingsClient() {
     );
   }
 
-  const active = SERVICES.find((s) => s.id === service)!;
   const settingsTitle =
     tab === "home"
       ? "Settings"
@@ -1115,26 +997,10 @@ export function SettingsClient() {
             Deezer playlist link. Matched tracks are added to a new Polarr
             playlist in your library.
           </p>
-          {importResult ? (
-            <InsetGroup>
-              <div className="space-y-1 px-4 py-3.5 text-[15px]">
-                <p className="font-medium text-foreground">
-                  Created “{importResult.name}”
-                </p>
-                <p className="text-muted-foreground">
-                  {importResult.matched} of {importResult.total} tracks added
-                  {importResult.unresolved > 0
-                    ? ` · ${importResult.unresolved} unmatched`
-                    : ""}
-                  .
-                </p>
-              </div>
-            </InsetGroup>
-          ) : null}
           <Button
             type="button"
             className={AUTH_SUBMIT}
-            onClick={() => setImportOpen(true)}
+            onClick={() => router.push("/settings/import")}
           >
             Import from link
           </Button>
@@ -1551,135 +1417,6 @@ export function SettingsClient() {
                   : "Save"}
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={importOpen}
-        onOpenChange={(open) => {
-          setImportOpen(open);
-        }}
-      >
-        <DialogContent
-          className={cn(
-            "gap-0 overflow-hidden p-0",
-            "w-[min(100vw-1.25rem,26rem)] max-w-none",
-            "max-h-[min(92dvh,40rem)]",
-            "rounded-2xl sm:rounded-2xl",
-          )}
-        >
-          <div className="max-h-[min(92dvh,40rem)] overflow-y-auto overscroll-contain">
-            <DialogHeader className="gap-1.5 px-5 pb-4 pt-5 pr-12 sm:px-6 sm:pt-6">
-              <DialogTitle className="text-[1.375rem] tracking-tight">
-                Import from link
-              </DialogTitle>
-              <DialogDescription className="text-[15px] leading-snug">
-                Pick a service, paste a public link, and we’ll match tracks into
-                a new playlist.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-5 px-5 pb-5 sm:px-6 sm:pb-6">
-              <InsetGroup>
-                {SERVICES.map((s) => {
-                  const disabled =
-                    s.id === "apple" || serviceReady[s.id] === false;
-                  const selected = service === s.id;
-                  const Mark = s.Mark;
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      disabled={disabled}
-                      onClick={() => setService(s.id)}
-                      className={cn(
-                        "flex w-full items-center gap-3.5 px-4 py-3.5 text-left transition-colors",
-                        selected ? "bg-white/[0.08]" : "hover:bg-white/[0.04]",
-                        disabled && "cursor-not-allowed opacity-45",
-                      )}
-                    >
-                      <Mark className="size-9" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-[16px] font-semibold text-foreground">
-                          {s.label}
-                        </span>
-                        <span className="mt-0.5 block text-sm text-muted-foreground">
-                          {disabled && s.id === "apple" ? "Coming soon" : s.hint}
-                        </span>
-                      </span>
-                      {selected && !disabled ? (
-                        <Check
-                          className="size-5 shrink-0 text-foreground"
-                          strokeWidth={2.5}
-                          aria-hidden
-                        />
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </InsetGroup>
-
-              <AuthFieldGroup>
-                <div className="px-4 pb-2 pt-3">
-                  <Label
-                    htmlFor="import-url"
-                    className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground"
-                  >
-                    Link
-                  </Label>
-                  <Input
-                    id="import-url"
-                    value={playlistUrl}
-                    onChange={(e) => setPlaylistUrl(e.target.value)}
-                    placeholder={active.placeholder}
-                    autoComplete="off"
-                    inputMode="url"
-                    enterKeyHint="done"
-                    className={cn(AUTH_CONTROL, "h-12 px-0")}
-                  />
-                </div>
-                <div className="px-4 pb-3 pt-2">
-                  <Label
-                    htmlFor="import-name"
-                    className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground"
-                  >
-                    Name · optional
-                  </Label>
-                  <Input
-                    id="import-name"
-                    value={playlistName}
-                    onChange={(e) => setPlaylistName(e.target.value)}
-                    placeholder="Uses the playlist title if empty"
-                    maxLength={80}
-                    className={cn(AUTH_CONTROL, "h-12 px-0")}
-                  />
-                </div>
-              </AuthFieldGroup>
-
-              <div className="flex flex-col gap-2 pt-1">
-                <Button
-                  type="button"
-                  className={cn(AUTH_SUBMIT, "mt-0")}
-                  disabled={
-                    importing ||
-                    service === "apple" ||
-                    !playlistUrl.trim()
-                  }
-                  onClick={() => void runImport()}
-                >
-                  {importing ? "Importing…" : "Import"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="h-12 w-full text-[15px] text-muted-foreground"
-                  onClick={() => setImportOpen(false)}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -131,27 +131,6 @@ function shuffleCopy<T>(items: T[]): T[] {
   return a;
 }
 
-function formatDateAdded(iso: string | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  const diff = Date.now() - d.getTime();
-  const day = 86_400_000;
-  if (diff < day && diff >= 0) return "Today";
-  if (diff < 2 * day && diff >= 0) return "Yesterday";
-  if (diff < 7 * day && diff >= 0) {
-    const n = Math.floor(diff / day);
-    return `${n} day${n === 1 ? "" : "s"} ago`;
-  }
-  return d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    ...(d.getFullYear() === new Date().getFullYear()
-      ? {}
-      : { year: "numeric" as const }),
-  });
-}
-
 function playlistTrackOnPolarr(t: {
   path?: string | null;
   source?: string | null;
@@ -1438,11 +1417,8 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                 <tr className="border-b border-border text-xs text-muted-foreground">
                   <th className="w-10 pb-3 pl-3 font-medium">#</th>
                   <th className="pb-3 pr-4 font-medium">Title</th>
-                  <th className="hidden w-[26%] pb-3 pr-4 font-medium md:table-cell">
+                  <th className="hidden w-[30%] pb-3 pr-4 font-medium md:table-cell">
                     Album
-                  </th>
-                  <th className="hidden w-[7rem] pb-3 pr-4 font-medium xl:table-cell">
-                    Date added
                   </th>
                   <th className="w-[5.5rem] pb-3 font-medium" aria-label="Actions" />
                   <th className="w-14 pb-3 pr-3 text-right font-medium">
@@ -1538,16 +1514,6 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                             {t.album || "—"}
                           </span>
                         )}
-                      </td>
-                      <td
-                        className={trackRowMidCell(
-                          isCurrent,
-                          "hidden overflow-hidden py-2.5 pr-4 tabular-nums text-muted-foreground xl:table-cell",
-                        )}
-                      >
-                        <span className="block truncate">
-                          {formatDateAdded(t.addedAt)}
-                        </span>
                       </td>
                       <td
                         className={trackRowMidCell(isCurrent, "py-2.5")}

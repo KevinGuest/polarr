@@ -89,6 +89,16 @@ function headersToRecord(headers: Headers): Record<string, string> {
   return out;
 }
 
+/** Bodies CapacitorHttp cannot send as multipart / binary (e.g. cover + avatar uploads). */
+function isRawRequestBody(body: BodyInit | null | undefined): boolean {
+  if (body == null || typeof body === "string") return false;
+  if (typeof FormData !== "undefined" && body instanceof FormData) return true;
+  if (typeof Blob !== "undefined" && body instanceof Blob) return true;
+  if (typeof ArrayBuffer !== "undefined" && body instanceof ArrayBuffer) return true;
+  if (ArrayBuffer.isView(body)) return true;
+  return false;
+}
+
 async function serverFetch(url: string, init?: RequestInit): Promise<Response> {
   const http = getCapacitorHttp();
   const headers = new Headers(init?.headers);
@@ -118,6 +128,12 @@ async function serverFetch(url: string, init?: RequestInit): Promise<Response> {
     }
   } catch {
     /* fall through */
+  }
+
+  // CapacitorHttp stringifies non-string bodies (`[object FormData]`), which
+  // breaks multipart playlist-cover / profile-avatar uploads. Use CORS fetch.
+  if (isRawRequestBody(init?.body ?? null)) {
+    return originalFetch(url, { ...init, headers });
   }
 
   const method = (init?.method || "GET").toUpperCase();
@@ -781,8 +797,14 @@ export async function installNativeRuntime(serverUrl: string, platform: NativePl
         headers.set("x-polarr-desktop-platform", bridge.desktopPlatform);
       }
       const method = (init?.method || (rewritten instanceof Request ? rewritten.method : "GET")).toUpperCase();
-      const body = method === "GET" || method === "HEAD" ? "" : await requestBody(input, init);
-      const plan = sameServer ? queuePlan(url, method, body) : null;
+      // Keep FormData/Blob intact — requestBody() only handles strings, and
+      // replacing body with "" would wipe multipart uploads (covers, avatars).
+      const passThroughBody = isRawRequestBody(init?.body ?? null);
+      const body =
+        method === "GET" || method === "HEAD" || passThroughBody
+          ? ""
+          : await requestBody(input, init);
+      const plan = passThroughBody ? null : sameServer ? queuePlan(url, method, body) : null;
       const nativeExternalArtwork =
         bridge.platform === "ios" && method === "GET" && isArtworkUrl(url);
       const requestCache = rewritten instanceof Request ? rewritten.cache : undefined;
@@ -815,8 +837,8 @@ export async function installNativeRuntime(serverUrl: string, platform: NativePl
             }
           })();
         const response =
-          streamingConnect
-            ? await originalFetch(url, { ...init, headers })
+          streamingConnect || (passThroughBody && sameServer)
+            ? await originalFetch(url, { ...init, method, headers })
             : sameServer || nativeExternalArtwork
               ? await serverFetch(url, {
                   ...init,

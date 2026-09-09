@@ -15,10 +15,10 @@ export function AdminImportClient() {
         </p>
       </div>
       <Link
-        href="/settings?tab=playlists"
+        href="/settings/import"
         className="inline-flex h-9 items-center rounded-md border border-border px-3 text-sm font-medium hover:bg-muted"
       >
-        Open Account → Playlists
+        Open Import
       </Link>
     </div>
   );

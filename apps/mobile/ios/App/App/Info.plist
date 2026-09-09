@@ -58,26 +58,13 @@
 	<array>
 		<string>audio</string>
 	</array>
-	<!-- CarPlay audio scene only — phone UI stays AppDelegate + Main storyboard. -->
-	<key>UIApplicationSceneManifest</key>
-	<dict>
-		<key>UIApplicationSupportsMultipleScenes</key>
-		<true/>
-		<key>UISceneConfigurations</key>
-		<dict>
-			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
-			<array>
-				<dict>
-					<key>UISceneClassName</key>
-					<string>CPTemplateApplicationScene</string>
-					<key>UISceneConfigurationName</key>
-					<string>PolarrCarPlay</string>
-					<key>UISceneDelegateClassName</key>
-					<string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
-				</dict>
-			</array>
-		</dict>
-	</dict>
+	<!--
+	  Do NOT add UIApplicationSceneManifest here until phone UI is on a
+	  UIWindowScene. A CarPlay-only scene manifest makes iOS skip the
+	  storyboard window (Capacitor BridgeViewController) → black screen.
+	  CarPlaySceneDelegate stays in the target; wire the manifest after a
+	  proper phone SceneDelegate lands. See apps/mobile/CARPLAY.md.
+	-->
 	<key>UIStatusBarStyle</key>
 	<string>UIStatusBarStyleLightContent</string>
 	<key>UIUserInterfaceStyle</key>

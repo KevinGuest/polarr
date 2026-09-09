@@ -13,6 +13,31 @@ Polarr is a **CarPlay Audio** app on top of the native `PolarrPlayer` AVPlayer.
 
 Phone UI stays Capacitor + Main storyboard (no phone `UIWindowScene`).
 
+## Info.plist / black screen
+
+Capacitor still boots the phone UI from `UIMainStoryboardFile` + `AppDelegate.window`.
+Adding `UIApplicationSceneManifest` (even CarPlay-only) makes newer iOS skip that
+storyboard path → **black screen on launch**.
+
+Keep CarPlay scene code in the target, but **do not** declare
+`UIApplicationSceneManifest` until a phone `UIWindowScene` / `SceneDelegate` is wired
+alongside `CPTemplateApplicationScene`. Then add both configurations:
+
+```xml
+<key>UIApplicationSceneManifest</key>
+<dict>
+  <key>UIApplicationSupportsMultipleScenes</key>
+  <false/>
+  <key>UISceneConfigurations</key>
+  <dict>
+    <key>UIWindowSceneSessionRoleApplication</key>
+    <!-- Main storyboard / SceneDelegate -->
+    <key>CPTemplateApplicationSceneSessionRoleApplication</key>
+    <!-- CarPlaySceneDelegate -->
+  </dict>
+</dict>
+```
+
 ## Apple entitlement (required to appear in CarPlay)
 
 1. Request **CarPlay Audio** at [developer.apple.com/contact/carplay](https://developer.apple.com/contact/carplay/) and sign the CarPlay addendum.

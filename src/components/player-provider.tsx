@@ -2726,45 +2726,77 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           setIsRemotePlayback(false);
           ownerIdRef.current = tabIdRef.current;
           const current = trackRef.current;
-          const audio = audioRef.current;
-          if (current && audio) {
-            const epoch = remoteEpochRef.current;
-            let resumeAt = progressRef.current;
-            if (epoch?.playing) {
-              resumeAt =
-                epoch.progress + Math.max(0, (Date.now() - epoch.at) / 1000);
-            } else if (epoch && Number.isFinite(epoch.progress)) {
-              resumeAt = epoch.progress;
+          if (!current) continue;
+          const epoch = remoteEpochRef.current;
+          let resumeAt = progressRef.current;
+          if (epoch?.playing) {
+            resumeAt =
+              epoch.progress + Math.max(0, (Date.now() - epoch.at) / 1000);
+          } else if (epoch && Number.isFinite(epoch.progress)) {
+            resumeAt = epoch.progress;
+          }
+          if (durationRef.current > 0) {
+            resumeAt = Math.min(durationRef.current, resumeAt);
+          }
+          remoteEpochRef.current = null;
+          progressRef.current = resumeAt;
+          setProgress(resumeAt);
+          const shouldPlay = playingRef.current;
+          const trackId = current.id;
+          void (async () => {
+            if (await probeNativeIosPlayer()) {
+              silenceHtmlAudio(audioRef.current);
+              silenceHtmlAudio(instAudioRef.current);
+              silenceHtmlAudio(nextAudioRef.current);
+              try {
+                const loaded = await nativeIosPlayerLoad({
+                  url: audioSrcFor(current),
+                  track: nativeLoadMeta(current),
+                  autoplay: shouldPlay,
+                  position: resumeAt > 0.25 ? resumeAt : 0,
+                });
+                if (loaded && trackRef.current?.id === trackId) {
+                  if (loaded.duration > 0) {
+                    durationRef.current = loaded.duration;
+                    setDuration(loaded.duration);
+                  }
+                  progressRef.current = loaded.position || resumeAt;
+                  setProgress(progressRef.current);
+                  playingRef.current = shouldPlay;
+                  setPlaying(shouldPlay);
+                  publishRef.current({
+                    ownerId: tabIdRef.current,
+                    playing: shouldPlay,
+                    progress: progressRef.current,
+                  });
+                  return;
+                }
+                setNativeIosPlayerOwning(false);
+              } catch {
+                setNativeIosPlayerOwning(false);
+              }
             }
-            if (durationRef.current > 0) {
-              resumeAt = Math.min(durationRef.current, resumeAt);
-            }
-            remoteEpochRef.current = null;
-            progressRef.current = resumeAt;
-            setProgress(resumeAt);
+            const audio = audioRef.current;
+            if (!audio || trackRef.current?.id !== trackId) return;
             setAudioSrc(audio, audioSrcFor(current));
             const disarm = armResumeSeek(audio, resumeAt);
-            const shouldPlay = playingRef.current;
-            const trackId = current.id;
-            void (async () => {
-              await waitForCanPlay(
-                audio,
-                () => trackRef.current?.id === trackId,
-                10_000,
-              );
+            await waitForCanPlay(
+              audio,
+              () => trackRef.current?.id === trackId,
+              10_000,
+            );
+            seekAudioTo(audio, resumeAt);
+            if (shouldPlay && trackRef.current?.id === trackId) {
+              await playBoth();
               seekAudioTo(audio, resumeAt);
-              if (shouldPlay && trackRef.current?.id === trackId) {
-                await playBoth();
-                seekAudioTo(audio, resumeAt);
-              }
-              window.setTimeout(disarm, 2_500);
-            })();
+            }
+            window.setTimeout(disarm, 2_500);
             publishRef.current({
               ownerId: tabIdRef.current,
               playing: shouldPlay,
               progress: resumeAt,
             });
-          }
+          })();
           continue;
         }
         if (command.type === "play-track") {
@@ -2777,12 +2809,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
         if (command.type === "play") {
           if (!playingRef.current) {
-            const audio = audioRef.current;
             const current = trackRef.current;
-            if (audio && current) {
-              ownerIdRef.current = tabIdRef.current;
-              setAudioSrc(audio, audioSrcFor(current));
-              void playBoth().then((ok) => {
+            if (!current) continue;
+            ownerIdRef.current = tabIdRef.current;
+            void (async () => {
+              if (isNativeIosPlayerOwning()) {
+                const ok = await nativeIosPlayerPlay().catch(() => false);
                 if (!ok) return;
                 playingRef.current = true;
                 setPlaying(true);
@@ -2790,8 +2822,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                   playing: true,
                   ownerId: tabIdRef.current,
                 });
+                return;
+              }
+              const audio = audioRef.current;
+              if (!audio) return;
+              setAudioSrc(audio, audioSrcFor(current));
+              const ok = await playBoth();
+              if (!ok) return;
+              playingRef.current = true;
+              setPlaying(true);
+              publishRef.current({
+                playing: true,
+                ownerId: tabIdRef.current,
               });
-            }
+            })();
           }
           continue;
         }
@@ -2806,8 +2850,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           continue;
         }
         if (command.type === "toggle") {
-          const audio = audioRef.current;
-          if (!audio || !trackRef.current) continue;
+          if (!trackRef.current) continue;
           if (playingRef.current) {
             pauseBoth();
             playingRef.current = false;
@@ -2818,27 +2861,46 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             });
           } else {
             ownerIdRef.current = tabIdRef.current;
-            void playBoth().then((ok) => {
-              if (!ok) return;
+            void (async () => {
+              if (isNativeIosPlayerOwning()) {
+                const ok = await nativeIosPlayerPlay().catch(() => false);
+                if (!ok) return;
+              } else {
+                const ok = await playBoth();
+                if (!ok) return;
+              }
               playingRef.current = true;
               setPlaying(true);
               publishRef.current({
                 playing: true,
                 ownerId: tabIdRef.current,
               });
-            });
+            })();
           }
           continue;
         }
         if (command.type === "seek") {
+          ownerIdRef.current = tabIdRef.current;
+          const next = Math.max(0, Number(command.progress) || 0);
+          if (isNativeIosPlayerOwning()) {
+            void nativeIosPlayerSeek(next).then((pos) => {
+              const landed = pos ?? next;
+              setProgress(landed);
+              progressRef.current = landed;
+              publishRef.current({
+                progress: landed,
+                ownerId: tabIdRef.current,
+              });
+            });
+            continue;
+          }
           const audio = audioRef.current;
           if (!audio) continue;
-          ownerIdRef.current = tabIdRef.current;
-          audio.currentTime = command.progress;
-          setProgress(command.progress);
-          progressRef.current = command.progress;
+          audio.currentTime = next;
+          setProgress(next);
+          progressRef.current = next;
           publishRef.current({
-            progress: command.progress,
+            progress: next,
             ownerId: tabIdRef.current,
           });
           continue;
@@ -2853,12 +2915,28 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
         if (command.type === "prev") {
           const current = trackRef.current;
-          const audio = audioRef.current;
           if (!current) continue;
-          if (audio && audio.currentTime > 3) {
-            audio.currentTime = 0;
-            setProgress(0);
-            publishRef.current({ progress: 0, ownerId: tabIdRef.current });
+          const position = isNativeIosPlayerOwning()
+            ? progressRef.current
+            : (audioRef.current?.currentTime ?? 0);
+          if (position > 3) {
+            if (isNativeIosPlayerOwning()) {
+              void nativeIosPlayerSeek(0).then(() => {
+                setProgress(0);
+                progressRef.current = 0;
+                publishRef.current({
+                  progress: 0,
+                  ownerId: tabIdRef.current,
+                });
+              });
+            } else if (audioRef.current) {
+              audioRef.current.currentTime = 0;
+              setProgress(0);
+              publishRef.current({
+                progress: 0,
+                ownerId: tabIdRef.current,
+              });
+            }
             continue;
           }
           const idx = queueRef.current.findIndex((t) => t.id === current.id);
@@ -4420,8 +4498,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const wasFollowing = followingRemoteRef.current;
     const epoch = remoteEpochRef.current;
     let resumeAt = progressRef.current;
-    if (!wasFollowing && audio) {
-      resumeAt = audio.currentTime || progressRef.current;
+    if (!wasFollowing) {
+      resumeAt = isNativeIosPlayerOwning()
+        ? progressRef.current
+        : (audio?.currentTime || progressRef.current);
     } else if (epoch?.playing) {
       resumeAt = epoch.progress + Math.max(0, (Date.now() - epoch.at) / 1000);
     } else if (epoch && Number.isFinite(epoch.progress)) {
@@ -4472,13 +4552,46 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setIsRemotePlayback(false);
       ownerIdRef.current = tabIdRef.current;
       const current = trackRef.current;
-      if (current && audio) {
+      if (current) {
         remoteEpochRef.current = null;
-        setAudioSrc(audio, audioSrcFor(current));
-        const disarm = armResumeSeek(audio, resumeAt);
         const shouldPlay = playingRef.current;
         const trackId = current.id;
         void (async () => {
+          if (await probeNativeIosPlayer()) {
+            silenceHtmlAudio(audio);
+            silenceHtmlAudio(instAudioRef.current);
+            silenceHtmlAudio(nextAudioRef.current);
+            try {
+              const loaded = await nativeIosPlayerLoad({
+                url: audioSrcFor(current),
+                track: nativeLoadMeta(current),
+                autoplay: shouldPlay,
+                position: resumeAt > 0.25 ? resumeAt : 0,
+              });
+              if (loaded && trackRef.current?.id === trackId) {
+                if (loaded.duration > 0) {
+                  durationRef.current = loaded.duration;
+                  setDuration(loaded.duration);
+                }
+                progressRef.current = loaded.position || resumeAt;
+                setProgress(progressRef.current);
+                playingRef.current = shouldPlay;
+                setPlaying(shouldPlay);
+                publish({
+                  ownerId: tabIdRef.current,
+                  playing: shouldPlay,
+                  progress: progressRef.current,
+                });
+                return;
+              }
+              setNativeIosPlayerOwning(false);
+            } catch {
+              setNativeIosPlayerOwning(false);
+            }
+          }
+          if (!audio || trackRef.current?.id !== trackId) return;
+          setAudioSrc(audio, audioSrcFor(current));
+          const disarm = armResumeSeek(audio, resumeAt);
           await waitForCanPlay(
             audio,
             () => trackRef.current?.id === trackId,
@@ -4490,12 +4603,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             seekAudioTo(audio, resumeAt);
           }
           window.setTimeout(disarm, 2_500);
+          publish({
+            ownerId: tabIdRef.current,
+            playing: shouldPlay,
+            progress: resumeAt,
+          });
         })();
-        publish({
-          ownerId: tabIdRef.current,
-          playing: shouldPlay,
-          progress: resumeAt,
-        });
       }
       applyConnectDevices(connectDevices.map((d) => ({
         id: d.id,

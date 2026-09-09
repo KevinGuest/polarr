@@ -111,6 +111,15 @@ async function serverFetch(url: string, init?: RequestInit): Promise<Response> {
   }
   if (!http) return originalFetch(url, { ...init, headers });
 
+  // CapacitorHttp cannot stream; Connect SSE must use WKWebView fetch.
+  try {
+    if (new URL(url).pathname.includes("/api/player/sync/events")) {
+      return originalFetch(url, { ...init, headers });
+    }
+  } catch {
+    /* fall through */
+  }
+
   const method = (init?.method || "GET").toUpperCase();
   let data: string | null = null;
   if (method !== "GET" && method !== "HEAD") {
@@ -796,10 +805,27 @@ export async function installNativeRuntime(serverUrl: string, platform: NativePl
             return decorateJson(stale, token);
           }
         }
-        const response = sameServer || nativeExternalArtwork
-          ? await serverFetch(url, { ...init, method, headers, body: body || undefined })
-          : await originalFetch(rewritten, { ...init, headers });
-        if (method === "GET") cacheResponse(url, token, response);
+        const streamingConnect =
+          sameServer &&
+          (() => {
+            try {
+              return new URL(url).pathname.includes("/api/player/sync/events");
+            } catch {
+              return false;
+            }
+          })();
+        const response =
+          streamingConnect
+            ? await originalFetch(url, { ...init, headers })
+            : sameServer || nativeExternalArtwork
+              ? await serverFetch(url, {
+                  ...init,
+                  method,
+                  headers,
+                  body: body || undefined,
+                })
+              : await originalFetch(rewritten, { ...init, headers });
+        if (method === "GET" && !streamingConnect) cacheResponse(url, token, response);
         if (response.status === 401 && token) clearNativeSessionToken();
         if (response.ok) void flushMutationQueue();
         return decorateJson(response, token);

@@ -53,11 +53,31 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<!-- Keep HTML5 audio playing when the screen locks / app backgrounds. -->
+	<!-- Keep HTML5 / AVPlayer audio playing when the screen locks / app backgrounds. -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
 	</array>
+	<!-- CarPlay audio scene only — phone UI stays AppDelegate + Main storyboard. -->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneClassName</key>
+					<string>CPTemplateApplicationScene</string>
+					<key>UISceneConfigurationName</key>
+					<string>PolarrCarPlay</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 	<key>UIStatusBarStyle</key>
 	<string>UIStatusBarStyleLightContent</string>
 	<key>UIUserInterfaceStyle</key>

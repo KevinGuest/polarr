@@ -7,9 +7,9 @@ import Capacitor
 /**
  Native AVPlayer-backed playback for Capacitor iOS.
 
- Queue / Connect / EQ stay in JS. This plugin owns decode, AVAudioSession
- activation, MPNowPlayingInfoCenter, and MPRemoteCommandCenter. Remote next/prev
- emit events so JS can advance the queue and call `load` again.
+ Queue UI / Connect / EQ stay in JS. This plugin owns decode, AVAudioSession,
+ MPNowPlayingInfoCenter, MPRemoteCommandCenter, and a CarPlay browse cache so
+ next/prev can advance while the WebView is suspended.
  */
 @objc(PolarrPlayerPlugin)
 public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
@@ -24,7 +24,11 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "seek", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getState", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "syncBrowse", returnType: CAPPluginReturnPromise),
     ]
+
+    /// CarPlay + remote commands reach the same instance Capacitor created.
+    public static weak var shared: PolarrPlayerPlugin?
 
     private var player: AVPlayer?
     private var timeObserver: Any?
@@ -34,6 +38,8 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private var trackId: String?
     private var currentUrl: String?
+    private var currentTitle: String = ""
+    private var currentArtist: String = ""
     private var artworkTask: URLSessionDataTask?
     private var metadataGeneration = UUID()
     private var cachedArtwork: (url: String, artwork: MPMediaItemArtwork)?
@@ -41,10 +47,55 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
     private var remoteCommandsWired = false
     private var lastEmittedPosition: Double = -1
 
+    private var browseItems: [PolarrBrowseItem] = []
+    private var browseIndex: Int = -1
+
+    public override func load() {
+        super.load()
+        PolarrPlayerPlugin.shared = self
+    }
+
     // MARK: - Capacitor API
 
     @objc func isAvailable(_ call: CAPPluginCall) {
         call.resolve(["available": true])
+    }
+
+    @objc func syncBrowse(_ call: CAPPluginCall) {
+        let rawItems = call.getArray("items", JSObject.self) ?? []
+        let currentId = call.getString("currentId")
+        var parsed: [PolarrBrowseItem] = []
+        parsed.reserveCapacity(rawItems.count)
+        for obj in rawItems {
+            guard let id = obj["id"] as? String, !id.isEmpty,
+                  let title = obj["title"] as? String, !title.isEmpty,
+                  let url = obj["url"] as? String, !url.isEmpty else { continue }
+            parsed.append(
+                PolarrBrowseItem(
+                    id: id,
+                    title: title,
+                    artist: (obj["artist"] as? String) ?? "",
+                    album: (obj["album"] as? String) ?? "",
+                    url: url,
+                    artworkUrl: obj["artworkUrl"] as? String,
+                    token: obj["token"] as? String,
+                    durationHint: obj["durationHint"] as? Double
+                )
+            )
+        }
+        DispatchQueue.main.async {
+            self.browseItems = parsed
+            if let currentId, let idx = parsed.firstIndex(where: { $0.id == currentId }) {
+                self.browseIndex = idx
+            } else if let trackId = self.trackId,
+                      let idx = parsed.firstIndex(where: { $0.id == trackId }) {
+                self.browseIndex = idx
+            } else if self.browseIndex >= parsed.count {
+                self.browseIndex = parsed.isEmpty ? -1 : 0
+            }
+            NotificationCenter.default.post(name: .polarrBrowseChanged, object: nil)
+            call.resolve(["count": parsed.count])
+        }
     }
 
     @objc func load(_ call: CAPPluginCall) {
@@ -77,6 +128,11 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
             self.replacePlayer(with: url)
             self.trackId = id
             self.currentUrl = urlString
+            self.currentTitle = title
+            self.currentArtist = artist
+            if let id, let idx = self.browseItems.firstIndex(where: { $0.id == id }) {
+                self.browseIndex = idx
+            }
 
             self.applyNowPlayingMetadata(
                 title: title,
@@ -94,6 +150,7 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
                 "artist": artist,
                 "album": album,
             ])
+            NotificationCenter.default.post(name: .polarrPlaybackChanged, object: nil)
 
             let finishLoad: () -> Void = {
                 let duration = self.currentDuration()
@@ -163,6 +220,7 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
             self.player?.play()
             self.syncNowPlayingPlayback(playing: true)
             self.notifyListeners("playing", data: self.statePayload(playing: true))
+            NotificationCenter.default.post(name: .polarrPlaybackChanged, object: nil)
             call.resolve()
         }
     }
@@ -172,6 +230,7 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
             self.player?.pause()
             self.syncNowPlayingPlayback(playing: false)
             self.notifyListeners("paused", data: self.statePayload(playing: false))
+            NotificationCenter.default.post(name: .polarrPlaybackChanged, object: nil)
             call.resolve()
         }
     }
@@ -296,9 +355,14 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         ) { [weak self] _ in
             guard let self else { return }
             self.syncNowPlayingPlayback(playing: false)
+            // Prefer native browse advance so CarPlay keeps going if JS is suspended.
+            if self.playAdjacentBrowse(delta: 1, reason: "ended") {
+                return
+            }
             self.notifyListeners("ended", data: [
                 "trackId": self.trackId as Any,
             ])
+            NotificationCenter.default.post(name: .polarrPlaybackChanged, object: nil)
         }
     }
 
@@ -412,11 +476,34 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
             return .success
         }
         center.nextTrackCommand.addTarget { [weak self] _ in
-            self?.notifyListeners("remote", data: ["action": "next"])
+            guard let self else { return .commandFailed }
+            let handled = self.playAdjacentBrowse(delta: 1, reason: "remote")
+            self.notifyListeners("remote", data: [
+                "action": "next",
+                "handled": handled,
+            ])
             return .success
         }
         center.previousTrackCommand.addTarget { [weak self] _ in
-            self?.notifyListeners("remote", data: ["action": "previous"])
+            guard let self else { return .commandFailed }
+            var handled = false
+            if self.currentPosition() > 3 {
+                self.seekPlayer(to: 0, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+                    self.syncNowPlayingPlayback(playing: (self.player?.rate ?? 0) > 0.01)
+                    self.notifyListeners("timeupdate", data: [
+                        "position": 0,
+                        "duration": self.currentDuration(),
+                        "playing": (self.player?.rate ?? 0) > 0.01,
+                    ])
+                }
+                handled = true
+            } else {
+                handled = self.playAdjacentBrowse(delta: -1, reason: "remote")
+            }
+            self.notifyListeners("remote", data: [
+                "action": "previous",
+                "handled": handled,
+            ])
             return .success
         }
         center.changePlaybackPositionCommand.addTarget { [weak self] event in
@@ -542,5 +629,114 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         artworkLock.lock()
         cachedArtwork = value
         artworkLock.unlock()
+    }
+
+    // MARK: - CarPlay / native browse
+
+    struct NowPlayingSnapshot {
+        let trackId: String?
+        let title: String
+        let artist: String
+        let playing: Bool
+    }
+
+    func carPlayBrowseItems() -> [PolarrBrowseItem] {
+        browseItems
+    }
+
+    func carPlayNowPlayingSnapshot() -> NowPlayingSnapshot? {
+        guard trackId != nil || !currentTitle.isEmpty else { return nil }
+        return NowPlayingSnapshot(
+            trackId: trackId,
+            title: currentTitle.isEmpty ? "Polarr" : currentTitle,
+            artist: currentArtist,
+            playing: (player?.rate ?? 0) > 0.01
+        )
+    }
+
+    func carPlayPlay() {
+        DispatchQueue.main.async {
+            self.activateSession()
+            self.player?.play()
+            self.syncNowPlayingPlayback(playing: true)
+            self.notifyListeners("playing", data: self.statePayload(playing: true))
+            self.notifyListeners("remote", data: ["action": "play"])
+            NotificationCenter.default.post(name: .polarrPlaybackChanged, object: nil)
+        }
+    }
+
+    func carPlayPause() {
+        DispatchQueue.main.async {
+            self.player?.pause()
+            self.syncNowPlayingPlayback(playing: false)
+            self.notifyListeners("paused", data: self.statePayload(playing: false))
+            self.notifyListeners("remote", data: ["action": "pause"])
+            NotificationCenter.default.post(name: .polarrPlaybackChanged, object: nil)
+        }
+    }
+
+    func carPlayPlayBrowseItem(id: String) {
+        DispatchQueue.main.async {
+            guard let idx = self.browseItems.firstIndex(where: { $0.id == id }) else { return }
+            self.browseIndex = idx
+            self.loadBrowseItem(self.browseItems[idx], reason: "carplay")
+        }
+    }
+
+    @discardableResult
+    private func playAdjacentBrowse(delta: Int, reason: String) -> Bool {
+        guard !browseItems.isEmpty else { return false }
+        let base: Int = {
+            if browseIndex >= 0 { return browseIndex }
+            if let trackId, let idx = browseItems.firstIndex(where: { $0.id == trackId }) {
+                return idx
+            }
+            return delta > 0 ? -1 : 0
+        }()
+        let nextIndex = base + delta
+        guard nextIndex >= 0, nextIndex < browseItems.count else { return false }
+        browseIndex = nextIndex
+        loadBrowseItem(browseItems[nextIndex], reason: reason)
+        return true
+    }
+
+    private func loadBrowseItem(_ item: PolarrBrowseItem, reason: String) {
+        guard let url = Self.playableURL(item.url) else { return }
+        ensureRemoteCommands()
+        activateSession()
+        replacePlayer(with: url)
+        trackId = item.id
+        currentUrl = item.url
+        currentTitle = item.title
+        currentArtist = item.artist
+
+        applyNowPlayingMetadata(
+            title: item.title,
+            artist: item.artist,
+            album: item.album,
+            durationHint: item.durationHint,
+            artworkUrl: item.artworkUrl,
+            token: item.token
+        )
+
+        player?.play()
+        syncNowPlayingPlayback(playing: true)
+
+        notifyListeners("trackchange", data: [
+            "trackId": item.id,
+            "url": item.url,
+            "title": item.title,
+            "artist": item.artist,
+            "album": item.album,
+            "reason": reason,
+        ])
+        notifyListeners("playing", data: statePayload(playing: true))
+        if reason == "ended" {
+            notifyListeners("ended", data: [
+                "trackId": item.id,
+                "advanced": true,
+            ])
+        }
+        NotificationCenter.default.post(name: .polarrPlaybackChanged, object: nil)
     }
 }

@@ -26,6 +26,7 @@ import {
   nativeIosPlayerPlay,
   nativeIosPlayerSeek,
   nativeIosPlayerStop,
+  nativeIosPlayerSyncBrowse,
   probeNativeIosPlayer,
   setNativeIosPlayerOwning,
   subscribeNativeIosPlayer,
@@ -3988,7 +3989,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     void (async () => {
       if (!(await probeNativeIosPlayer()) || cancelled) return;
 
-      const add = async <K extends "timeupdate" | "playing" | "paused" | "ended" | "error" | "remote">(
+      const add = async <
+        K extends
+          | "timeupdate"
+          | "playing"
+          | "paused"
+          | "ended"
+          | "error"
+          | "remote"
+          | "trackchange",
+      >(
         event: K,
         handler: Parameters<typeof subscribeNativeIosPlayer<K>>[1],
       ) => {
@@ -4023,8 +4033,32 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setMediaSessionPlaybackState("paused");
       });
 
-      await add("ended", () => {
+      await add("trackchange", (data) => {
+        if (followingRemoteRef.current || !isNativeIosPlayerOwning()) return;
+        const id = typeof data.trackId === "string" ? data.trackId : null;
+        if (!id) return;
+        const fromQueue = queueRef.current.find((t) => t.id === id);
+        if (!fromQueue) return;
+        trackRef.current = fromQueue;
+        setTrack(fromQueue);
+        progressRef.current = 0;
+        setProgress(0);
+        if (fromQueue.duration && fromQueue.duration > 0) {
+          durationRef.current = fromQueue.duration;
+          setDuration(fromQueue.duration);
+        }
+        publishRef.current({
+          track: fromQueue,
+          progress: 0,
+          playing: playingRef.current,
+          ownerId: tabIdRef.current,
+        });
+      });
+
+      await add("ended", (data) => {
         if (followingRemoteRef.current || !isOwner()) return;
+        // Native already advanced via browse cache (CarPlay / background).
+        if (data.advanced) return;
         void (async () => {
           const current = trackRef.current;
           if (!current) return;
@@ -4035,9 +4069,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
       await add("remote", (data) => {
         if (followingRemoteRef.current) return;
-        if (data.action === "next") next();
-        else if (data.action === "previous") prev();
-        else if (data.action === "play" && !playingRef.current) toggle();
+        if (data.action === "next") {
+          if (!data.handled) next();
+        } else if (data.action === "previous") {
+          if (!data.handled) prev();
+        } else if (data.action === "play" && !playingRef.current) toggle();
         else if (data.action === "pause" && playingRef.current) toggle();
         else if (data.action === "seek" && Number.isFinite(data.position)) {
           const dur = durationRef.current;
@@ -4062,6 +4098,50 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       });
     };
   }, [next, prev, seek, toggle]);
+
+  // Keep CarPlay / native remote next-prev queue in sync with JS.
+  useEffect(() => {
+    if (nativeClientPlatform() !== "ios") return;
+    if (!isNativeIosPlayerOwning()) return;
+    if (isRemotePlayback) return;
+
+    let cancelled = false;
+    void (async () => {
+      if (!(await probeNativeIosPlayer()) || cancelled) return;
+      const q = queue;
+      const current = track;
+      if (!current) {
+        await nativeIosPlayerSyncBrowse({ items: [], currentId: null });
+        return;
+      }
+      const idx = Math.max(
+        0,
+        q.findIndex((t) => t.id === current.id),
+      );
+      const window = q.slice(idx, idx + 25);
+      const items = window.map((t) => ({
+        id: t.id,
+        title: t.title,
+        artist:
+          t.resolveArtist || primaryArtistName(t.artist) || t.artist || "",
+        album: t.album || "",
+        url: audioSrcFor(t),
+        artworkUrl: mediaSessionArtworkUrl(t.coverPath),
+        durationHint:
+          typeof t.duration === "number" && t.duration > 0
+            ? t.duration
+            : undefined,
+      }));
+      await nativeIosPlayerSyncBrowse({
+        items,
+        currentId: current.id,
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [queue, track, isRemotePlayback, playing]);
 
   useEffect(() => {
     if (!track || isRemotePlayback) {

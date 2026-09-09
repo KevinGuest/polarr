@@ -15,6 +15,7 @@
 		8F3A1C2F2A1B4E6F00168520 /* PolarrVolumePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F3A1C2E2A1B4E6F00168520 /* PolarrVolumePlugin.swift */; };
 		8F3A1C312A1B4E6F00168521 /* PolarrNowPlayingPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F3A1C302A1B4E6F00168521 /* PolarrNowPlayingPlugin.swift */; };
 		8F3A1C332A1B4E6F00168522 /* PolarrPlayerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F3A1C322A1B4E6F00168522 /* PolarrPlayerPlugin.swift */; };
+		8F3A1C352A1B4E6F00168523 /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F3A1C342A1B4E6F00168523 /* CarPlaySceneDelegate.swift */; };
 		504EC30D1FED79650016851F /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30B1FED79650016851F /* Main.storyboard */; };
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
@@ -32,6 +33,8 @@
 		8F3A1C2E2A1B4E6F00168520 /* PolarrVolumePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolarrVolumePlugin.swift; sourceTree = "<group>"; };
 		8F3A1C302A1B4E6F00168521 /* PolarrNowPlayingPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolarrNowPlayingPlugin.swift; sourceTree = "<group>"; };
 		8F3A1C322A1B4E6F00168522 /* PolarrPlayerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolarrPlayerPlugin.swift; sourceTree = "<group>"; };
+		8F3A1C342A1B4E6F00168523 /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
+		8F3A1C362A1B4E6F00168524 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		504EC30C1FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
 		504EC30E1FED79650016851F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		504EC3111FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
@@ -90,6 +93,8 @@
 				8F3A1C2E2A1B4E6F00168520 /* PolarrVolumePlugin.swift */,
 				8F3A1C302A1B4E6F00168521 /* PolarrNowPlayingPlugin.swift */,
 				8F3A1C322A1B4E6F00168522 /* PolarrPlayerPlugin.swift */,
+				8F3A1C342A1B4E6F00168523 /* CarPlaySceneDelegate.swift */,
+				8F3A1C362A1B4E6F00168524 /* App.entitlements */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
@@ -230,6 +235,7 @@
 				8F3A1C2F2A1B4E6F00168520 /* PolarrVolumePlugin.swift in Sources */,
 				8F3A1C312A1B4E6F00168521 /* PolarrNowPlayingPlugin.swift in Sources */,
 				8F3A1C332A1B4E6F00168522 /* PolarrPlayerPlugin.swift in Sources */,
+				8F3A1C352A1B4E6F00168523 /* CarPlaySceneDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -367,8 +373,9 @@
 			baseConfigurationReference = FC68EB0AF532CFC21C3344DD /* Pods-App.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 640;
+				CURRENT_PROJECT_VERSION = 641;
 				DEVELOPMENT_TEAM = C7Z88WS83P;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
@@ -388,8 +395,9 @@
 			baseConfigurationReference = AF51FD2D460BCFE21FA515B2 /* Pods-App.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 640;
+				CURRENT_PROJECT_VERSION = 641;
 				DEVELOPMENT_TEAM = C7Z88WS83P;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;

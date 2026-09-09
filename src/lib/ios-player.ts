@@ -42,20 +42,35 @@ export type NativePlayerRemoteAction =
   | "previous"
   | "seek";
 
+export type NativePlayerBrowseItem = {
+  id: string;
+  title: string;
+  artist: string;
+  album?: string;
+  url: string;
+  artworkUrl?: string | null;
+  durationHint?: number;
+};
+
 export type NativePlayerEvents = {
   timeupdate: { position: number; duration: number; playing?: boolean };
   playing: NativePlayerState;
   paused: NativePlayerState;
-  ended: { trackId?: string | null };
+  ended: { trackId?: string | null; advanced?: boolean };
   trackchange: {
     trackId?: string | null;
     url: string;
     title?: string;
     artist?: string;
     album?: string;
+    reason?: string;
   };
   error: { code: string; message: string; url?: string };
-  remote: { action: NativePlayerRemoteAction; position?: number };
+  remote: {
+    action: NativePlayerRemoteAction;
+    position?: number;
+    handled?: boolean;
+  };
 };
 
 type NativePlayerPlugin = {
@@ -80,6 +95,19 @@ type NativePlayerPlugin = {
   seek(options: { position: number }): Promise<{ position: number }>;
   stop(): Promise<void>;
   getState(): Promise<NativePlayerState>;
+  syncBrowse(options: {
+    items: Array<{
+      id: string;
+      title: string;
+      artist: string;
+      album?: string;
+      url: string;
+      artworkUrl?: string;
+      token?: string;
+      durationHint?: number;
+    }>;
+    currentId?: string;
+  }): Promise<{ count: number }>;
   addListener(
     event: string,
     cb: (data: Record<string, unknown>) => void,
@@ -225,6 +253,38 @@ export async function nativeIosPlayerGetState(): Promise<NativePlayerState | nul
   } catch {
     return null;
   }
+}
+
+export async function nativeIosPlayerSyncBrowse(input: {
+  items: NativePlayerBrowseItem[];
+  currentId?: string | null;
+}): Promise<void> {
+  const native = resolvePlugin();
+  if (!native || !(await probeNativeIosPlayer())) return;
+  const items = input.items
+    .filter((item) => item.id && item.url && item.title)
+    .slice(0, 40)
+    .map((item) => {
+      const token = artworkToken(item.artworkUrl);
+      return {
+        id: item.id,
+        title: item.title,
+        artist: item.artist || "",
+        ...(item.album ? { album: item.album } : {}),
+        url: item.url,
+        ...(item.artworkUrl ? { artworkUrl: item.artworkUrl } : {}),
+        ...(token ? { token } : {}),
+        ...(Number.isFinite(item.durationHint) && Number(item.durationHint) > 0
+          ? { durationHint: Number(item.durationHint) }
+          : {}),
+      };
+    });
+  await native
+    .syncBrowse({
+      items,
+      ...(input.currentId ? { currentId: input.currentId } : {}),
+    })
+    .catch(() => null);
 }
 
 type ListenerHandle = { remove: () => void };

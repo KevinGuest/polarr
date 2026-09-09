@@ -11,6 +11,12 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { AUTH_CONTROL, AUTH_SUBMIT, AuthFieldGroup } from "@/components/auth-screen";
 import { InsetGroup } from "@/components/media-shelf";
+import {
+  AppleMusicMark,
+  DeezerMark,
+  SpotifyMark,
+  YoutubeMusicMark,
+} from "@/components/service-brand-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -58,6 +64,7 @@ import { invalidateDiscordPresenceCache } from "@/components/player-provider";
 import { toastError, toastSaved, toastSuccess } from "@/lib/toast";
 import {
   ArrowLeft,
+  Check,
   ChevronRight,
   Info,
   Monitor,
@@ -104,30 +111,35 @@ const SERVICES: {
   label: string;
   hint: string;
   placeholder: string;
+  Mark: typeof SpotifyMark;
 }[] = [
   {
     id: "spotify",
     label: "Spotify",
-    hint: "Paste a public playlist link",
+    hint: "Public playlist or album link",
     placeholder: "https://open.spotify.com/playlist/…",
+    Mark: SpotifyMark,
   },
   {
     id: "youtube",
     label: "YouTube Music",
     hint: "Playlist or mix link",
     placeholder: "https://music.youtube.com/playlist?list=…",
+    Mark: YoutubeMusicMark,
   },
   {
     id: "deezer",
     label: "Deezer",
-    hint: "Works with no extra setup",
+    hint: "Public playlist link",
     placeholder: "https://www.deezer.com/playlist/…",
+    Mark: DeezerMark,
   },
   {
     id: "apple",
     label: "Apple Music",
     hint: "Coming soon",
     placeholder: "https://music.apple.com/…/playlist/…",
+    Mark: AppleMusicMark,
   },
 ];
 
@@ -376,7 +388,7 @@ export function SettingsClient() {
   const [playlistUrl, setPlaylistUrl] = useState("");
   const [playlistName, setPlaylistName] = useState("");
   const [serviceReady, setServiceReady] = useState<Record<string, boolean>>({
-    spotify: false,
+    spotify: true,
     youtube: true,
     deezer: true,
     apple: false,
@@ -1008,7 +1020,7 @@ export function SettingsClient() {
             <InsetGroup>
               <SettingsRow
                 title="Playlists"
-                detail="Import and manage playlist connections"
+                detail="Import from Spotify, YouTube Music, or Deezer"
                 onClick={() => setTab("playlists")}
               />
               <SettingsRow
@@ -1096,10 +1108,12 @@ export function SettingsClient() {
       {tab === "playlists" ? (
         <section className="space-y-3">
           <h2 className="text-[1.375rem] font-semibold tracking-tight">
-            Import playlist
+            Import
           </h2>
           <p className="text-[15px] text-muted-foreground">
-            Pull a playlist from Spotify, YouTube Music, or Deezer with a link.
+            Paste a public Spotify playlist or album link, or a YouTube Music /
+            Deezer playlist link. Matched tracks are added to a new Polarr
+            playlist in your library.
           </p>
           {importResult ? (
             <InsetGroup>
@@ -1122,7 +1136,7 @@ export function SettingsClient() {
             className={AUTH_SUBMIT}
             onClick={() => setImportOpen(true)}
           >
-            Import playlist
+            Import from link
           </Button>
         </section>
       ) : null}
@@ -1546,92 +1560,126 @@ export function SettingsClient() {
           setImportOpen(open);
         }}
       >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Import playlist</DialogTitle>
-            <DialogDescription>
-              Pick a service and paste the playlist link.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent
+          className={cn(
+            "gap-0 overflow-hidden p-0",
+            "w-[min(100vw-1.25rem,26rem)] max-w-none",
+            "max-h-[min(92dvh,40rem)]",
+            "rounded-2xl sm:rounded-2xl",
+          )}
+        >
+          <div className="max-h-[min(92dvh,40rem)] overflow-y-auto overscroll-contain">
+            <DialogHeader className="gap-1.5 px-5 pb-4 pt-5 pr-12 sm:px-6 sm:pt-6">
+              <DialogTitle className="text-[1.375rem] tracking-tight">
+                Import from link
+              </DialogTitle>
+              <DialogDescription className="text-[15px] leading-snug">
+                Pick a service, paste a public link, and we’ll match tracks into
+                a new playlist.
+              </DialogDescription>
+            </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {SERVICES.map((s) => {
-              const ready =
-                serviceReady[s.id] !== false ||
-                s.id === "youtube" ||
-                s.id === "deezer";
-              const disabled = s.id === "apple";
-              return (
-                <button
-                  key={s.id}
+            <div className="space-y-5 px-5 pb-5 sm:px-6 sm:pb-6">
+              <InsetGroup>
+                {SERVICES.map((s) => {
+                  const disabled =
+                    s.id === "apple" || serviceReady[s.id] === false;
+                  const selected = service === s.id;
+                  const Mark = s.Mark;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => setService(s.id)}
+                      className={cn(
+                        "flex w-full items-center gap-3.5 px-4 py-3.5 text-left transition-colors",
+                        selected ? "bg-white/[0.08]" : "hover:bg-white/[0.04]",
+                        disabled && "cursor-not-allowed opacity-45",
+                      )}
+                    >
+                      <Mark className="size-9" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[16px] font-semibold text-foreground">
+                          {s.label}
+                        </span>
+                        <span className="mt-0.5 block text-sm text-muted-foreground">
+                          {disabled && s.id === "apple" ? "Coming soon" : s.hint}
+                        </span>
+                      </span>
+                      {selected && !disabled ? (
+                        <Check
+                          className="size-5 shrink-0 text-foreground"
+                          strokeWidth={2.5}
+                          aria-hidden
+                        />
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </InsetGroup>
+
+              <AuthFieldGroup>
+                <div className="px-4 pb-2 pt-3">
+                  <Label
+                    htmlFor="import-url"
+                    className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground"
+                  >
+                    Link
+                  </Label>
+                  <Input
+                    id="import-url"
+                    value={playlistUrl}
+                    onChange={(e) => setPlaylistUrl(e.target.value)}
+                    placeholder={active.placeholder}
+                    autoComplete="off"
+                    inputMode="url"
+                    enterKeyHint="done"
+                    className={cn(AUTH_CONTROL, "h-12 px-0")}
+                  />
+                </div>
+                <div className="px-4 pb-3 pt-2">
+                  <Label
+                    htmlFor="import-name"
+                    className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground"
+                  >
+                    Name · optional
+                  </Label>
+                  <Input
+                    id="import-name"
+                    value={playlistName}
+                    onChange={(e) => setPlaylistName(e.target.value)}
+                    placeholder="Uses the playlist title if empty"
+                    maxLength={80}
+                    className={cn(AUTH_CONTROL, "h-12 px-0")}
+                  />
+                </div>
+              </AuthFieldGroup>
+
+              <div className="flex flex-col gap-2 pt-1">
+                <Button
                   type="button"
-                  disabled={disabled}
-                  onClick={() => {
-                    setService(s.id);
-                  }}
-                  className={cn(
-                    "rounded-lg border px-2 py-3 text-center text-sm font-medium transition-colors",
-                    service === s.id
-                      ? "border-foreground bg-muted"
-                      : "border-border hover:border-foreground/40",
-                    disabled && "cursor-not-allowed opacity-50",
-                  )}
+                  className={cn(AUTH_SUBMIT, "mt-0")}
+                  disabled={
+                    importing ||
+                    service === "apple" ||
+                    !playlistUrl.trim()
+                  }
+                  onClick={() => void runImport()}
                 >
-                  {s.label}
-                  {!ready && s.id === "spotify" ? (
-                    <span className="mt-1 block text-[10px] font-normal text-muted-foreground">
-                      Needs setup
-                    </span>
-                  ) : null}
-                  {s.id === "apple" ? (
-                    <span className="mt-1 block text-[10px] font-normal text-muted-foreground">
-                      Soon
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="import-url">{active.hint}</Label>
-              <Input
-                id="import-url"
-                value={playlistUrl}
-                onChange={(e) => setPlaylistUrl(e.target.value)}
-                placeholder={active.placeholder}
-                autoComplete="off"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="import-name">Name (optional)</Label>
-              <Input
-                id="import-name"
-                value={playlistName}
-                onChange={(e) => setPlaylistName(e.target.value)}
-                placeholder="Uses the playlist title if empty"
-                maxLength={80}
-              />
+                  {importing ? "Importing…" : "Import"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-12 w-full text-[15px] text-muted-foreground"
+                  onClick={() => setImportOpen(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
             </div>
           </div>
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setImportOpen(false)}
-            >
-              Close
-            </Button>
-            <Button
-              type="button"
-              disabled={importing || service === "apple"}
-              onClick={() => void runImport()}
-            >
-              {importing ? "Importing…" : "Import"}
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

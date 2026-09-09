@@ -83,7 +83,6 @@ const adminNavGroups = [
     items: [
       { href: "/admin/lidarr", label: "Sources", icon: Radio },
       { href: "/admin/quality", label: "Quality", icon: Gauge },
-      { href: "/admin/import", label: "Import", icon: Download },
       { href: "/admin/lyrics", label: "Lyrics", icon: Mic2 },
       { href: "/admin/email", label: "SMTP", icon: AtSign },
       { href: "/admin/notifications", label: "Notifications", icon: Bell },

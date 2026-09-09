@@ -1,10 +1,9 @@
 /**
- * Fetch playlist tracks from streaming service URLs (no CSV export).
+ * Fetch playlist/album tracks from public streaming URLs (user Account import).
  * Spotify · YouTube Music · Deezer (+ Apple Music when MusicKit is configured).
  */
 
 import { spawn } from "node:child_process";
-import { getSettings } from "@/lib/db";
 import { ensureYtDlp } from "@/lib/tools";
 import {
   PLAYLIST_IMPORT_MAX,
@@ -123,17 +122,26 @@ function assertSafePlaylistUrl(
   return null;
 }
 
-function spotifyPlaylistId(url: string): string | null {
+type SpotifyEmbedKind = "playlist" | "album";
+
+function spotifyEmbedTarget(
+  url: string,
+): { kind: SpotifyEmbedKind; id: string } | null {
   const trimmed = url.trim();
-  const uri = trimmed.match(/spotify:playlist:([a-zA-Z0-9]+)/i);
-  if (uri?.[1]) return uri[1];
+  const uri = trimmed.match(/spotify:(playlist|album):([a-zA-Z0-9]+)/i);
+  if (uri?.[1] && uri[2]) {
+    return { kind: uri[1].toLowerCase() as SpotifyEmbedKind, id: uri[2] };
+  }
   try {
     const u = new URL(trimmed);
-    const m = u.pathname.match(/\/playlist\/([a-zA-Z0-9]+)/i);
-    return m?.[1] || null;
+    const m = u.pathname.match(/\/(playlist|album)\/([a-zA-Z0-9]+)/i);
+    if (m?.[1] && m[2]) {
+      return { kind: m[1].toLowerCase() as SpotifyEmbedKind, id: m[2] };
+    }
   } catch {
-    return null;
+    /* fall through */
   }
+  return null;
 }
 
 function deezerPlaylistId(url: string): string | null {
@@ -147,133 +155,137 @@ function deezerPlaylistId(url: string): string | null {
   }
 }
 
-let spotifyTokenCache: { token: string; exp: number } | null = null;
-
-async function spotifyAccessToken(): Promise<string | null> {
-  const s = getSettings();
-  const id = s.spotifyClientId.trim();
-  const secret = s.spotifyClientSecret.trim();
-  if (!id || !secret) return null;
-
-  if (spotifyTokenCache && Date.now() < spotifyTokenCache.exp - 60_000) {
-    return spotifyTokenCache.token;
-  }
-
-  const basic = Buffer.from(`${id}:${secret}`).toString("base64");
-  const res = await fetch("https://accounts.spotify.com/api/token", {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${basic}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-    cache: "no-store",
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as {
-    access_token?: string;
-    expires_in?: number;
-  };
-  if (!data.access_token) return null;
-  spotifyTokenCache = {
-    token: data.access_token,
-    exp: Date.now() + (data.expires_in || 3600) * 1000,
-  };
-  return data.access_token;
+/** Paste-a-link Spotify import — no admin credentials. */
+export function spotifyImportReady(): boolean {
+  return true;
 }
 
-export function spotifyImportConfigured(): boolean {
-  const s = getSettings();
-  return Boolean(s.spotifyClientId.trim() && s.spotifyClientSecret.trim());
+/**
+ * User-facing public playlist/album import via Spotify’s embed page
+ * (`__NEXT_DATA__` trackList). No Client ID / Secret.
+ */
+async function fetchSpotifyFromEmbed(
+  kind: SpotifyEmbedKind,
+  id: string,
+): Promise<RemotePlaylist | { error: string }> {
+  const label = kind === "album" ? "album" : "playlist";
+  const embedUrl = `https://open.spotify.com/embed/${kind}/${encodeURIComponent(id)}`;
+  const res = await fetch(embedUrl, {
+    headers: {
+      Accept: "text/html,application/xhtml+xml",
+      "Accept-Language": "en-US,en;q=0.9",
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    },
+    cache: "no-store",
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (res.status === 404) {
+    return {
+      error: `${label[0]!.toUpperCase()}${label.slice(1)} not found (is the link public?).`,
+    };
+  }
+  if (!res.ok) {
+    return { error: `Spotify returned ${res.status}. Try again later.` };
+  }
+
+  const html = await res.text();
+  const match = html.match(
+    /<script id="__NEXT_DATA__"[^>]*>(.*?)<\/script>/s,
+  );
+  if (!match?.[1]) {
+    return {
+      error: `Couldn’t read that Spotify ${label}. Make sure the link is public.`,
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(match[1]);
+  } catch {
+    return { error: `Couldn’t parse the Spotify ${label} response.` };
+  }
+
+  const pageProps = (
+    parsed as {
+      props?: {
+        pageProps?: {
+          status?: number;
+          state?: {
+            data?: {
+              entity?: {
+                name?: string;
+                title?: string;
+                trackList?: {
+                  title?: string;
+                  subtitle?: string;
+                  entityType?: string;
+                }[];
+              };
+            };
+          };
+        };
+      };
+    }
+  )?.props?.pageProps;
+
+  if (pageProps?.status === 404) {
+    return {
+      error: `${label[0]!.toUpperCase()}${label.slice(1)} not found (is the link public?).`,
+    };
+  }
+
+  const entity = pageProps?.state?.data?.entity;
+  const trackList = entity?.trackList;
+  if (!Array.isArray(trackList) || trackList.length === 0) {
+    return {
+      error: `No tracks on that ${label} (private links aren’t readable from a URL alone).`,
+    };
+  }
+
+  const tracks: ImportTrackRow[] = [];
+  const albumName =
+    kind === "album"
+      ? (entity?.name || entity?.title || "").trim() || undefined
+      : undefined;
+  for (const row of trackList) {
+    if (row.entityType && row.entityType !== "track") continue;
+    const title = (row.title || "").trim();
+    const artist = (row.subtitle || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!title || !artist) continue;
+    tracks.push({
+      title,
+      artist,
+      album: albumName,
+    });
+    if (tracks.length >= PLAYLIST_IMPORT_MAX) break;
+  }
+
+  if (tracks.length === 0) {
+    return { error: `No usable tracks found on that Spotify ${label}.` };
+  }
+
+  const name = (
+    entity?.name ||
+    entity?.title ||
+    (kind === "album" ? "Spotify album" : "Spotify playlist")
+  ).trim();
+  return { name, tracks, service: "spotify" };
 }
 
 async function fetchSpotifyPlaylist(
   url: string,
 ): Promise<RemotePlaylist | { error: string }> {
-  if (!spotifyImportConfigured()) {
+  const target = spotifyEmbedTarget(url);
+  if (!target) {
     return {
-      error:
-        "Spotify import needs API credentials. Ask an admin to add a Spotify Client ID & Secret under Admin → Import (or set POLARR_SPOTIFY_CLIENT_ID / POLARR_SPOTIFY_CLIENT_SECRET).",
+      error: "Paste a Spotify playlist or album link.",
     };
   }
-  const id = spotifyPlaylistId(url);
-  if (!id) {
-    return {
-      error: "That doesn’t look like a Spotify playlist link.",
-    };
-  }
-  const token = await spotifyAccessToken();
-  if (!token) {
-    return {
-      error: "Couldn’t authenticate with Spotify. Check the Client ID & Secret.",
-    };
-  }
-
-  type SpotTrack = {
-    name?: string;
-    artists?: { name?: string }[];
-    album?: { name?: string };
-  };
-
-  const metaRes = await fetch(
-    `https://api.spotify.com/v1/playlists/${id}?fields=name`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: "no-store",
-      signal: AbortSignal.timeout(12_000),
-    },
-  );
-  if (metaRes.status === 404) {
-    return { error: "Playlist not found (is it public?)." };
-  }
-  if (!metaRes.ok) {
-    return { error: `Spotify returned ${metaRes.status}. Try again later.` };
-  }
-  const meta = (await metaRes.json()) as { name?: string };
-  const name = (meta.name || "Spotify playlist").trim();
-
-  const tracks: ImportTrackRow[] = [];
-  let nextUrl: string | null =
-    `https://api.spotify.com/v1/playlists/${id}/tracks?limit=100&fields=items(track(name,artists(name),album(name))),next`;
-
-  while (nextUrl && tracks.length < PLAYLIST_IMPORT_MAX) {
-    const res = await fetch(nextUrl, {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: "no-store",
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!res.ok) {
-      return { error: `Spotify returned ${res.status} while loading tracks.` };
-    }
-    const data = (await res.json()) as {
-      items?: { track?: SpotTrack | null }[];
-      next?: string | null;
-    };
-    for (const item of data.items || []) {
-      const t = item.track;
-      if (!t?.name) continue;
-      const artist = (t.artists || [])
-        .map((a) => a.name || "")
-        .filter(Boolean)
-        .join(", ");
-      if (!artist) continue;
-      tracks.push({
-        title: t.name.trim(),
-        artist: artist.trim(),
-        album: t.album?.name?.trim() || undefined,
-      });
-      if (tracks.length >= PLAYLIST_IMPORT_MAX) break;
-    }
-    nextUrl = data.next || null;
-  }
-
-  if (tracks.length === 0) {
-    return {
-      error:
-        "No tracks on that playlist (private playlists need a different setup).",
-    };
-  }
-  return { name, tracks, service: "spotify" };
+  return fetchSpotifyFromEmbed(target.kind, target.id);
 }
 
 async function fetchDeezerPlaylist(

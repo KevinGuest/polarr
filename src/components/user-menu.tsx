@@ -282,7 +282,7 @@ export function ProfileDrawer({
             <div className="border-t border-border/60">
               <DrawerRow
                 icon={Settings}
-                label="Settings and privacy"
+                label="Settings"
                 onClick={() => go("/settings")}
               />
               <DrawerRow

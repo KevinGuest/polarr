@@ -7,7 +7,7 @@ import {
 } from "@/lib/playlist-import";
 import {
   fetchRemotePlaylist,
-  spotifyImportConfigured,
+  spotifyImportReady,
   type PlaylistService,
 } from "@/lib/playlist-services";
 
@@ -29,7 +29,7 @@ export async function GET() {
   if (!user) return json({ error: "Unauthorized" }, { status: 401 });
   return json({
     services: {
-      spotify: spotifyImportConfigured(),
+      spotify: spotifyImportReady(),
       youtube: true,
       deezer: true,
       apple: false,

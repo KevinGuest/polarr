@@ -214,17 +214,6 @@ export function AdminInfoClient() {
                 <div className="mt-2 text-sm font-semibold">{data.lidarr}</div>
               </Link>
               <Link
-                href="/admin/import"
-                className="rounded-xl border border-border px-4 py-4 transition-colors hover:border-foreground/30"
-              >
-                <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                  Import
-                </div>
-                <div className="mt-2 text-sm font-semibold">
-                  Spotify playlists
-                </div>
-              </Link>
-              <Link
                 href="/admin/email"
                 className="rounded-xl border border-border px-4 py-4 transition-colors hover:border-foreground/30"
               >

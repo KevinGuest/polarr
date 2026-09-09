@@ -112,7 +112,11 @@ The desktop app checks:
 
 `https://github.com/KevinGuest/polarr/releases/latest/download/latest.json`
 
-On launch (after ~4s) and via **⋯ → Check for updates…**. When a newer `desktop-v*` release exists, the menu shows **Update to v…**; Windows installs passively and the app restarts.
+On launch the desktop shell opens a small updater window, checks
+`https://github.com/KevinGuest/polarr/releases/latest/download/latest.json`,
+and if a newer build exists downloads it, replaces the app, and relaunches.
+Windows uses the NSIS installer (`installMode: passive`); macOS uses the
+signed `.app.tar.gz` updater artifact. There is no separate update helper.
 
 **Required GitHub secret** (one-time — keep the private key safe; losing it blocks future updates):
 

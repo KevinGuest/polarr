@@ -190,3 +190,53 @@ jobs:
               gh release delete-asset "$tag" latest.json --yes
             fi
           done
+
+      # Older Mac clients (≤0.2.22) check for a non-existent `macos-universal`
+      # platform key and silently skip updates. Alias it to the universal
+      # darwin artifact so those installs can still climb to a fixed build.
+      - name: Alias macos-universal in latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mapfile -t tags < <(
+            gh api "repos/${{ github.repository }}/releases" --paginate \
+              --jq '.[] | select(.draft == false and (.tag_name | startswith("desktop-v"))) | .tag_name'
+          )
+          latest="${tags[0]:-}"
+          if [ -z "$latest" ]; then
+            echo "No desktop release"
+            exit 0
+          fi
+          tmp="$(mktemp)"
+          if ! gh release download "$latest" -p latest.json -O "$tmp"; then
+            echo "No latest.json on ${latest}"
+            exit 0
+          fi
+          python3 - "$tmp" <<'PY'
+          import json, sys
+          path = sys.argv[1]
+          with open(path) as f:
+              data = json.load(f)
+          platforms = data.setdefault("platforms", {})
+          src = (
+              platforms.get("darwin-aarch64")
+              or platforms.get("darwin-aarch64-app")
+              or platforms.get("darwin-x86_64")
+              or platforms.get("darwin-x86_64-app")
+          )
+          if not src:
+              print("No darwin platform to alias")
+              sys.exit(0)
+          if platforms.get("macos-universal") == src:
+              print("macos-universal already aliased")
+              sys.exit(0)
+          platforms["macos-universal"] = src
+          with open(path, "w") as f:
+              json.dump(data, f, indent=2)
+              f.write("\n")
+          print("Aliased macos-universal ->", src.get("url"))
+          PY
+          gh release delete-asset "$latest" latest.json --yes || true
+          gh release upload "$latest" "$tmp" --clobber
+          echo "Uploaded patched latest.json to ${latest}"

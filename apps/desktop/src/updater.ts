@@ -2,11 +2,12 @@ import { getVersion } from "@tauri-apps/api/app";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 
-/** Universal macOS builds use a custom updater target in latest.json. */
-export function updaterCheckOptions() {
-  if (typeof navigator !== "undefined" && navigator.platform?.includes("Mac")) {
-    return { target: "macos-universal" as const };
-  }
+/**
+ * Use the plugin default platform keys (`darwin-aarch64` / `darwin-x86_64`,
+ * plus `-app` / Windows NSIS variants). Do not pass a custom `target` —
+ * CI publishes those keys for the universal `.app.tar.gz`, not `macos-universal`.
+ */
+export function updaterCheckOptions(): Record<string, never> {
   return {};
 }
 
@@ -26,7 +27,8 @@ export async function getAppVersion(): Promise<string> {
 export async function findAppUpdate(): Promise<Update | null> {
   try {
     return (await check(updaterCheckOptions())) ?? null;
-  } catch {
+  } catch (err) {
+    console.error("polarr updater: check failed", err);
     return null;
   }
 }

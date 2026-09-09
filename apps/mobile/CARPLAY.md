@@ -17,9 +17,16 @@ Phone UI stays Capacitor + Main storyboard (no phone `UIWindowScene`).
 
 1. Request **CarPlay Audio** at [developer.apple.com/contact/carplay](https://developer.apple.com/contact/carplay/) and sign the CarPlay addendum.
 2. When Apple enables the managed capability on team `C7Z88WS83P` / App ID `app.polarr.mobile`, regenerate the provisioning profile so it includes CarPlay Audio.
-3. Xcode → Signing: ensure the profile with CarPlay is selected (Automatic usually picks it up after the capability exists).
+3. Add to `App/App.entitlements`:
 
-Without Apple’s grant, the app builds but **will not show on the CarPlay home screen** (Simulator also needs a CarPlay-capable profile).
+```xml
+<key>com.apple.developer.carplay-audio</key>
+<true/>
+```
+
+4. Xcode → Signing: ensure the profile with CarPlay is selected (Automatic usually picks it up after the capability exists).
+
+**Until then:** leave the key out of `App.entitlements`. The CarPlay scene code ships in the binary, but signing fails if the entitlement is claimed without Apple’s grant, and the app will not show on the CarPlay home screen.
 
 ## Test plan
 

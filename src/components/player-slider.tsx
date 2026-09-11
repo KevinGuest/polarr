@@ -15,6 +15,8 @@ type PlayerSliderProps = {
   tone?: "on-dark" | "default";
   /** When false, progress scrub is visual-only (non-seekable stream). */
   seekable?: boolean;
+  /** Force-disable (e.g. remote Connect volume belongs to the owner device). */
+  disabled?: boolean;
 };
 
 export function PlayerSlider({
@@ -25,6 +27,7 @@ export function PlayerSlider({
   variant = "progress",
   tone = "on-dark",
   seekable = true,
+  disabled: disabledProp = false,
 }: PlayerSliderProps) {
   const [active, setActive] = useState(false);
   /** Hold the scrub value so live timeupdate doesn't yank the thumb mid-drag. */
@@ -36,7 +39,7 @@ export function PlayerSlider({
       : Math.round(clamped * 100);
 
   const onDark = tone === "on-dark";
-  const disabled = variant === "progress" && !seekable;
+  const disabled = disabledProp || (variant === "progress" && !seekable);
 
   useEffect(() => {
     if (!active) return;

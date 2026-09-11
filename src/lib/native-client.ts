@@ -90,9 +90,30 @@ export function nativeSessionToken(): string | null {
   return localStorage.getItem(NATIVE_TOKEN_KEY);
 }
 
+async function syncNativeSignedIn(signedIn: boolean): Promise<void> {
+  if (!isNativeClient() || nativeClientPlatform() !== "ios") return;
+  try {
+    const plugin = (
+      window as Window & {
+        Capacitor?: {
+          Plugins?: {
+            PolarrOffline?: {
+              setSignedIn?: (opts: { signedIn: boolean }) => Promise<void>;
+            };
+          };
+        };
+      }
+    ).Capacitor?.Plugins?.PolarrOffline;
+    await plugin?.setSignedIn?.({ signedIn });
+  } catch {
+    /* CarPlay auth flag is best-effort */
+  }
+}
+
 export async function persistNativeSessionToken(token: unknown): Promise<void> {
   if (!isNativeClient() || typeof token !== "string" || !token.trim()) return;
   localStorage.setItem(NATIVE_TOKEN_KEY, token.trim());
+  await syncNativeSignedIn(true);
   await window.__POLARR_NATIVE_CLIENT__?.refreshMediaTicket?.();
 }
 
@@ -103,6 +124,7 @@ export function clearNativeSessionToken(): void {
     window.__POLARR_NATIVE_CLIENT__.mediaTicket = null;
     window.__POLARR_NATIVE_CLIENT__.mediaTicketExpiresAt = null;
   }
+  void syncNativeSignedIn(false);
 }
 
 export function isNativeMediaPath(pathname: string): boolean {

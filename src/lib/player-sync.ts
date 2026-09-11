@@ -194,6 +194,30 @@ export function heartbeatDevice(
   return next;
 }
 
+/**
+ * Drop a device from Connect (app background / page hide).
+ * If it owned playback, clear ownership so other clients stop showing
+ * "Playing on …" for a frozen/suspended session.
+ */
+export function leaveConnect(userId: string, deviceId: string): void {
+  const session = sessionFor(userId);
+  const id = deviceId.trim().slice(0, 128);
+  if (!id) return;
+  const now = Date.now();
+  session.devices.delete(id);
+  session.commands.delete(id);
+  if (session.state?.ownerId === id) {
+    session.state = {
+      ...session.state,
+      playing: false,
+      ownerId: null,
+      updatedAt: now,
+    };
+    session.pendingVolume = null;
+  }
+  prune(session, now);
+}
+
 export function publishConnectState(
   userId: string,
   deviceId: string,
@@ -243,6 +267,9 @@ export function enqueueConnectCommand(
   }
 
   if (command.type === "volume") {
+    // Volume is local to the device that owns audio output.
+    const ownerId = session.state?.ownerId;
+    if (ownerId && ownerId !== fromDeviceId) return;
     const volume = Math.max(0, Math.min(1, command.volume));
     const now = Date.now();
     if (session.state) {

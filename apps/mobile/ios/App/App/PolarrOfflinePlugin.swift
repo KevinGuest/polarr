@@ -36,6 +36,7 @@ public class PolarrOfflinePlugin: CAPPlugin, CAPBridgedPlugin, URLSessionDownloa
     public let jsName = "PolarrOffline"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "setSession", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setSignedIn", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "list", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "ids", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "has", returnType: CAPPluginReturnPromise),
@@ -183,9 +184,24 @@ public class PolarrOfflinePlugin: CAPPlugin, CAPBridgedPlugin, URLSessionDownloa
         authorizedUserId = userId?.isEmpty == false ? userId : nil
         if let user = authorizedUserId {
             UserDefaults.standard.set(user, forKey: "polarr.offline.user")
+            UserDefaults.standard.set(true, forKey: "polarr.signed_in")
         } else {
             UserDefaults.standard.removeObject(forKey: "polarr.offline.user")
+            UserDefaults.standard.set(false, forKey: "polarr.signed_in")
         }
+        NotificationCenter.default.post(name: .polarrAuthChanged, object: nil)
+        call.resolve()
+    }
+
+    /// Lightweight auth flag for CarPlay (token may exist before /me publicId).
+    @objc func setSignedIn(_ call: CAPPluginCall) {
+        let signedIn = call.getBool("signedIn") ?? false
+        UserDefaults.standard.set(signedIn, forKey: "polarr.signed_in")
+        if !signedIn {
+            authorizedUserId = nil
+            UserDefaults.standard.removeObject(forKey: "polarr.offline.user")
+        }
+        NotificationCenter.default.post(name: .polarrAuthChanged, object: nil)
         call.resolve()
     }
 

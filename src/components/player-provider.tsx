@@ -453,6 +453,7 @@ async function postConnectSync(body: {
     shuffle: boolean;
   };
   command?: ConnectCommand | { id: string; type: "transfer"; targetId: string };
+  leave?: boolean;
 }): Promise<ConnectSyncResponse | null> {
   try {
     const res = await fetch("/api/player/sync", {
@@ -3108,12 +3109,88 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     schedulePoll();
     startStream();
 
+    let connectSuspended = false;
+
+    const leaveConnectPresence = () => {
+      const device = localDeviceRef.current;
+      if (!device.id) return;
+      streamAbort?.abort();
+      streamAbort = null;
+      sseAlive = false;
+      if (pollId != null) {
+        window.clearInterval(pollId);
+        pollId = null;
+      }
+      if (reconnectTimer != null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      void postConnectSync({ device, leave: true });
+      // Clear local follower UI so we don't keep "Playing on …" after leave.
+      followingRemoteRef.current = false;
+      setIsRemotePlayback(false);
+      setConnectDevices([]);
+      setActiveConnectDevice(null);
+    };
+
+    const suspendConnect = () => {
+      if (cancelled || connectSuspended) return;
+      connectSuspended = true;
+      leaveConnectPresence();
+    };
+
+    const resumeConnect = () => {
+      if (cancelled || !connectSuspended) return;
+      connectSuspended = false;
+      void tick();
+      schedulePoll();
+      startStream();
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") suspendConnect();
+      else resumeConnect();
+    };
+    const onPageHide = () => suspendConnect();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
+
+    let removeAppState: (() => void) | undefined;
+    try {
+      type CapAppHandle = { remove: () => void | Promise<void> };
+      type CapAppPlugin = {
+        addListener: (
+          event: "appStateChange",
+          cb: (state: { isActive: boolean }) => void,
+        ) => Promise<CapAppHandle> | CapAppHandle;
+      };
+      const cap = (
+        window as unknown as {
+          Capacitor?: { Plugins?: { App?: CapAppPlugin }; isNativePlatform?: () => boolean };
+        }
+      ).Capacitor;
+      if (cap?.isNativePlatform?.() !== false && cap?.Plugins?.App) {
+        const maybe = cap.Plugins.App.addListener("appStateChange", ({ isActive }) => {
+          if (isActive) resumeConnect();
+          else suspendConnect();
+        });
+        void Promise.resolve(maybe).then((handle) => {
+          removeAppState = () => {
+            void handle.remove();
+          };
+        });
+      }
+    } catch {
+      /* web / desktop — visibility + pagehide cover it */
+    }
+
     return () => {
       cancelled = true;
       sseAlive = false;
-      streamAbort?.abort();
-      if (pollId != null) window.clearInterval(pollId);
-      if (reconnectTimer != null) window.clearTimeout(reconnectTimer);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
+      removeAppState?.();
+      leaveConnectPresence();
     };
   }, [applyConnectDevices, applyMixVolumes, applyRemote, pauseBoth, playBoth]);
 
@@ -3665,6 +3742,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const setVolume = useCallback(
     (v: number) => {
+      // Remote Connect playback: volume belongs to the device that owns audio.
+      if (followingRemoteRef.current) return;
       const next = Math.max(0, Math.min(1, v));
       setVolumeState(next);
       volumeRef.current = next;
@@ -3678,14 +3757,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         void writeSystemVolume(next);
       } else {
         applyMixVolumes();
-      }
-      if (followingRemoteRef.current) {
-        sendConnectCommandRef.current({
-          id: newCommandId(),
-          type: "volume",
-          volume: next,
-        });
-        return;
       }
       if (isOwner()) publish({ volume: next });
     },

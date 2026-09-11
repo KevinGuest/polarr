@@ -18,11 +18,21 @@ struct PolarrBrowseItem {
     let durationHint: Double?
 }
 
-/**
- CarPlay audio UI: Queue list + system Now Playing.
+enum PolarrCarPlaySession {
+    /// Phone app has a Polarr session (token and/or offline user id).
+    static var isSignedIn: Bool {
+        if UserDefaults.standard.bool(forKey: "polarr.signed_in") { return true }
+        let user = UserDefaults.standard.string(forKey: "polarr.offline.user")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return !(user ?? "").isEmpty
+    }
+}
 
- Playback still goes through `PolarrPlayerPlugin` (AVPlayer). JS syncs the
- upcoming queue (with final stream URLs) so next/prev works while backgrounded.
+/**
+ CarPlay is a thin extension of PolarrPlayer — Now Playing + queue only.
+
+ Sign-in happens on iPhone. If there is no session, CarPlay asks you to open
+ Polarr and sign in; it does not host its own login UI.
  */
 final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
     private var interfaceController: CPInterfaceController?
@@ -38,14 +48,20 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(onBrowseChanged),
+            selector: #selector(onSessionOrPlaybackChanged),
             name: .polarrBrowseChanged,
             object: nil
         )
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(onPlaybackChanged),
+            selector: #selector(onSessionOrPlaybackChanged),
             name: .polarrPlaybackChanged,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(onSessionOrPlaybackChanged),
+            name: .polarrAuthChanged,
             object: nil
         )
     }
@@ -62,28 +78,41 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         queueTemplate = nil
     }
 
-    @objc private func onBrowseChanged() {
+    @objc private func onSessionOrPlaybackChanged() {
         rebuildRoot(animated: true)
-    }
-
-    @objc private func onPlaybackChanged() {
-        // Refresh Now Playing accessory / selection highlight.
-        rebuildQueueTemplate()
-        if let queueTemplate, let interfaceController {
-            // Replace only the queue tab content when possible.
-            interfaceController.setRootTemplate(makeTabBar(queue: queueTemplate), animated: false) { _, _ in }
-        }
     }
 
     private func rebuildRoot(animated: Bool) {
         guard let interfaceController else { return }
+
+        if !PolarrCarPlaySession.isSignedIn {
+            queueTemplate = nil
+            interfaceController.setRootTemplate(makeSignInTemplate(), animated: animated) { _, _ in }
+            return
+        }
+
         let queue = makeQueueTemplate()
         queueTemplate = queue
         interfaceController.setRootTemplate(makeTabBar(queue: queue), animated: animated) { _, _ in }
     }
 
-    private func rebuildQueueTemplate() {
-        queueTemplate = makeQueueTemplate()
+    private func makeSignInTemplate() -> CPListTemplate {
+        let item = CPListItem(
+            text: "Sign in on iPhone",
+            detailText: "Open Polarr on your iPhone and sign in to use CarPlay."
+        )
+        item.handler = { _, completion in
+            completion()
+        }
+        let section = CPListSection(
+            items: [item],
+            header: "Polarr",
+            sectionIndexTitle: nil
+        )
+        let template = CPListTemplate(title: "Polarr", sections: [section])
+        template.tabImage = UIImage(systemName: "person.crop.circle.badge.exclamationmark")
+        template.tabTitle = "Sign in"
+        return template
     }
 
     private func makeTabBar(queue: CPListTemplate) -> CPTabBarTemplate {
@@ -102,12 +131,12 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
               let snapshot = player.carPlayNowPlayingSnapshot() else {
             let item = CPListItem(
                 text: "Nothing playing",
-                detailText: "Start a track in Polarr on iPhone"
+                detailText: "Start playback in Polarr on iPhone"
             )
             item.handler = { _, completion in
                 completion()
             }
-            return CPListSection(items: [item])
+            return CPListSection(items: [item], header: "Player", sectionIndexTitle: nil)
         }
 
         let item = CPListItem(text: snapshot.title, detailText: snapshot.artist)
@@ -139,7 +168,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         if items.isEmpty {
             let empty = CPListItem(
                 text: "Queue is empty",
-                detailText: "Play music in Polarr to fill CarPlay"
+                detailText: "Play something in Polarr on iPhone"
             )
             empty.handler = { _, completion in completion() }
             return CPListTemplate(title: "Queue", sections: [CPListSection(items: [empty])])
@@ -167,4 +196,5 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 extension Notification.Name {
     static let polarrBrowseChanged = Notification.Name("polarrBrowseChanged")
     static let polarrPlaybackChanged = Notification.Name("polarrPlaybackChanged")
+    static let polarrAuthChanged = Notification.Name("polarrAuthChanged")
 }

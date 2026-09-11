@@ -3,6 +3,7 @@ import { getAuthUser, json } from "@/lib/api";
 import {
   enqueueConnectCommand,
   heartbeatDevice,
+  leaveConnect,
   notifyConnect,
   publishConnectState,
   snapshotConnect,
@@ -78,6 +79,8 @@ const bodySchema = z.object({
   }),
   state: stateSchema.optional(),
   command: commandSchema.optional(),
+  /** Drop this device from Connect (background / unload). */
+  leave: z.boolean().optional(),
 });
 
 export async function POST(req: Request) {
@@ -89,7 +92,16 @@ export async function POST(req: Request) {
     return json({ error: "Invalid payload" }, { status: 400 });
   }
 
-  const { device, state, command } = parsed.data;
+  const { device, state, command, leave } = parsed.data;
+
+  if (leave) {
+    leaveConnect(user.id, device.id);
+    notifyConnect(user.id);
+    return json(snapshotConnect(user.id, device.id), {
+      headers: { "Cache-Control": "private, no-store" },
+    });
+  }
+
   heartbeatDevice(user.id, {
     id: device.id,
     name: device.name,

@@ -403,13 +403,34 @@ export function NowPlayingBar() {
                 <ListMusic className="size-3.5" />
               </button>
             </BarTooltip>
-            <div className="flex items-center gap-2 pl-0.5">
-              <BarTooltip label={muteLabel}>
+            <div
+              className={cn(
+                "flex items-center gap-2 pl-0.5",
+                isRemotePlayback && "pointer-events-none opacity-40",
+              )}
+              title={
+                isRemotePlayback
+                  ? "Volume is controlled on the playing device"
+                  : undefined
+              }
+            >
+              <BarTooltip
+                label={
+                  isRemotePlayback
+                    ? "Volume is controlled on the playing device"
+                    : muteLabel
+                }
+              >
                 <button
                   type="button"
-                  aria-label={muteLabel}
+                  aria-label={
+                    isRemotePlayback
+                      ? "Volume is controlled on the playing device"
+                      : muteLabel
+                  }
+                  disabled={isRemotePlayback}
                   onClick={() => setVolume(volume === 0 ? 0.8 : 0)}
-                  className="text-muted-foreground transition-colors hover:text-foreground"
+                  className="text-muted-foreground transition-colors hover:text-foreground disabled:hover:text-muted-foreground"
                 >
                   <VolumeIcon className="size-3.5" />
                 </button>
@@ -420,6 +441,7 @@ export function NowPlayingBar() {
                 aria-label="Volume"
                 variant="volume"
                 tone="default"
+                disabled={isRemotePlayback}
                 className="-my-2 w-[93px]"
               />
             </div>

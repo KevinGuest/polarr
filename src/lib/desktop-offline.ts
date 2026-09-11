@@ -89,6 +89,7 @@ function getTauriInvoke(): TauriInvoke | null {
 
 type IOSOfflinePlugin = {
   setSession(options: { userId: string | null }): Promise<void>;
+  setSignedIn?(options: { signedIn: boolean }): Promise<void>;
   list(): Promise<{ tracks?: DesktopOfflineTrack[] }>;
   ids(): Promise<{ ids?: string[] }>;
   has(options: { trackId: string }): Promise<{ has?: boolean }>;

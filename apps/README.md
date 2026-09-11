@@ -198,7 +198,7 @@ Already configured in the Xcode project:
 - Dark launch / status bar styling
 - `UIBackgroundModes = audio` + `AVAudioSession` playback category (background/lock-screen audio)
 - Native **`PolarrPlayer`** plugin (`AVPlayer`) owns decode + `MPNowPlayingInfoCenter` + `MPRemoteCommandCenter` on iOS; the React player still owns queue / Connect / stream URL building. HTMLAudio remains the fallback (web, desktop, and if the plugin is missing).
-- **CarPlay Audio** scene (`CarPlaySceneDelegate`) — Queue + Now Playing tabs on the same player. Requires Apple’s `com.apple.developer.carplay-audio` entitlement on the App ID (see `apps/mobile/CARPLAY.md`).
+- **CarPlay Audio** — phone `SceneDelegate` + `CarPlaySceneDelegate` (Queue + Now Playing). Requires Apple’s `com.apple.developer.carplay-audio` entitlement (see `apps/mobile/CARPLAY.md`).
 - `NSAppTransportSecurity` allows cleartext HTTP for LAN / Umbrel
 - Safe-area aware setup screen (`viewport-fit=cover`; Polarr web already sets this)
 

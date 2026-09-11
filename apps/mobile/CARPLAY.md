@@ -2,67 +2,44 @@
 
 Polarr is a **CarPlay Audio** app on top of the native `PolarrPlayer` AVPlayer.
 
+CarPlay is a **player extension only** — Now Playing + queue. Sign-in happens on
+iPhone; if there is no session, CarPlay shows “Sign in on iPhone”.
+
 ## What ships in code
 
 | Piece | Role |
 | --- | --- |
-| `App.entitlements` | `com.apple.developer.carplay-audio` |
-| `Info.plist` scene manifest | `CPTemplateApplicationScene` → `CarPlaySceneDelegate` |
-| `CarPlaySceneDelegate` | Tab UI: Now Playing + Queue |
+| `App.entitlements` | `com.apple.developer.carplay-audio` (Apple-approved) |
+| `Info.plist` scene manifest | Phone `UIWindowScene` → `SceneDelegate` **and** `CPTemplateApplicationScene` → `CarPlaySceneDelegate` |
+| `SceneDelegate` | Loads Main storyboard so Capacitor does not black-screen |
+| `CarPlaySceneDelegate` | Sign-in gate, then Now Playing + Queue tabs |
+| `PolarrOffline.setSignedIn` / `setSession` | Persist auth for CarPlay when JS logs in/out |
 | `PolarrPlayer.syncBrowse` | JS pushes upcoming queue (URLs already ticketed) so CarPlay next/prev works while WKWebView is suspended |
 
-Phone UI stays Capacitor + Main storyboard (no phone `UIWindowScene`).
+## Why both scenes
 
-## Info.plist / black screen
+Adding **only** a CarPlay scene makes newer iOS skip the storyboard window path → **black screen on launch**. Always ship:
 
-Capacitor still boots the phone UI from `UIMainStoryboardFile` + `AppDelegate.window`.
-Adding `UIApplicationSceneManifest` (even CarPlay-only) makes newer iOS skip that
-storyboard path → **black screen on launch**.
+1. `UIWindowSceneSessionRoleApplication` → `SceneDelegate` (phone UI)
+2. `CPTemplateApplicationSceneSessionRoleApplication` → `CarPlaySceneDelegate`
 
-Keep CarPlay scene code in the target, but **do not** declare
-`UIApplicationSceneManifest` until a phone `UIWindowScene` / `SceneDelegate` is wired
-alongside `CPTemplateApplicationScene`. Then add both configurations:
+## Apple entitlement
 
-```xml
-<key>UIApplicationSceneManifest</key>
-<dict>
-  <key>UIApplicationSupportsMultipleScenes</key>
-  <false/>
-  <key>UISceneConfigurations</key>
-  <dict>
-    <key>UIWindowSceneSessionRoleApplication</key>
-    <!-- Main storyboard / SceneDelegate -->
-    <key>CPTemplateApplicationSceneSessionRoleApplication</key>
-    <!-- CarPlaySceneDelegate -->
-  </dict>
-</dict>
-```
-
-## Apple entitlement (required to appear in CarPlay)
-
-1. Request **CarPlay Audio** at [developer.apple.com/contact/carplay](https://developer.apple.com/contact/carplay/) and sign the CarPlay addendum.
-2. When Apple enables the managed capability on team `C7Z88WS83P` / App ID `app.polarr.mobile`, regenerate the provisioning profile so it includes CarPlay Audio.
-3. Add to `App/App.entitlements`:
-
-```xml
-<key>com.apple.developer.carplay-audio</key>
-<true/>
-```
-
-4. Xcode → Signing: ensure the profile with CarPlay is selected (Automatic usually picks it up after the capability exists).
-
-**Until then:** leave the key out of `App.entitlements`. The CarPlay scene code ships in the binary, but signing fails if the entitlement is claimed without Apple’s grant, and the app will not show on the CarPlay home screen.
+CarPlay Audio is enabled on team `C7Z88WS83P` / App ID `app.polarr.mobile`. Regenerate the provisioning profile if signing fails, then confirm Xcode Automatic Signing picks a profile that includes CarPlay Audio.
 
 ## Test plan
 
-1. Build **641+** to device, play a queue in Polarr.
+1. Build to device, **sign in** on iPhone, play a queue in Polarr.
 2. Connect CarPlay (car or Simulator → I/O → External Displays → CarPlay).
-3. Open Polarr → Queue lists upcoming tracks; Playing opens system Now Playing.
-4. Next/prev from the car steers wheel / Now Playing while the phone is locked.
+3. Polarr → Playing / Queue; next/prev from the wheel while the phone is locked.
+4. Sign out on iPhone → CarPlay should switch to “Sign in on iPhone”.
+5. Cold-launch the phone app — UI must appear (not a black screen).
 
 ## Files
 
+- `apps/mobile/ios/App/App/SceneDelegate.swift`
 - `apps/mobile/ios/App/App/CarPlaySceneDelegate.swift`
 - `apps/mobile/ios/App/App/App.entitlements`
+- `apps/mobile/ios/App/App/PolarrOfflinePlugin.swift`
 - `apps/mobile/ios/App/App/PolarrPlayerPlugin.swift` (`syncBrowse`, browse advance)
-- `src/lib/ios-player.ts` / `player-provider.tsx` browse sync
+- `src/lib/ios-player.ts` / `native-client.ts` / `player-provider.tsx`

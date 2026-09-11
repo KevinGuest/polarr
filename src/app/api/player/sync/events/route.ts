@@ -73,14 +73,11 @@ export async function GET(req: Request) {
         push(snapshot);
       });
 
-      // Keep device alive + prevent proxy idle timeouts.
+      // Wire keepalive only — do not refresh lastSeen. Otherwise a frozen
+      // background WebView with an open SSE socket stays "online" forever and
+      // other clients keep showing "Playing on …" for a dead session.
       pingTimer = setInterval(() => {
         if (closed) return;
-        heartbeatDevice(user.id, {
-          id: deviceId,
-          name: name || "Device",
-          kind,
-        });
         try {
           controller.enqueue(encoder.encode(`: ping\n\n`));
         } catch {

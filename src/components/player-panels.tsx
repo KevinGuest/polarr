@@ -1265,6 +1265,7 @@ function MobileTransport({
   progress,
   duration,
   volume,
+  volumeLocked = false,
   onSeek,
   onToggle,
   onPrev,
@@ -1276,6 +1277,7 @@ function MobileTransport({
   progress: number;
   duration: number;
   volume: number;
+  volumeLocked?: boolean;
   onSeek: (ratio: number) => void;
   onToggle: () => void;
   onPrev: () => void;
@@ -1332,7 +1334,17 @@ function MobileTransport({
           <SkipForward className="size-8" fill="currentColor" />
         </button>
       </div>
-      <div className="flex min-h-[44px] items-center gap-3 px-1">
+      <div
+        className={cn(
+          "flex min-h-[44px] items-center gap-3 px-1",
+          volumeLocked && "pointer-events-none opacity-40",
+        )}
+        title={
+          volumeLocked
+            ? "Volume is controlled on the playing device"
+            : undefined
+        }
+      >
         <Volume1 className="size-4 shrink-0 text-white/50" aria-hidden />
         <PlayerSlider
           value={volume}
@@ -1340,6 +1352,7 @@ function MobileTransport({
           aria-label="Volume"
           variant="volume"
           tone="on-dark"
+          disabled={volumeLocked}
           className="-my-2 flex-1"
         />
         <Volume2 className="size-5 shrink-0 text-white/50" aria-hidden />
@@ -1417,6 +1430,7 @@ function MobilePlayerSheet() {
     duration,
     volume,
     isPanelOpen,
+    isRemotePlayback,
     setPanel,
     closePanel,
     toggle,
@@ -1653,6 +1667,7 @@ function MobilePlayerSheet() {
               progress={progress}
               duration={duration}
               volume={volume}
+              volumeLocked={isRemotePlayback}
               onSeek={seek}
               onToggle={toggle}
               onPrev={prev}

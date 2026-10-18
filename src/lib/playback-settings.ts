@@ -43,12 +43,13 @@ export const STREAM_QUALITIES: {
     id: "lossless",
     label: "Lossless",
     detail:
-      "Original when the phone can play it; otherwise ALAC from FLAC/WAV",
+      "Original file (FLAC/WAV); on iPhone/iPad converted to ALAC. Slowest to start",
   },
   {
     id: "high",
     label: "High",
-    detail: "AAC ~256 kbps — near-transparent, sensible default",
+    detail:
+      "AAC ~256 kbps — same as Apple Music, near-transparent, instant start",
   },
   {
     id: "standard",

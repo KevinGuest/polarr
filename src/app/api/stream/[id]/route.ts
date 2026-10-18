@@ -6,8 +6,12 @@ import { getSettings, getTrack } from "@/lib/db";
 import { resolvePlayableAudioPath } from "@/lib/audio-path";
 import { isManagedMusicPath } from "@/lib/paths";
 import {
-  IOS_NATIVE_EXTS,
-  IOS_TRANSCODE_EXTS,
+  getCachedCompatM4a,
+  needsEncode,
+  requestedStreamQuality,
+  scheduleSidecarEncode,
+  serveCompatRangedFile,
+  SIDECAR_QUALITY,
   startCompatEncodedDownload,
   startCompatPlayback,
   streamQualityFromRequest,
@@ -94,8 +98,10 @@ export async function GET(
   }
 
   const ext = path.extname(filePath).toLowerCase();
-  // iOS: phone-native files pass through; FLAC/etc encode per quality tier.
-  if (wantsCompatStream(req) && IOS_TRANSCODE_EXTS.has(ext) && !IOS_NATIVE_EXTS.has(ext)) {
+  const encodable = needsEncode(ext);
+  // iOS: phone-native files pass through; FLAC/etc *must* encode per tier
+  // (HTMLAudio/AVPlayer cannot decode them) so this path blocks on ffmpeg.
+  if (wantsCompatStream(req) && encodable) {
     const quality = streamQualityFromRequest(req);
     if (wantsOfflineDownload(req)) {
       const file = await startCompatEncodedDownload(
@@ -113,6 +119,25 @@ export async function GET(
         req,
       );
       if (compat) return compat;
+    }
+  } else if (encodable && !wantsOfflineDownload(req)) {
+    // Web / desktop asked for a lossy tier: serve the pre-encoded AAC sidecar
+    // when it exists (fraction of the FLAC bytes → near-instant start). If it
+    // isn't built yet, never block — serve the original and queue the encode.
+    const wanted = requestedStreamQuality(req);
+    if (wanted && wanted !== "lossless") {
+      const sidecar = getCachedCompatM4a(filePath, wanted);
+      if (sidecar) {
+        return serveCompatRangedFile(
+          req,
+          sidecar.path,
+          sidecar.size,
+          "audio/mp4",
+          wanted,
+        );
+      }
+      scheduleSidecarEncode(filePath, wanted);
+      if (wanted !== SIDECAR_QUALITY) scheduleSidecarEncode(filePath, SIDECAR_QUALITY);
     }
   }
 

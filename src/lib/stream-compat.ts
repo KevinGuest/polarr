@@ -18,9 +18,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
+import { dataDir } from "@/lib/paths";
 import { resolveFfmpeg } from "@/lib/tools";
 import type { StreamQuality } from "@/lib/playback-settings";
 import { isStreamQuality } from "@/lib/playback-settings";
+
+/**
+ * Pre-encoded sidecar tier. AAC-LC 256 kbps is Apple Music's default and is
+ * effectively transparent; it decodes natively everywhere (Safari, AVPlayer,
+ * WebView2, Chromium) and is ~4-5× smaller than FLAC — so first-byte-to-sound
+ * on click is a fraction of streaming the lossless original.
+ */
+export const SIDECAR_QUALITY: StreamQuality = "high";
 
 /** Need encode for iOS <audio>. */
 export const IOS_TRANSCODE_EXTS = new Set([
@@ -56,6 +65,24 @@ export function streamQualityFromRequest(req: Request): StreamQuality {
     .trim()
     .toLowerCase();
   return isStreamQuality(raw) ? raw : "high";
+}
+
+/** Explicit `quality=` on the URL (web/desktop opt into an AAC tier this way). */
+export function requestedStreamQuality(req: Request): StreamQuality | null {
+  const raw = (new URL(req.url).searchParams.get("quality") || "")
+    .trim()
+    .toLowerCase();
+  return isStreamQuality(raw) ? raw : null;
+}
+
+/**
+ * Original must be re-encoded to be served as a device-friendly M4A.
+ * Lossy originals (mp3/m4a/aac) are already small and universally decodable —
+ * never re-encode those.
+ */
+export function needsEncode(ext: string): boolean {
+  const e = ext.toLowerCase();
+  return IOS_TRANSCODE_EXTS.has(e) && !IOS_NATIVE_EXTS.has(e);
 }
 
 function ffmpegBin(): string | null {
@@ -150,6 +177,41 @@ export function startCompatAacStream(
   });
 }
 
+const SIDECAR_PREFIX = "polarr-compat-";
+
+/**
+ * Persistent sidecar directory under the data dir (survives container
+ * restarts, unlike os.tmpdir()). Falls back to tmp when data isn't writable.
+ */
+let encodeCacheDirCache: string | null = null;
+export function encodeCacheDir(): string {
+  if (encodeCacheDirCache) return encodeCacheDirCache;
+  const env = (process.env.POLARR_ENCODE_CACHE_DIR || "").trim();
+  const candidates = [env, path.join(safeDataDir(), "encode-cache")].filter(
+    Boolean,
+  );
+  for (const dir of candidates) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.accessSync(dir, fs.constants.W_OK);
+      encodeCacheDirCache = dir;
+      return dir;
+    } catch {
+      /* try next */
+    }
+  }
+  encodeCacheDirCache = os.tmpdir();
+  return encodeCacheDirCache;
+}
+
+function safeDataDir(): string {
+  try {
+    return dataDir();
+  } catch {
+    return os.tmpdir();
+  }
+}
+
 function compatCachePath(filePath: string, quality: StreamQuality): string | null {
   try {
     const st = fs.statSync(filePath);
@@ -159,28 +221,47 @@ function compatCachePath(filePath: string, quality: StreamQuality): string | nul
       )
       .digest("hex")
       .slice(0, 20);
-    return path.join(os.tmpdir(), `polarr-compat-${key}.m4a`);
+    return path.join(encodeCacheDir(), `${SIDECAR_PREFIX}${key}.m4a`);
   } catch {
     return null;
   }
 }
 
-/** Encode (or reuse) a seekable AAC/ALAC M4A for iOS HTMLAudio scrubbing. */
-async function ensureCompatM4a(
+/** Sync lookup: sidecar already on disk? (No encode, never blocks.) */
+export function getCachedCompatM4a(
   filePath: string,
   quality: StreamQuality,
-  signal?: AbortSignal | null,
-): Promise<{ path: string; size: number } | null> {
+): { path: string; size: number } | null {
   const out = compatCachePath(filePath, quality);
   if (!out) return null;
   try {
-    if (fs.existsSync(out)) {
-      const st = fs.statSync(out);
-      if (st.isFile() && st.size > 1024) return { path: out, size: st.size };
-    }
+    const st = fs.statSync(out);
+    if (st.isFile() && st.size > 1024) return { path: out, size: st.size };
   } catch {
-    /* re-encode */
+    /* miss */
   }
+  return null;
+}
+
+/** De-dupe concurrent encodes of the same output (iOS request + pre-encoder). */
+const inflightEncodes = new Map<string, Promise<{ path: string; size: number } | null>>();
+
+/**
+ * Encode (or reuse) a seekable AAC/ALAC M4A. The encode itself is never
+ * aborted by a single requester — other waiters (and the sidecar cache)
+ * benefit from letting it finish.
+ */
+export async function ensureCompatM4a(
+  filePath: string,
+  quality: StreamQuality,
+): Promise<{ path: string; size: number } | null> {
+  const out = compatCachePath(filePath, quality);
+  if (!out) return null;
+  const cached = getCachedCompatM4a(filePath, quality);
+  if (cached) return cached;
+
+  const existing = inflightEncodes.get(out);
+  if (existing) return existing;
 
   const argsTail =
     quality === "lossless"
@@ -196,15 +277,191 @@ async function ensureCompatM4a(
           "ipod",
         ];
 
-  const encoded = await encodeTempFile(filePath, argsTail, "m4a", signal);
-  if (!encoded) return null;
+  // Shared encodes must not die with the first requester's abort.
+  const task = (async () => {
+    const encoded = await encodeTempFile(filePath, argsTail, "m4a", null);
+    if (!encoded) return null;
+    try {
+      fs.renameSync(encoded.path, out);
+      const st = fs.statSync(out);
+      return { path: out, size: st.size };
+    } catch {
+      return encoded;
+    }
+  })();
+  inflightEncodes.set(out, task);
   try {
-    fs.renameSync(encoded.path, out);
-    const st = fs.statSync(out);
-    return { path: out, size: st.size };
-  } catch {
-    return encoded;
+    return await task;
+  } finally {
+    inflightEncodes.delete(out);
   }
+}
+
+/* ───────────────────────── background pre-encoder ───────────────────────── */
+
+const PREENCODE_DISABLED =
+  /^(0|false|off|no)$/i.test((process.env.POLARR_PREENCODE || "").trim());
+/** Stop filling the cache past this many GB (on-demand encodes still run). */
+const PREENCODE_MAX_BYTES =
+  Math.max(1, Number(process.env.POLARR_ENCODE_CACHE_MAX_GB) || 50) * 1024 ** 3;
+
+const g = globalThis as typeof globalThis & {
+  __polarrPreencode?: {
+    queue: string[];
+    queued: Set<string>;
+    running: boolean;
+    encoded: number;
+    failed: number;
+    lastSweep: number;
+  };
+};
+function preState() {
+  if (!g.__polarrPreencode) {
+    g.__polarrPreencode = {
+      queue: [],
+      queued: new Set(),
+      running: false,
+      encoded: 0,
+      failed: 0,
+      lastSweep: 0,
+    };
+  }
+  return g.__polarrPreencode;
+}
+
+function cacheDirBytes(): number {
+  let total = 0;
+  try {
+    for (const name of fs.readdirSync(encodeCacheDir())) {
+      if (!name.startsWith(SIDECAR_PREFIX)) continue;
+      try {
+        total += fs.statSync(path.join(encodeCacheDir(), name)).size;
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return total;
+}
+
+/**
+ * Queue a sidecar for a single file (e.g. first play of a track that has no
+ * sidecar yet). Encodes run one at a time so ffmpeg never starves playback.
+ */
+export function scheduleSidecarEncode(
+  filePath: string,
+  quality: StreamQuality = SIDECAR_QUALITY,
+): void {
+  if (PREENCODE_DISABLED || !ffmpegBin()) return;
+  if (!needsEncode(path.extname(filePath))) return;
+  if (getCachedCompatM4a(filePath, quality)) return;
+  const key = `${quality}\0${filePath}`;
+  const s = preState();
+  if (s.queued.has(key)) return;
+  s.queued.add(key);
+  // Interactive misses jump the line ahead of the bulk library sweep.
+  s.queue.unshift(key);
+  void drainPreencodeQueue();
+}
+
+async function drainPreencodeQueue() {
+  const s = preState();
+  if (s.running) return;
+  s.running = true;
+  try {
+    while (s.queue.length) {
+      const key = s.queue.shift()!;
+      s.queued.delete(key);
+      const sep = key.indexOf("\0");
+      const quality = key.slice(0, sep) as StreamQuality;
+      const filePath = key.slice(sep + 1);
+      if (getCachedCompatM4a(filePath, quality)) continue;
+      if (cacheDirBytes() >= PREENCODE_MAX_BYTES) {
+        console.warn(
+          `[polarr] encode cache at limit (${(PREENCODE_MAX_BYTES / 1024 ** 3).toFixed(0)} GB) — skipping pre-encode; raise POLARR_ENCODE_CACHE_MAX_GB`,
+        );
+        s.queue.length = 0;
+        s.queued.clear();
+        break;
+      }
+      const ok = await ensureCompatM4a(filePath, quality);
+      if (ok) s.encoded += 1;
+      else s.failed += 1;
+      // Yield between files so request handlers / scans interleave.
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  } finally {
+    s.running = false;
+  }
+}
+
+/**
+ * Enqueue sidecars for every library track that needs one (newest first) and
+ * drop sidecars whose source no longer exists. Called after each library scan.
+ */
+export function warmLibrarySidecars(paths: string[]): {
+  queued: number;
+  removed: number;
+} {
+  if (PREENCODE_DISABLED || !ffmpegBin()) return { queued: 0, removed: 0 };
+  const s = preState();
+  const expected = new Set<string>();
+  let queued = 0;
+  for (const p of paths) {
+    if (!p || !needsEncode(path.extname(p))) continue;
+    const out = compatCachePath(p, SIDECAR_QUALITY);
+    if (!out) continue;
+    expected.add(path.basename(out));
+    if (fs.existsSync(out)) continue;
+    const key = `${SIDECAR_QUALITY}\0${p}`;
+    if (s.queued.has(key)) continue;
+    s.queued.add(key);
+    s.queue.push(key);
+    queued += 1;
+  }
+
+  // Sweep orphans (file edited/deleted) at most once a day; keep other tiers'
+  // on-demand encodes younger than a week so iOS users aren't re-encoded daily.
+  let removed = 0;
+  const now = Date.now();
+  if (now - s.lastSweep > 24 * 3600_000) {
+    s.lastSweep = now;
+    try {
+      for (const name of fs.readdirSync(encodeCacheDir())) {
+        if (!name.startsWith(SIDECAR_PREFIX) || expected.has(name)) continue;
+        const full = path.join(encodeCacheDir(), name);
+        try {
+          const st = fs.statSync(full);
+          if (now - st.mtimeMs < 7 * 24 * 3600_000) continue;
+          fs.unlinkSync(full);
+          removed += 1;
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (queued) void drainPreencodeQueue();
+  return { queued, removed };
+}
+
+export function getPreencodeStatus() {
+  const s = preState();
+  return {
+    enabled: !PREENCODE_DISABLED && Boolean(ffmpegBin()),
+    quality: SIDECAR_QUALITY,
+    pending: s.queue.length,
+    running: s.running,
+    encoded: s.encoded,
+    failed: s.failed,
+    cacheDir: encodeCacheDir(),
+    cacheBytes: cacheDirBytes(),
+  };
 }
 
 /** Byte-range response so HTMLMediaElement can seek. */
@@ -215,7 +472,9 @@ export function serveCompatRangedFile(
   contentType: string,
   quality: StreamQuality,
 ): Response {
-  const cacheControl = "private, max-age=3600";
+  // Sidecar name is keyed on source mtime+size — safe to treat as immutable so
+  // the browser / service worker reuse it across seeks and replays.
+  const cacheControl = "private, max-age=86400, immutable";
   const range = req.headers.get("range");
   if (range) {
     const match = /bytes=(\d+)-(\d*)/.exec(range);
@@ -376,7 +635,7 @@ export async function startCompatEncodedDownload(
 ): Promise<Response | null> {
   if (!IOS_TRANSCODE_EXTS.has(ext.toLowerCase())) return null;
 
-  const cached = await ensureCompatM4a(filePath, quality, signal);
+  const cached = await ensureCompatM4a(filePath, quality);
   if (!cached) return null;
   // Copy to a disposable temp so download cleanup can unlink freely.
   const tmp = path.join(
@@ -420,7 +679,7 @@ export async function startCompatPlayback(
   req: Request,
 ): Promise<Response | null> {
   if (!IOS_TRANSCODE_EXTS.has(ext.toLowerCase())) return null;
-  const cached = await ensureCompatM4a(filePath, quality, req.signal);
+  const cached = await ensureCompatM4a(filePath, quality);
   if (cached) {
     return serveCompatRangedFile(
       req,

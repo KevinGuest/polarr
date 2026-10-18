@@ -108,6 +108,9 @@ type NativePlayerPlugin = {
     }>;
     currentId?: string;
   }): Promise<{ count: number }>;
+  /** Older app builds lack these — always optional-call. */
+  prefetchHeads?(options: { urls: string[] }): Promise<{ queued: number }>;
+  clearHeadCache?(): Promise<void>;
   addListener(
     event: string,
     cb: (data: Record<string, unknown>) => void,
@@ -285,6 +288,25 @@ export async function nativeIosPlayerSyncBrowse(input: {
       ...(input.currentId ? { currentId: input.currentId } : {}),
     })
     .catch(() => null);
+}
+
+/**
+ * Store the first ~15 s of these stream URLs in the native head cache so
+ * AVPlayer starts from disk. No-ops on app builds without the method.
+ */
+export function nativeIosPlayerPrefetchHeads(urls: readonly string[]): void {
+  const native = resolvePlugin();
+  if (!native || !isNativeIosPlayerAvailable()) return;
+  if (typeof native.prefetchHeads !== "function") return;
+  const list = urls.filter(Boolean).slice(0, 120);
+  if (!list.length) return;
+  void native.prefetchHeads({ urls: list }).catch(() => null);
+}
+
+export function nativeIosPlayerClearHeadCache(): void {
+  const native = resolvePlugin();
+  if (!native || typeof native.clearHeadCache !== "function") return;
+  void native.clearHeadCache().catch(() => null);
 }
 
 type ListenerHandle = { remove: () => void };

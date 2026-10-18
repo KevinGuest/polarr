@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, Play, Shuffle } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
@@ -12,7 +12,12 @@ import {
   MediaTileShell,
   ShelfHeader,
 } from "@/components/media-shelf";
-import { usePlayer, type PlayerTrack } from "@/components/player-provider";
+import {
+  usePlayer,
+  usePrefetchHeads,
+  useWarmLibraryTrack,
+  type PlayerTrack,
+} from "@/components/player-provider";
 import { albumHref } from "@/lib/album-ref";
 import { setDragTrack } from "@/lib/drag-track";
 import { cn, formatDuration, formatTrackArtistLine } from "@/lib/utils";
@@ -75,6 +80,7 @@ export function ArtistClient() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { play } = usePlayer();
+  const warmTrack = useWarmLibraryTrack();
   const name = searchParams.get("name") || "";
   const foreignArtistId = searchParams.get("foreignArtistId") || "";
   const imageParam = searchParams.get("image") || "";
@@ -117,6 +123,10 @@ export function ArtistClient() {
     obs.observe(el);
     return () => obs.disconnect();
   }, [loading, name]);
+
+  // Heads for the top 10 so Popular rows start instantly.
+  const popularHeadTracks = useMemo(() => tracks.slice(0, 10), [tracks]);
+  usePrefetchHeads(popularHeadTracks);
 
   if (!name) {
     return (
@@ -204,6 +214,7 @@ export function ArtistClient() {
             <button
               type="button"
               onClick={() => play(t, tracks)}
+              {...warmTrack(t)}
               className="flex min-w-0 flex-1 items-center gap-3 text-left"
             >
               <span

@@ -5,6 +5,14 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // Service worker must revalidate every load so updates roll out.
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache, max-age=0" },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
+      },
+      {
         source: "/(.*)",
         headers: [
           {

@@ -15,6 +15,7 @@
 		8F3A1C2F2A1B4E6F00168520 /* PolarrVolumePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F3A1C2E2A1B4E6F00168520 /* PolarrVolumePlugin.swift */; };
 		8F3A1C312A1B4E6F00168521 /* PolarrNowPlayingPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F3A1C302A1B4E6F00168521 /* PolarrNowPlayingPlugin.swift */; };
 		8F3A1C332A1B4E6F00168522 /* PolarrPlayerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F3A1C322A1B4E6F00168522 /* PolarrPlayerPlugin.swift */; };
+		8F3A1C392A1B4E6F00168527 /* PolarrHeadCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F3A1C382A1B4E6F00168526 /* PolarrHeadCache.swift */; };
 		8F3A1C352A1B4E6F00168523 /* CarPlaySceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F3A1C342A1B4E6F00168523 /* CarPlaySceneDelegate.swift */; };
 		8F3A1C372A1B4E6F00168525 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F3A1C362A1B4E6F00168525 /* SceneDelegate.swift */; };
 		504EC30D1FED79650016851F /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30B1FED79650016851F /* Main.storyboard */; };
@@ -34,6 +35,7 @@
 		8F3A1C2E2A1B4E6F00168520 /* PolarrVolumePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolarrVolumePlugin.swift; sourceTree = "<group>"; };
 		8F3A1C302A1B4E6F00168521 /* PolarrNowPlayingPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolarrNowPlayingPlugin.swift; sourceTree = "<group>"; };
 		8F3A1C322A1B4E6F00168522 /* PolarrPlayerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolarrPlayerPlugin.swift; sourceTree = "<group>"; };
+		8F3A1C382A1B4E6F00168526 /* PolarrHeadCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolarrHeadCache.swift; sourceTree = "<group>"; };
 		8F3A1C342A1B4E6F00168523 /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
 		8F3A1C362A1B4E6F00168525 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		8F3A1C362A1B4E6F00168524 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
@@ -95,6 +97,7 @@
 				8F3A1C2E2A1B4E6F00168520 /* PolarrVolumePlugin.swift */,
 				8F3A1C302A1B4E6F00168521 /* PolarrNowPlayingPlugin.swift */,
 				8F3A1C322A1B4E6F00168522 /* PolarrPlayerPlugin.swift */,
+				8F3A1C382A1B4E6F00168526 /* PolarrHeadCache.swift */,
 				8F3A1C342A1B4E6F00168523 /* CarPlaySceneDelegate.swift */,
 				8F3A1C362A1B4E6F00168525 /* SceneDelegate.swift */,
 				8F3A1C362A1B4E6F00168524 /* App.entitlements */,
@@ -238,6 +241,7 @@
 				8F3A1C2F2A1B4E6F00168520 /* PolarrVolumePlugin.swift in Sources */,
 				8F3A1C312A1B4E6F00168521 /* PolarrNowPlayingPlugin.swift in Sources */,
 				8F3A1C332A1B4E6F00168522 /* PolarrPlayerPlugin.swift in Sources */,
+				8F3A1C392A1B4E6F00168527 /* PolarrHeadCache.swift in Sources */,
 				8F3A1C352A1B4E6F00168523 /* CarPlaySceneDelegate.swift in Sources */,
 				8F3A1C372A1B4E6F00168525 /* SceneDelegate.swift in Sources */,
 			);

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { AppShell } from "@/components/app-shell";
 import { AppToaster } from "@/components/app-toaster";
+import { AudioCacheRegistrar } from "@/components/audio-cache-registrar";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -32,6 +33,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         </Script>
         <AppShell>{children}</AppShell>
         <AppToaster />
+        <AudioCacheRegistrar />
       </body>
     </html>
   );

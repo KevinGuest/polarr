@@ -27,7 +27,12 @@ import {
 import { TrackActionsDrawer } from "@/components/track-actions-drawer";
 import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
-import { usePlayer, type PlayerTrack } from "@/components/player-provider";
+import {
+  usePlayer,
+  usePrefetchHeads,
+  useWarmLibraryTrack,
+  type PlayerTrack,
+} from "@/components/player-provider";
 import { cn, formatTrackArtistLine, titleLooksExplicit } from "@/lib/utils";
 import {
   artistNameMatchesQuery,
@@ -158,6 +163,7 @@ export function SearchClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { play } = usePlayer();
+  const warmTrack = useWarmLibraryTrack();
   const q = searchParams.get("q") || "";
   const view = searchParams.get("view");
   const filter = parseFilter(searchParams.get("filter"));
@@ -348,6 +354,23 @@ export function SearchClient() {
     }
     return tracks;
   }, [tracks, scope]);
+
+  // Heads for on-server hits in the visible results, so any tap is instant.
+  const localHitTracks = useMemo<PlayerTrack[]>(
+    () =>
+      scopedTracks
+        .filter((t) => t.localTrackId)
+        .slice(0, 30)
+        .map((t) => ({
+          id: t.localTrackId!,
+          title: t.title,
+          artist: t.artist,
+          album: t.album,
+          quality: "local" as const,
+        })),
+    [scopedTracks],
+  );
+  usePrefetchHeads(localHitTracks);
 
   const scopedAlbums = useMemo(() => {
     if (scope === "library") {
@@ -762,6 +785,20 @@ export function SearchClient() {
           <button
             type="button"
             onClick={() => void playCatalogTrack(hit)}
+            {...warmTrack(
+              hit.localTrackId
+                ? {
+                    id: hit.localTrackId,
+                    title: hit.title,
+                    artist: artistLine,
+                    resolveArtist: hit.artist,
+                    album: hit.album || "",
+                    coverPath: hit.image || null,
+                    duration: hit.duration,
+                    quality: "local",
+                  }
+                : null,
+            )}
             className="shrink-0 text-left"
             aria-label={`Play ${hit.title}`}
           >
@@ -1006,6 +1043,7 @@ export function SearchClient() {
       duration: hit.duration,
       resolveArtist: hit.artist,
       explicit,
+      quality: hit.localTrackId ? "local" : "youtube",
     };
 
     const trackLoading = coverLoading("track", hit.id);
@@ -1014,6 +1052,7 @@ export function SearchClient() {
         <button
           type="button"
           onClick={() => void playCatalogTrack(hit)}
+          {...warmTrack(hit.localTrackId ? pt : null)}
           className="flex min-w-0 flex-1 items-center gap-3 text-left"
         >
           <CoverArt

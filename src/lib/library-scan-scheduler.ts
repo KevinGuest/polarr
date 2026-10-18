@@ -3,8 +3,9 @@
  * Interval is checked every minute against Settings.libraryScanMinutes (or env).
  */
 
-import { getSettings } from "@/lib/db";
+import { getSettings, listLibraryTrackPaths } from "@/lib/db";
 import { scanMusicLibrary } from "@/lib/library";
+import { warmLibrarySidecars } from "@/lib/stream-compat";
 
 const CHECK_MS = 60_000;
 const BOOT_DELAY_MS = 20_000;
@@ -92,6 +93,26 @@ async function tick() {
   }
 }
 
+/**
+ * Boot-time fill: pre-encode AAC sidecars for the existing library even when
+ * periodic scans are disabled (scans themselves re-trigger this).
+ */
+function queueSidecarWarm() {
+  try {
+    const { queued, removed } = warmLibrarySidecars(listLibraryTrackPaths());
+    if (queued || removed) {
+      console.info(
+        `[polarr] sidecar pre-encode · ${queued} queued · ${removed} orphans removed`,
+      );
+    }
+  } catch (err) {
+    console.error(
+      "[polarr] sidecar pre-encode failed:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
 /** Idempotent — safe across Next hot reloads via globalThis. */
 export function startLibraryScanScheduler() {
   const s = state();
@@ -105,6 +126,9 @@ export function startLibraryScanScheduler() {
   setTimeout(() => {
     void tick();
   }, BOOT_DELAY_MS);
+
+  // Even with periodic scans disabled, fill sidecars for the existing library once.
+  setTimeout(queueSidecarWarm, BOOT_DELAY_MS + 10_000);
 
   setInterval(() => {
     void tick();

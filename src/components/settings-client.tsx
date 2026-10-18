@@ -1137,8 +1137,8 @@ export function SettingsClient() {
                     STREAM_QUALITIES.find((q) => q.id === playback.streamQuality)
                       ?.detail
                   }
-                  . On iPhone/iPad, FLAC is converted to this quality for playback
-                  and offline downloads.
+                  . Lossless originals are pre-encoded to this tier on the server so
+                  tracks start on click; MP3/M4A files are never re-encoded.
                 </p>
               </div>
               <div className="space-y-2 border-t border-border/70 px-4 py-3">

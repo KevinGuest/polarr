@@ -243,5 +243,19 @@ export async function scanMusicLibrary(): Promise<{
     }
   }
 
+  // Kick the AAC sidecar pre-encoder so new FLAC/WAV drops play instantly.
+  try {
+    const { warmLibrarySidecars } = await import("@/lib/stream-compat");
+    const { listLibraryTrackPaths } = await import("@/lib/db");
+    const { queued, removed } = warmLibrarySidecars(listLibraryTrackPaths());
+    if (queued || removed) {
+      console.info(
+        `[polarr] sidecar pre-encode · ${queued} queued · ${removed} orphans removed`,
+      );
+    }
+  } catch {
+    /* non-fatal */
+  }
+
   return { scanned: files.length, probed, added, root: roots.join(" + ") };
 }

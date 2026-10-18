@@ -47,7 +47,12 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { usePlayer, type PlayerTrack } from "@/components/player-provider";
+import {
+  usePlayer,
+  usePrimeFirstTrack,
+  useWarmLibraryTrack,
+  type PlayerTrack,
+} from "@/components/player-provider";
 import { albumHref } from "@/lib/album-ref";
 import { setDragTrack } from "@/lib/drag-track";
 import {
@@ -359,6 +364,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
   const auth = useAuthOptional();
   const { play, toggle, track, queue: playerQueue, playing, shuffle, toggleShuffle } =
     usePlayer();
+  const warmTrack = useWarmLibraryTrack();
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -525,6 +531,9 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
       ),
     [sortedTracks, playlist],
   );
+  // Page-load prime: header Play starts instantly (skipped while shuffling —
+  // the first audible track is random then).
+  usePrimeFirstTrack(queue, !shuffle);
 
   const offlineTracks: DesktopOfflineTrack[] = useMemo(
     () =>
@@ -1135,6 +1144,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                       <button
                         type="button"
                         onClick={() => playTrack(t)}
+                        {...warmTrack(playerTrack)}
                         className="flex min-w-0 flex-1 items-center gap-3 text-left"
                       >
                         <CoverArt
@@ -1457,6 +1467,7 @@ export function PlaylistClient({ playlistId }: { playlistId: string }) {
                       onDragStart={(e) => setDragTrack(e, playerTrack)}
                       className="group/row cursor-grab transition-colors active:cursor-grabbing"
                       onClick={() => playTrack(t)}
+                      {...warmTrack(playerTrack)}
                     >
                       <td
                         className={trackRowStartCell(

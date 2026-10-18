@@ -3769,6 +3769,17 @@ export function countTracks(): number {
   return row.c;
 }
 
+/** Library file paths, most recently added first — used by the sidecar pre-encoder. */
+export function listLibraryTrackPaths(): string[] {
+  return (
+    getDb()
+      .prepare(
+        `SELECT path FROM tracks WHERE ${LIBRARY_TRACK_FILTER} ORDER BY added_at DESC`,
+      )
+      .all() as { path: string }[]
+  ).map((r) => r.path);
+}
+
 export type AlbumListRow = {
   artist: string;
   title: string;

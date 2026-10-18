@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { usePathname } from "next/navigation";
 import { nativeAssetUrl, ensureNativeMediaTicket, isNativeClient, nativeClientPlatform, nativeSessionToken } from "@/lib/native-client";
@@ -26,6 +27,7 @@ import {
   nativeIosPlayerPlay,
   nativeIosPlayerSeek,
   nativeIosPlayerStop,
+  nativeIosPlayerPrefetchHeads,
   nativeIosPlayerSyncBrowse,
   probeNativeIosPlayer,
   setNativeIosPlayerOwning,
@@ -48,6 +50,11 @@ import { formatDuration, titleLooksExplicit } from "@/lib/utils";
 import { emitListenCredited, MEDIA_TICKET_UPDATED_EVENT } from "@/lib/ui-events";
 import { LISTEN_HEARTBEAT_SECONDS } from "@/lib/listen";
 import { offlineStreamUrl } from "@/lib/desktop-offline";
+import {
+  audioCacheSupported,
+  cacheHeadUrls,
+  cacheTrackUrl,
+} from "@/lib/audio-cache";
 import {
   detectConnectDevice,
   resolveConnectDevice,
@@ -348,6 +355,10 @@ type PlayerContextValue = {
   panel: PlayerPanel;
   isPanelOpen: (id: PlayerPanelId) => boolean;
   play: (track: PlayerTrack, queue?: PlayerTrack[]) => void;
+  /** Range-fetch first ~1 MiB of a library stream into the HTTP cache. */
+  warmLibraryStream: (track: PlayerTrack) => void;
+  /** Start loading a library track into the idle nextAudio element. */
+  primeTrack: (track: PlayerTrack) => void;
   toggle: () => void;
   seek: (ratio: number) => void;
   next: () => void;
@@ -542,6 +553,22 @@ function audioSrcFor(track: PlayerTrack): string {
     } catch {
       /* keep original */
     }
+    return src;
+  }
+  // Web / desktop: ask for the pre-encoded AAC tier (server falls back to the
+  // original transparently if the sidecar isn't built yet). Lossless = raw file.
+  if (typeof window === "undefined") return src;
+  try {
+    const quality = readPlaybackSettings().streamQuality || "high";
+    if (quality !== "lossless") {
+      const url = new URL(src, window.location.origin);
+      if (/\/api\/stream\//.test(url.pathname)) {
+        url.searchParams.set("quality", quality);
+        src = url.toString();
+      }
+    }
+  } catch {
+    /* keep original */
   }
   return src;
 }
@@ -925,33 +952,53 @@ async function resolveIfNeeded(
 }
 
 const prefetched = new Set<string>();
+/** First ~1 MiB — enough for FLAC headers + early frames on LAN. */
+const LIBRARY_WARM_RANGE = "bytes=0-1048575";
+const WARM_MAX_CONCURRENT = 2;
+let warmInFlight = 0;
+const warmWaiters: Array<() => void> = [];
+
+function runWarmSlot(task: () => Promise<void>) {
+  const start = () => {
+    warmInFlight += 1;
+    void task().finally(() => {
+      warmInFlight -= 1;
+      const next = warmWaiters.shift();
+      if (next) next();
+    });
+  };
+  if (warmInFlight < WARM_MAX_CONCURRENT) start();
+  else warmWaiters.push(start);
+}
 
 /**
- * Warm the next track while the current one plays.
- * Library: Range-fetch the first bytes into the browser cache.
- * Live/catalog: resolve the session server-side (yt-dlp is ~3s cold), which
- * also warms the server's byte cache, so the skip starts instantly.
+ * Warm a library stream (or resolve a live/catalog track) ahead of play.
+ * Used for next-in-queue, hover, and pointerdown intent.
  */
-function prefetchStream(track: PlayerTrack | null | undefined) {
+function warmLibraryStream(track: PlayerTrack | null | undefined) {
   if (!track) return;
   if (prefetched.has(track.id)) return;
   prefetched.add(track.id);
   if (prefetched.size > 200) prefetched.clear();
 
   if (isEphemeralTrack(track)) {
-    void fetch("/api/live", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: track.title,
-        artist: track.artist,
-        album: track.album,
-        trackId: isLibraryTrackId(track.id) ? track.id : undefined,
-        duration: track.duration || undefined,
-      }),
-      credentials: "same-origin",
-    }).catch(() => {
-      /* ignore */
+    runWarmSlot(async () => {
+      try {
+        await fetch("/api/live", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            trackId: isLibraryTrackId(track.id) ? track.id : undefined,
+            duration: track.duration || undefined,
+          }),
+          credentials: "same-origin",
+        });
+      } catch {
+        /* ignore */
+      }
     });
     return;
   }
@@ -964,13 +1011,44 @@ function prefetchStream(track: PlayerTrack | null | undefined) {
     /* keep */
   }
   if (!pathname.includes("/api/stream/")) return;
-  void fetch(src, {
-    headers: { Range: "bytes=0-262143" },
-    credentials: "same-origin",
-    cache: "force-cache",
-  }).catch(() => {
-    /* ignore */
+  runWarmSlot(async () => {
+    try {
+      await fetch(src, {
+        headers: { Range: LIBRARY_WARM_RANGE },
+        credentials: "same-origin",
+        cache: "force-cache",
+      });
+    } catch {
+      /* ignore */
+    }
   });
+}
+
+/** @deprecated alias — prefer warmLibraryStream */
+const prefetchStream = warmLibraryStream;
+
+/**
+ * Store the first ~15 s of these library tracks on disk via the service
+ * worker so a tap on any of them starts instantly. No-op for ephemeral
+ * (catalog/YouTube) tracks, offline copies, and the native iOS player.
+ */
+export function prefetchHeads(tracks: readonly (PlayerTrack | null | undefined)[]) {
+  const nativeIos = isNativeIosPlayerAvailable();
+  if (!nativeIos && !audioCacheSupported()) return;
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  for (const t of tracks) {
+    if (!t || isEphemeralTrack(t) || seen.has(t.id)) continue;
+    if (offlineStreamUrl(t.id)) continue;
+    seen.add(t.id);
+    const src = audioSrcFor(t);
+    if (src.includes("/api/stream/")) urls.push(src);
+  }
+  if (!urls.length) return;
+  // iOS app: AVPlayer bypasses the page fetch pipeline, so heads live in a
+  // native on-disk cache served through an AVAssetResourceLoader.
+  if (nativeIos) nativeIosPlayerPrefetchHeads(urls);
+  else cacheHeadUrls(urls);
 }
 
 /** Swap a queue entry when a stream/catalog id resolves to a real track. */
@@ -1035,6 +1113,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   /** Warm second program bus used for crossfade and gapless hand-off. */
   const nextAudioRef = useRef<HTMLAudioElement | null>(null);
+  /** Library track id currently loading into nextAudio for click-to-play. */
+  const primedTrackIdRef = useRef<string | null>(null);
   /** Demucs instrumental bus (full-quality stereo stem). */
   const instAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -1416,11 +1496,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       );
     }
 
-    for (const element of [
-      audioRef.current,
-      instAudioRef.current,
-      nextAudioRef.current,
-    ]) {
+    // Main bus always buffers eagerly — that's the click-to-play path.
+    // Spare / instrumental buses only pre-buffer when gapless wants them to
+    // (primeTrack flips the spare to "auto" on demand regardless).
+    if (audioRef.current) audioRef.current.preload = "auto";
+    for (const element of [instAudioRef.current, nextAudioRef.current]) {
       if (!element) continue;
       element.preload = settings.gaplessEnabled ? "auto" : "metadata";
     }
@@ -1538,6 +1618,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       transitionTimerRef.current = null;
     }
     const spare = nextAudioRef.current;
+    primedTrackIdRef.current = null;
     if (spare) {
       spare.pause();
       spare.removeAttribute("src");
@@ -1750,6 +1831,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       queueRef.current = nextQ;
       setQueue(nextQ);
 
+      primedTrackIdRef.current = null;
       warmAudio.pause();
       warmAudio.removeAttribute("src");
       warmAudio.volume = volumeRef.current;
@@ -1947,16 +2029,81 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const primeTrack = useCallback(
+    (raw: PlayerTrack) => {
+      if (followingRemoteRef.current) return;
+      if (transitionBusyRef.current) return;
+      if (isEphemeralTrack(raw)) return;
+      if (isNativeIosPlayerOwning()) return;
+      const spare = nextAudioRef.current;
+      if (!spare) return;
+      // Don't steal the spare bus right before a gapless/crossfade hand-off.
+      const main = audioRef.current;
+      if (main && playingRef.current && Number.isFinite(main.duration)) {
+        const settings = playbackSettingsRef.current;
+        const lead =
+          (settings.crossfadeEnabled ? settings.crossfadeSeconds : 0) + 8;
+        if (
+          (settings.gaplessEnabled || settings.crossfadeEnabled) &&
+          main.duration - main.currentTime <= lead
+        ) {
+          return;
+        }
+      }
+      const next = withPlayerMeta(raw);
+      if (trackRef.current?.id === next.id && playingRef.current) return;
+      const src = audioSrcFor(next);
+      if (!src.includes("/api/stream/") && !offlineStreamUrl(next.id)) return;
+      if (
+        primedTrackIdRef.current === next.id &&
+        spare.src &&
+        sameStreamUrl(spare.src, src)
+      ) {
+        return;
+      }
+      primedTrackIdRef.current = next.id;
+      spare.preload = "auto";
+      spare.volume = volumeRef.current;
+      setAudioSrc(spare, src);
+    },
+    [],
+  );
+
+  const warmLibraryStreamCb = useCallback((track: PlayerTrack) => {
+    warmLibraryStream(track);
+  }, []);
+
   const claimAndPlay = useCallback(
     (raw: PlayerTrack, nextQueue?: PlayerTrack[], gen?: number) => {
-      cancelTransition();
       transitionExhaustedTrackRef.current = null;
-      const audio = audioRef.current;
-      if (!audio && !isNativeIosPlayerAvailable()) return;
       const playGen = gen ?? ++playGenRef.current;
       if (playGen !== playGenRef.current) return;
 
       const next = withPlayerMeta(raw);
+      const desiredSrc = audioSrcFor(next);
+      const spare = nextAudioRef.current;
+      const canPromotePrime =
+        !transitionBusyRef.current &&
+        !isEphemeralTrack(next) &&
+        Boolean(spare?.src) &&
+        primedTrackIdRef.current === next.id &&
+        sameStreamUrl(spare!.src, desiredSrc);
+
+      if (!canPromotePrime) {
+        cancelTransition();
+      } else {
+        // Keep the primed element; only end an in-flight gapless timer.
+        if (transitionTimerRef.current != null) {
+          window.clearTimeout(transitionTimerRef.current);
+          transitionTimerRef.current = null;
+        }
+        transitionBusyRef.current = false;
+        audioRef.current?.pause();
+      }
+
+      const audio = audioRef.current;
+      if (!audio && !isNativeIosPlayerAvailable()) return;
+
       const queue = nextQueue?.map(withPlayerMeta);
       ownerIdRef.current = tabIdRef.current;
       if (queue) {
@@ -1967,6 +2114,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setTrack(next);
       setProgress(0);
       progressRef.current = 0;
+      // Optimistic: flip the UI to "playing" on the click itself (Spotify-style).
+      // Rolled back below if the element never starts.
+      playingRef.current = true;
+      setPlaying(true);
+      const rollbackPlaying = () => {
+        if (playGen !== playGenRef.current) return;
+        playingRef.current = false;
+        setPlaying(false);
+      };
 
       // Always leave karaoke when the song changes
       karaokeGenRef.current += 1;
@@ -2005,6 +2161,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           silenceHtmlAudio(audio);
           silenceHtmlAudio(instAudioRef.current);
           silenceHtmlAudio(nextAudioRef.current);
+          primedTrackIdRef.current = null;
           try {
             const loaded = await nativeIosPlayerLoad({
               url: audioSrcFor(next),
@@ -2015,6 +2172,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             if (!current()) return;
             if (!loaded) {
               setNativeIosPlayerOwning(false);
+              rollbackPlaying();
             } else {
               if (loaded.duration > 0) {
                 durationRef.current = loaded.duration;
@@ -2039,18 +2197,78 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        if (!audio) return;
-        setAudioSrc(audio, audioSrcFor(next));
+        if (!audio) {
+          rollbackPlaying();
+          return;
+        }
+
+        // Promote a pointerdown/hover-primed bus so we keep its buffer.
+        const warm = nextAudioRef.current;
+        if (
+          warm &&
+          primedTrackIdRef.current === next.id &&
+          warm.src &&
+          sameStreamUrl(warm.src, desiredSrc)
+        ) {
+          detachAudioListenersRef.current(audio);
+          audioRef.current = warm;
+          nextAudioRef.current = audio;
+          attachAudioListenersRef.current(warm);
+          primedTrackIdRef.current = null;
+          silenceHtmlAudio(audio);
+          applyMixVolumes();
+          if (warm.duration > 0) {
+            durationRef.current = warm.duration;
+            setDuration(warm.duration);
+          }
+          let ok = await playBoth();
+          if (!ok && current()) {
+            const buffered = await waitForCanPlay(warm, current, 8_000);
+            if (!buffered || !current()) {
+              rollbackPlaying();
+              return;
+            }
+            ok = await playBoth();
+          }
+          if (!current()) return;
+          if (!ok) {
+            rollbackPlaying();
+            return;
+          }
+          playingRef.current = true;
+          setPlaying(true);
+          publish({
+            track: next,
+            queue: queueRef.current,
+            playing: true,
+            progress: 0,
+            ownerId: tabIdRef.current,
+          });
+          const q = queueRef.current;
+          const idx = q.findIndex((t) => t.id === next.id);
+          prefetchStream(idx >= 0 ? q[idx + 1] : undefined);
+          return;
+        }
+
+        audio.preload = "auto";
+        setAudioSrc(audio, desiredSrc);
         applyMixVolumes();
         // Start immediately — don't wait for canplay (saves buffer latency).
         // Retry once if the element wasn't ready yet.
         let ok = await playBoth();
         if (!ok && current()) {
           const buffered = await waitForCanPlay(audio, current, 8_000);
-          if (!buffered || !current()) return;
+          if (!buffered || !current()) {
+            rollbackPlaying();
+            return;
+          }
           ok = await playBoth();
         }
-        if (!ok || !current()) return;
+        if (!current()) return;
+        if (!ok) {
+          rollbackPlaying();
+          return;
+        }
         playingRef.current = true;
         setPlaying(true);
         publish({
@@ -4381,6 +4599,80 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setMediaSessionPlaybackState(playing ? "playing" : "paused");
   }, [playing, track, isRemotePlayback]);
 
+  // Recent-tracks cache: once a library track has been playing for a few
+  // seconds (so the startup fetch isn't competing for bandwidth), ask the
+  // service worker to store the full body. Replays then start from disk.
+  useEffect(() => {
+    if (!track || !playing || isRemotePlayback) return;
+    if (isEphemeralTrack(track) || offlineStreamUrl(track.id)) return;
+    if (isNativeIosPlayerOwning()) return;
+    const id = window.setTimeout(() => {
+      if (trackRef.current?.id !== track.id || !playingRef.current) return;
+      cacheTrackUrl(audioSrcFor(track));
+    }, 6_000);
+    return () => window.clearTimeout(id);
+  }, [playing, track, isRemotePlayback]);
+
+  // Heads for the next few queue items — skipping ahead feels instant.
+  useEffect(() => {
+    if (!track || isRemotePlayback) return;
+    const q = queue;
+    const idx = q.findIndex((t) => t.id === track.id);
+    if (idx < 0) return;
+    const id = window.setTimeout(() => {
+      prefetchHeads(q.slice(idx + 1, idx + 4));
+    }, 3_000);
+    return () => window.clearTimeout(id);
+  }, [track, queue, isRemotePlayback]);
+
+  // Once per session: heads for recently played + liked library tracks, so the
+  // songs you actually come back to start from disk. Runs idle, after boot.
+  useEffect(() => {
+    const iosNative = nativeClientPlatform() === "ios";
+    if (!iosNative && !audioCacheSupported()) return;
+    let cancelled = false;
+    const run = async () => {
+      if (cancelled) return;
+      try {
+        if (iosNative && !(await probeNativeIosPlayer())) return;
+        const [recentRes, likesRes] = await Promise.all([
+          fetch("/api/recent?limit=100", { credentials: "same-origin" }),
+          fetch("/api/likes", { credentials: "same-origin" }),
+        ]);
+        if (cancelled) return;
+        const recent = recentRes.ok
+          ? ((await recentRes.json()) as { items?: { id: string }[] }).items ?? []
+          : [];
+        const likes = likesRes.ok
+          ? ((await likesRes.json()) as {
+              tracks?: { id: string; streamOnly?: boolean }[];
+            }).tracks ?? []
+          : [];
+        const ids: string[] = [];
+        for (const t of recent) if (t?.id) ids.push(t.id);
+        for (const t of likes) if (t?.id && !t.streamOnly) ids.push(t.id);
+        const tracks: PlayerTrack[] = ids
+          .filter((id) => isLibraryTrackId(id))
+          .slice(0, 300)
+          .map((id) => ({ id, title: "", artist: "", album: "" }));
+        prefetchHeads(tracks);
+      } catch {
+        /* best effort */
+      }
+    };
+    const w = window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    };
+    const timer = window.setTimeout(() => {
+      if (w.requestIdleCallback) w.requestIdleCallback(() => void run(), { timeout: 10_000 });
+      else void run();
+    }, 12_000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
+
   useEffect(() => {
     if (!track || isRemotePlayback) return;
     setMediaSessionPositionState(progress, duration, playing ? 1 : 1);
@@ -4748,6 +5040,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       panel,
       isPanelOpen,
       play,
+      warmLibraryStream: warmLibraryStreamCb,
+      primeTrack,
       toggle,
       seek,
       next,
@@ -4787,6 +5081,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       panel,
       isPanelOpen,
       play,
+      warmLibraryStreamCb,
+      primeTrack,
       toggle,
       seek,
       next,
@@ -4819,4 +5115,115 @@ export function usePlayer() {
   const ctx = useContext(PlayerContext);
   if (!ctx) throw new Error("usePlayer must be used within PlayerProvider");
   return ctx;
+}
+
+type WarmTrackHandlers = {
+  onPointerDown?: (event: ReactPointerEvent) => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+};
+
+/** Hover dwell before we commit the spare audio bus to a row. */
+const HOVER_PRIME_MS = 150;
+
+/**
+ * Page-mount warm for a tracklist:
+ *  - primes the first library track into the spare bus so the header "Play"
+ *    button starts instantly (skipped when `primeFirst` is false, e.g. shuffle);
+ *  - stores ~15 s heads of every library row on disk via the service worker so
+ *    tapping any row starts instantly.
+ * Re-runs when the list identity changes; all helpers de-dupe internally.
+ */
+export function usePrimeFirstTrack(
+  queue: readonly PlayerTrack[],
+  primeFirst = true,
+) {
+  const { warmLibraryStream, primeTrack } = usePlayer();
+  const first = queue[0];
+  const firstId = first && !isEphemeralTrack(first) ? first.id : null;
+  const listKey = useMemo(
+    () => queue.map((t) => t.id).join("\u0000"),
+    [queue],
+  );
+
+  useEffect(() => {
+    if (!primeFirst || !firstId) return;
+    const id = window.setTimeout(() => {
+      const t = queue[0];
+      if (!t || t.id !== firstId) return;
+      warmLibraryStream(t);
+      primeTrack(t);
+    }, 400);
+    return () => window.clearTimeout(id);
+  }, [primeFirst, firstId, queue, primeTrack, warmLibraryStream]);
+
+  useEffect(() => {
+    if (!listKey) return;
+    // Let the page paint + the first track prime before the head batch.
+    const id = window.setTimeout(() => prefetchHeads(queue), 1_200);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- listKey is the identity of `queue`
+  }, [listKey]);
+}
+
+/** Heads only (no first-track prime) — for search results / artist pages. */
+export function usePrefetchHeads(tracks: readonly PlayerTrack[]) {
+  const listKey = useMemo(
+    () => tracks.map((t) => t.id).join("\u0000"),
+    [tracks],
+  );
+  useEffect(() => {
+    if (!listKey) return;
+    const id = window.setTimeout(() => prefetchHeads(tracks), 1_200);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- listKey is the identity of `tracks`
+  }, [listKey]);
+}
+
+/**
+ * Pointerdown primes the idle audio bus immediately; a 150 ms hover dwell
+ * Range-warms the HTTP cache *and* primes the spare bus (desktop pointers only).
+ * Attach to track row play buttons for library (on-server) tracks.
+ */
+export function useWarmLibraryTrack() {
+  const { warmLibraryStream, primeTrack } = usePlayer();
+  const hoverTimerRef = useRef<number | null>(null);
+
+  const clearHover = useCallback(() => {
+    if (hoverTimerRef.current != null) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => clearHover(), [clearHover]);
+
+  return useCallback(
+    (track: PlayerTrack | null | undefined): WarmTrackHandlers => {
+      if (!track || isEphemeralTrack(track)) return {};
+      return {
+        onPointerDown: (event) => {
+          if (event.button !== 0) return;
+          warmLibraryStream(track);
+          primeTrack(track);
+        },
+        onMouseEnter: () => {
+          clearHover();
+          if (
+            typeof window !== "undefined" &&
+            !window.matchMedia("(hover: hover)").matches
+          ) {
+            return;
+          }
+          hoverTimerRef.current = window.setTimeout(() => {
+            hoverTimerRef.current = null;
+            warmLibraryStream(track);
+            primeTrack(track);
+          }, HOVER_PRIME_MS);
+        },
+        onMouseLeave: clearHover,
+      };
+    },
+    [clearHover, primeTrack, warmLibraryStream],
+  );
 }

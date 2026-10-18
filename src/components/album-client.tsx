@@ -21,7 +21,12 @@ import { TrackContextMenu } from "@/components/track-context-menu";
 import { TrackRowActions } from "@/components/track-row-actions";
 import { TrackRowIndex } from "@/components/track-row-index";
 import { Skeleton } from "@/components/ui/skeleton";
-import { usePlayer, type PlayerTrack } from "@/components/player-provider";
+import {
+  usePlayer,
+  usePrimeFirstTrack,
+  useWarmLibraryTrack,
+  type PlayerTrack,
+} from "@/components/player-provider";
 import {
   isPlayerRowCurrent,
   trackRowEndCell,
@@ -91,6 +96,7 @@ function albumLibraryPinKey(artistName: string, albumTitle: string) {
 export function AlbumClient({ albumId }: { albumId: string }) {
   const auth = useAuthOptional();
   const { play, toggle, track, queue, playing } = usePlayer();
+  const warmTrack = useWarmLibraryTrack();
   const router = useRouter();
   const ref = useMemo(() => decodeAlbumId(albumId), [albumId]);
 
@@ -238,6 +244,8 @@ export function AlbumClient({ albumId }: { albumId: string }) {
       })),
     [tracks, album, artist, title],
   );
+  // Page-load prime: the header Play button starts without a buffer wait.
+  usePrimeFirstTrack(albumQueue);
 
   const offlineTracks: DesktopOfflineTrack[] = useMemo(
     () =>
@@ -543,6 +551,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
       streamUrl: t.streamUrl || null,
       explicit: t.explicit,
       duration: t.duration || undefined,
+      quality: t.localTrackId ? "local" : "youtube",
     };
   }
 
@@ -717,6 +726,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                             type="button"
                             disabled={busy}
                             onClick={() => void playTrack(t)}
+                            {...warmTrack(playerTrack)}
                             className="min-w-0 flex-1 text-left disabled:opacity-50"
                           >
                             <div
@@ -938,6 +948,10 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                       onDragStart={(e) => setDragTrack(e, playerTrack)}
                       className="group/row cursor-grab transition-colors active:cursor-grabbing"
                       onClick={() => void playTrack(t)}
+                      {...warmTrack({
+                        ...playerTrack,
+                        quality: t.localTrackId ? "local" : playerTrack.quality,
+                      })}
                     >
                       <td
                         className={trackRowStartCell(

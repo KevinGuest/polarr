@@ -41,6 +41,8 @@ export function UserMenu({
     await fetch("/api/auth/me", { method: "DELETE" }).catch(() => null);
     const { clearDesktopOfflineSession } = await import("@/lib/desktop-offline");
     await clearDesktopOfflineSession().catch(() => null);
+    const { clearAudioCache } = await import("@/lib/audio-cache");
+    await clearAudioCache().catch(() => null);
     clear();
     router.replace("/login");
     router.refresh();
@@ -201,6 +203,8 @@ export function ProfileDrawer({
     await fetch("/api/auth/me", { method: "DELETE" }).catch(() => null);
     const { clearDesktopOfflineSession } = await import("@/lib/desktop-offline");
     await clearDesktopOfflineSession().catch(() => null);
+    const { clearAudioCache } = await import("@/lib/audio-cache");
+    await clearAudioCache().catch(() => null);
     clear();
     router.replace("/login");
     router.refresh();

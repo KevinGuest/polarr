@@ -148,10 +148,12 @@ export async function POST(req: Request) {
 
   if (body.action === "scan" || !body.action) {
     const result = await scanMusicLibrary();
+    const { getPreencodeStatus } = await import("@/lib/stream-compat");
     return json({
       ok: true,
       ...result,
       totalTracks: countTracks(),
+      preencode: getPreencodeStatus(),
     });
   }
 

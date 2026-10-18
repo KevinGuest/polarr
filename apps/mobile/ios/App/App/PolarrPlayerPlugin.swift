@@ -25,6 +25,8 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getState", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "syncBrowse", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "prefetchHeads", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "clearHeadCache", returnType: CAPPluginReturnPromise),
     ]
 
     /// CarPlay + remote commands reach the same instance Capacitor created.
@@ -49,6 +51,8 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private var browseItems: [PolarrBrowseItem] = []
     private var browseIndex: Int = -1
+    /// Keeps the resource-loader delegate alive for the current head-backed item.
+    private var headLoader: PolarrHeadResourceLoader?
 
     public override func load() {
         super.load()
@@ -59,6 +63,18 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func isAvailable(_ call: CAPPluginCall) {
         call.resolve(["available": true])
+    }
+
+    /// Store the first ~15 s of each stream URL so a later tap starts instantly.
+    @objc func prefetchHeads(_ call: CAPPluginCall) {
+        let urls = (call.getArray("urls", String.self) ?? []).prefix(120)
+        PolarrHeadCache.shared.prefetch(Array(urls))
+        call.resolve(["queued": urls.count])
+    }
+
+    @objc func clearHeadCache(_ call: CAPPluginCall) {
+        PolarrHeadCache.shared.clear()
+        call.resolve()
     }
 
     @objc func syncBrowse(_ call: CAPPluginCall) {
@@ -293,7 +309,17 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private func replacePlayer(with url: URL) {
         teardownTimeObservers()
-        let item = AVPlayerItem(url: url)
+        headLoader = nil
+        let item: AVPlayerItem
+        if !url.isFileURL, let (asset, loader) = PolarrHeadResourceLoader.makeAsset(for: url) {
+            // Head on disk → first bytes served locally, remainder via Range.
+            headLoader = loader
+            item = AVPlayerItem(asset: asset)
+        } else {
+            item = AVPlayerItem(url: url)
+        }
+        // Start as soon as a few seconds are decodable rather than a deep buffer.
+        item.preferredForwardBufferDuration = 4
         if let player {
             player.replaceCurrentItem(with: item)
         } else {
@@ -314,6 +340,7 @@ public class PolarrPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         teardownTimeObservers()
         player?.replaceCurrentItem(with: nil)
         statusObservation = nil
+        headLoader = nil
     }
 
     private func teardownTimeObservers() {

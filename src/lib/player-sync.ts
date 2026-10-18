@@ -195,9 +195,10 @@ export function heartbeatDevice(
 }
 
 /**
- * Drop a device from Connect (app background / page hide).
- * If it owned playback, clear ownership so other clients stop showing
- * "Playing on …" for a frozen/suspended session.
+ * Drop a device from Connect (page unload, or backgrounded while it is
+ * not the audible owner). If it owned playback, clear ownership so other
+ * clients stop showing "Playing on …" for a session that can no longer
+ * take commands. A hidden owner that is still playing must not call this.
  */
 export function leaveConnect(userId: string, deviceId: string): void {
   const session = sessionFor(userId);

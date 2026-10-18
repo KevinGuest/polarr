@@ -1168,6 +1168,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       : detectConnectDevice(),
   );
   const followingRemoteRef = useRef(false);
+  /** Owner heartbeats must apply the snapshot their POST already consumed. */
+  const applyConnectSyncRef = useRef<(data: ConnectSyncResponse) => void>(
+    () => {},
+  );
+  /** Installed by the connect effect; drops presence after playback stops in the background. */
+  const suspendIdleConnectRef = useRef<() => void>(() => {});
   const sendConnectCommandRef = useRef<
     (
       command:
@@ -1281,7 +1287,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [track]);
   useEffect(() => {
     playingRef.current = playing;
-  }, [playing]);
+    // Hidden + no longer the audible owner (pause, stop, or handoff).
+    suspendIdleConnectRef.current();
+  }, [playing, isRemotePlayback]);
   useEffect(() => {
     progressRef.current = progress;
   }, [progress]);
@@ -1708,6 +1716,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           volume: payload.volume,
           shuffle: Boolean(payload.shuffle),
         },
+      }).then((data) => {
+        // snapshotConnect takes this device's queue. Dropping the body
+        // silently discards pause / seek / transfer while the heartbeat
+        // is the only channel (SSE down, or it won the race).
+        if (!data?.commands?.length) return;
+        applyConnectSyncRef.current(data);
       }).catch(() => null);
     }
   }, []);
@@ -3258,6 +3272,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         runCommands(data.commands);
       }
     };
+    applyConnectSyncRef.current = applyConnectData;
 
     const tick = async () => {
       if (cancelled) return;
@@ -3323,11 +3338,38 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         });
     };
 
-    void tick();
-    schedulePoll();
-    startStream();
-
     let connectSuspended = false;
+    let pageHidden = document.visibilityState === "hidden";
+    let appInactive = false;
+    /** pagehide — the document is actually going away, not just obscured. */
+    let unloaded = false;
+    let backgroundSuspendTimer: number | null = null;
+
+    const clearBackgroundSuspend = () => {
+      if (backgroundSuspendTimer != null) {
+        window.clearTimeout(backgroundSuspendTimer);
+        backgroundSuspendTimer = null;
+      }
+    };
+
+    const capacitorNative = () => {
+      const cap = (
+        window as unknown as {
+          Capacitor?: { isNativePlatform?: () => boolean };
+        }
+      ).Capacitor;
+      return cap?.isNativePlatform?.() === true;
+    };
+
+    // This tab is the device actually outputting audio. Hiding the window
+    // must not drop it — playback keeps the page schedulable, and other
+    // devices still need to reach it. pagehide is the real unload.
+    const ownsAudiblePlayback = () =>
+      playingRef.current &&
+      !followingRemoteRef.current &&
+      ownerIdRef.current === tabIdRef.current;
+
+    const backgrounded = () => pageHidden || appInactive;
 
     const leaveConnectPresence = () => {
       const device = localDeviceRef.current;
@@ -3352,6 +3394,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
 
     const suspendConnect = () => {
+      clearBackgroundSuspend();
       if (cancelled || connectSuspended) return;
       connectSuspended = true;
       leaveConnectPresence();
@@ -3365,13 +3408,61 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       startStream();
     };
 
-    const onVisibility = () => {
-      if (document.visibilityState === "hidden") suspendConnect();
-      else resumeConnect();
+    // onEnded clears `playing` before the next track starts. Wait out that
+    // gap so a song change while minimized doesn't look like a stop.
+    // If audio starts again after we did leave, rejoin — the heartbeat
+    // alone would republish state but leave SSE and polling torn down.
+    const BACKGROUND_IDLE_MS = 1500;
+    suspendIdleConnectRef.current = () => {
+      if (cancelled || unloaded) return;
+      if (!backgrounded() || ownsAudiblePlayback()) {
+        clearBackgroundSuspend();
+        if (backgrounded() && ownsAudiblePlayback() && connectSuspended) {
+          resumeConnect();
+        }
+        return;
+      }
+      if (connectSuspended || backgroundSuspendTimer != null) return;
+      backgroundSuspendTimer = window.setTimeout(() => {
+        backgroundSuspendTimer = null;
+        if (cancelled || unloaded || !backgrounded() || ownsAudiblePlayback()) {
+          return;
+        }
+        suspendConnect();
+      }, BACKGROUND_IDLE_MS);
     };
-    const onPageHide = () => suspendConnect();
+
+    const leaveIfNotAudibleOwner = () => {
+      if (ownsAudiblePlayback()) return;
+      suspendConnect();
+    };
+
+    const onVisibility = () => {
+      pageHidden = document.visibilityState === "hidden";
+      if (!pageHidden) {
+        unloaded = false;
+        clearBackgroundSuspend();
+        if (!appInactive) resumeConnect();
+        return;
+      }
+      leaveIfNotAudibleOwner();
+    };
+    const onPageHide = () => {
+      // Capacitor webviews can emit pagehide for a background transition.
+      // appStateChange is that signal; a real navigation tears the JS
+      // context down either way. Desktop/browser pagehide is unload.
+      if (capacitorNative() && ownsAudiblePlayback()) return;
+      unloaded = true;
+      suspendConnect();
+    };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("pagehide", onPageHide);
+    if (backgrounded()) leaveIfNotAudibleOwner();
+    if (!connectSuspended) {
+      void tick();
+      schedulePoll();
+      startStream();
+    }
 
     let removeAppState: (() => void) | undefined;
     try {
@@ -3389,8 +3480,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       ).Capacitor;
       if (cap?.isNativePlatform?.() !== false && cap?.Plugins?.App) {
         const maybe = cap.Plugins.App.addListener("appStateChange", ({ isActive }) => {
-          if (isActive) resumeConnect();
-          else suspendConnect();
+          if (isActive) {
+            appInactive = false;
+            unloaded = false;
+            clearBackgroundSuspend();
+            if (!pageHidden) resumeConnect();
+          } else {
+            appInactive = true;
+            leaveIfNotAudibleOwner();
+          }
         });
         void Promise.resolve(maybe).then((handle) => {
           removeAppState = () => {
@@ -3405,6 +3503,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
       sseAlive = false;
+      clearBackgroundSuspend();
+      applyConnectSyncRef.current = () => {};
+      suspendIdleConnectRef.current = () => {};
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pagehide", onPageHide);
       removeAppState?.();

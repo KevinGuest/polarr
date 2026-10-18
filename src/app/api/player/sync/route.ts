@@ -79,7 +79,7 @@ const bodySchema = z.object({
   }),
   state: stateSchema.optional(),
   command: commandSchema.optional(),
-  /** Drop this device from Connect (background / unload). */
+  /** Drop this device from Connect (unload, or idle while backgrounded). */
   leave: z.boolean().optional(),
 });
 

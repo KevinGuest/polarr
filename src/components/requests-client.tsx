@@ -138,6 +138,7 @@ export function RequestsClient() {
   const [scanResult, setScanResult] = useState<{
     scanned: number;
     added: number;
+    removed: number;
     totalTracks: number;
     newest: {
       id: string;
@@ -231,13 +232,14 @@ export function RequestsClient() {
         return;
       }
       const added = Number(data?.added) || 0;
+      const removed = Number(data?.removed) || 0;
       const scanned = Number(data?.scanned) || 0;
       const totalTracks = Number(data?.totalTracks) || 0;
-      toastSuccess(
-        added > 0
-          ? `Scan complete · ${added} added · ${totalTracks} total`
-          : `Scan complete · ${scanned} files checked · ${totalTracks} total`,
-      );
+      const parts = [`Scan complete · ${scanned} files checked`];
+      if (added > 0) parts.push(`${added} added`);
+      if (removed > 0) parts.push(`${removed} removed`);
+      parts.push(`${totalTracks} total`);
+      toastSuccess(parts.join(" · "));
       const newestRes = await fetch(
         "/api/admin/media?mode=tracks&page=1&limit=10",
         { cache: "no-store" },
@@ -246,6 +248,7 @@ export function RequestsClient() {
       setScanResult({
         scanned,
         added,
+        removed,
         totalTracks,
         newest: Array.isArray(newestData?.tracks) ? newestData.tracks : [],
       });
@@ -458,8 +461,11 @@ export function RequestsClient() {
                 Last scan
               </h2>
               <p className="text-xs text-muted-foreground">
-                {scanResult.scanned} files checked · {scanResult.added} new ·{" "}
-                {scanResult.totalTracks} in library
+                {scanResult.scanned} files checked · {scanResult.added} new
+                {scanResult.removed > 0
+                  ? ` · ${scanResult.removed} removed`
+                  : ""}{" "}
+                · {scanResult.totalTracks} in library
               </p>
             </div>
             <Button asChild size="sm" variant="ghost" className="h-8 text-xs">

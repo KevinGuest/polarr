@@ -11,10 +11,13 @@ import {
 } from "./audio-tags";
 import {
   deleteTrack,
+  deleteTracks,
   getSettings,
   getTrackByPath,
+  listLibraryTrackIdPaths,
   upsertTrack,
 } from "./db";
+import { remapForeignMusicPath } from "./music-roots";
 import { downloadsDir, musicDir } from "./paths";
 import { classifyIndexedTrackSource } from "./track-source";
 
@@ -120,21 +123,101 @@ async function mapPool<T>(
   );
 }
 
+function dirIsScannable(dir: string): boolean {
+  try {
+    if (!fs.existsSync(dir)) return false;
+    const st = fs.statSync(dir);
+    if (!st.isDirectory()) return false;
+    fs.readdirSync(dir);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function pathUnderRoot(filePath: string, root: string): boolean {
+  const abs = path.resolve(filePath);
+  const rootAbs = path.resolve(root);
+  return abs === rootAbs || abs.startsWith(rootAbs + path.sep);
+}
+
+/** Prefer parent folders so /music and /music/downloads are walked once. */
+function collapseNestedRoots(dirs: string[]): string[] {
+  const resolved = [...new Set(dirs.map((dir) => path.resolve(dir)))].sort(
+    (a, b) => a.length - b.length,
+  );
+  const out: string[] = [];
+  for (const dir of resolved) {
+    if (out.some((parent) => pathUnderRoot(dir, parent))) continue;
+    out.push(dir);
+  }
+  return out;
+}
+
+/** True when this DB path lives in a tree we actually listed this scan. */
+function storedPathUnderWalkedRoots(
+  stored: string,
+  walkedRoots: string[],
+): boolean {
+  if (walkedRoots.some((root) => pathUnderRoot(stored, root))) return true;
+  const remapped = remapForeignMusicPath(stored);
+  return Boolean(
+    remapped && walkedRoots.some((root) => pathUnderRoot(remapped, root)),
+  );
+}
+
+/**
+ * Drop library rows whose files vanished (Lidarr delete, manual rm).
+ * Skips prune when no music root can be listed, so an unmounted volume
+ * cannot wipe the index.
+ */
+function pruneMissingLibraryTracks(files: string[], roots: string[]): number {
+  const walkedRoots = roots.filter(dirIsScannable);
+  if (walkedRoots.length === 0) {
+    console.warn(
+      "[polarr] library scan skipped prune — music root is missing or unreadable",
+    );
+    return 0;
+  }
+
+  const seen = new Set(files.map((file) => path.resolve(file)));
+  const staleIds: string[] = [];
+  for (const row of listLibraryTrackIdPaths()) {
+    const abs = path.resolve(row.path);
+    if (seen.has(abs)) continue;
+    const remapped = remapForeignMusicPath(row.path);
+    if (remapped && seen.has(path.resolve(remapped))) continue;
+    if (!storedPathUnderWalkedRoots(row.path, walkedRoots)) continue;
+    staleIds.push(row.id);
+  }
+
+  if (!staleIds.length) return 0;
+  const removed = deleteTracks(staleIds);
+  console.info(`[polarr] library scan pruned ${removed} missing tracks`);
+  return removed;
+}
+
 /**
  * Walk music + downloads roots, read embedded tags (ffprobe), and index
- * match_key so catalog/live resolve can find local files.
+ * match_key so catalog/live resolve can find local files. Rows whose files
+ * are gone from those roots are removed so libraryCount matches disk.
  */
 export async function scanMusicLibrary(): Promise<{
   scanned: number;
   probed: number;
   added: number;
+  removed: number;
   root: string;
 }> {
   const settings = getSettings();
   const root = settings.musicRoot || musicDir();
   // Always index downtify output so those files stream without extra setup.
   const dlRoot = path.resolve(downloadsDir());
-  const roots = Array.from(new Set([path.resolve(root), dlRoot]));
+  const aliasRoots = [
+    remapForeignMusicPath(root),
+    dirIsScannable("/music") ? "/music" : null,
+  ].filter((dir): dir is string => Boolean(dir && dirIsScannable(dir)));
+  const roots = collapseNestedRoots([root, dlRoot, ...aliasRoots]);
   const files = roots.flatMap((dir) => walk(dir));
   let probed = 0;
   let added = 0;
@@ -223,6 +306,8 @@ export async function scanMusicLibrary(): Promise<{
     if (isNew) added += 1;
   });
 
+  const removed = pruneMissingLibraryTracks(files, roots);
+
   if (added > 0) {
     try {
       const { notifyDiscord } = await import("@/lib/admin-notify");
@@ -247,15 +332,23 @@ export async function scanMusicLibrary(): Promise<{
   try {
     const { warmLibrarySidecars } = await import("@/lib/stream-compat");
     const { listLibraryTrackPaths } = await import("@/lib/db");
-    const { queued, removed } = warmLibrarySidecars(listLibraryTrackPaths());
-    if (queued || removed) {
+    const { queued, removed: sidecarOrphans } = warmLibrarySidecars(
+      listLibraryTrackPaths(),
+    );
+    if (queued || sidecarOrphans) {
       console.info(
-        `[polarr] sidecar pre-encode · ${queued} queued · ${removed} orphans removed`,
+        `[polarr] sidecar pre-encode · ${queued} queued · ${sidecarOrphans} orphans removed`,
       );
     }
   } catch {
     /* non-fatal */
   }
 
-  return { scanned: files.length, probed, added, root: roots.join(" + ") };
+  return {
+    scanned: files.length,
+    probed,
+    added,
+    removed,
+    root: roots.join(" + "),
+  };
 }

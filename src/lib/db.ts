@@ -3780,6 +3780,13 @@ export function listLibraryTrackPaths(): string[] {
   ).map((r) => r.path);
 }
 
+/** Library track ids + paths for scan prune of files Lidarr/disk removed. */
+export function listLibraryTrackIdPaths(): { id: string; path: string }[] {
+  return getDb()
+    .prepare(`SELECT id, path FROM tracks WHERE ${LIBRARY_TRACK_FILTER}`)
+    .all() as { id: string; path: string }[];
+}
+
 export type AlbumListRow = {
   artist: string;
   title: string;
@@ -4067,6 +4074,16 @@ export function deleteTrack(
   }
 
   return track;
+}
+
+/** Batch wrapper around deleteTrack (likes survive as stream stubs). */
+export function deleteTracks(ids: string[]): number {
+  if (!ids.length) return 0;
+  const tx = getDb().transaction((list: string[]) => {
+    for (const id of list) deleteTrack(id);
+  });
+  tx(ids);
+  return ids.length;
 }
 
 function recordTrackDeletion(id: string) {

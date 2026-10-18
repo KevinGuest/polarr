@@ -82,7 +82,7 @@ async function tick() {
     s.lastScanAt = Date.now();
     s.lastError = null;
     console.info(
-      `[polarr] library scan ok · ${result.scanned} files · ${result.probed} probed · next ≤${minutes}m`,
+      `[polarr] library scan ok · ${result.scanned} files · ${result.probed} probed · ${result.added} added · ${result.removed} removed · next ≤${minutes}m`,
     );
   } catch (err) {
     s.lastScanAt = Date.now();

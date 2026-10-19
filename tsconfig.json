@@ -30,5 +30,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "ios", "ui-preview", "apps"]
+  "exclude": ["node_modules", "ios", "ui-preview", "apps/desktop", "apps/mobile"]
 }

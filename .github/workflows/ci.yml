@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Read-only token, no secrets used anywhere in this workflow.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  server:
+    name: Server (typecheck + next build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      # Node 22 matches the Dockerfile (node:22-bookworm-slim), which is what ships.
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # No install scripts needed: tsc and next build don't load native addons.
+      # (better-sqlite3 has no install script; onnxruntime-node's only fetches
+      # optional GPU providers.) Verified locally on 0ee9635.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # next typegen writes the route types (LayoutProps etc.) that tsc needs.
+      - name: Typecheck
+        run: |
+          npx next typegen
+          npm run typecheck
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+
+  desktop-frontend:
+    name: Desktop frontend (tsc + vite build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      # Node 24 matches release.yml's desktop build.
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/desktop/package-lock.json
+
+      # Shared UI in /src resolves imports through the root node_modules.
+      - name: Install shared UI dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install desktop dependencies
+        working-directory: apps/desktop
+        run: npm ci --ignore-scripts
+
+      # tsc --noEmit && vite build: the step that failed in desktop-v0.2.19.
+      - name: Build desktop frontend
+        working-directory: apps/desktop
+        run: npm run build

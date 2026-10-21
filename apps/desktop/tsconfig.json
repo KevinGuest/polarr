@@ -12,7 +12,6 @@
     "isolatedModules": true,
     "noEmit": true,
     "strict": true,
-    "baseUrl": ".",
     "paths": {
       "@/*": ["../../src/*"],
       "next/link": ["../client/navigation.tsx"],

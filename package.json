@@ -59,7 +59,7 @@
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.10",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^7"
   },
   "description": "Self-hosted music discovery, requests, and streaming for your home server"
 }

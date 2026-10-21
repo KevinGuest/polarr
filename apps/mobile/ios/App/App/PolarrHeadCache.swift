@@ -21,8 +21,9 @@ final class PolarrHeadCache {
 
     /// ~15 s of AAC-LC 256 kbps including the moov atom.
     static let headBytes = 480 * 1024
-    private let maxEntries = 800
-    private let maxTotalBytes: Int64 = 400 * 1024 * 1024
+    /// Whole library. iOS may purge Caches under storage pressure.
+    private let maxEntries = 5000
+    private let maxTotalBytes: Int64 = 2_500_000_000
 
     struct Entry {
         let data: Data

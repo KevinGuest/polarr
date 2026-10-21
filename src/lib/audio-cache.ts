@@ -27,9 +27,7 @@ let registering: Promise<ServiceWorkerRegistration | null> | null = null;
 export function registerAudioCacheWorker(): Promise<ServiceWorkerRegistration | null> {
   if (!audioCacheSupported()) return Promise.resolve(null);
   if (registering) return registering;
-  registering = navigator.serviceWorker
-    .register(SW_URL, { scope: "/" })
-    .catch(() => null);
+  registering = navigator.serviceWorker.register(SW_URL, { scope: "/" }).catch(() => null);
   return registering;
 }
 
@@ -53,7 +51,7 @@ export function cacheTrackUrl(url: string) {
 }
 
 /** Respect Data Saver / metered hints for speculative prefetch. */
-function prefetchAllowed(): boolean {
+export function audioPrefetchAllowed(): boolean {
   if (typeof navigator === "undefined") return false;
   const conn = (
     navigator as Navigator & {
@@ -73,10 +71,21 @@ const MAX_HEAD_BATCH = 120;
  * repeatedly — the worker skips anything it already has.
  */
 export function cacheHeadUrls(urls: readonly string[]) {
-  if (!prefetchAllowed()) return;
+  if (!audioPrefetchAllowed()) return;
   const list = urls.filter((u) => u && /\/api\/stream\//.test(u));
   if (!list.length) return;
   post({ type: "cache-heads", urls: list.slice(0, MAX_HEAD_BATCH) });
+}
+
+/**
+ * Walk every library track in the service worker and store a ~15 s head.
+ * Resumes from the last offset. No-ops under Data Saver. iOS uses the native
+ * head cache instead — the caller pages `/api/library/ids` itself there.
+ */
+export function startLibraryHeadSync(quality: string) {
+  if (!audioPrefetchAllowed()) return;
+  const q = ["high", "standard", "compact", "lossless"].includes(quality) ? quality : "high";
+  post({ type: "sync-library", quality: q });
 }
 
 /** Wipe cached audio (logout / account switch) — web SW cache and iOS heads. */

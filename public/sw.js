@@ -4,8 +4,8 @@
  *
  * Two tiers, Spotify-style:
  *
- *  1. HEADS  — the first ~15 s (480 KiB of AAC 256k) of tracks you're likely
- *     to tap next: rows on screen, the next few queue items, liked/recent.
+ *  1. HEADS  — the first ~15 s (480 KiB of AAC 256k). Rows on screen jump
+ *     the queue. A library sync job then walks every on-server track.
  *     When <audio> opens a track we answer its first `bytes=0-` request with
  *     the head from disk, so decoding starts instantly; the element's
  *     follow-up range for the remainder goes to the network and has the head
@@ -27,8 +27,10 @@ const MAX_FULL_TRACKS = 40;
 const MAX_FULL_TRACK_BYTES = 160 * 1024 * 1024;
 /** ~15 s of AAC-LC 256 kbps (incl. moov). Raw FLAC heads are shorter but still useful. */
 const HEAD_BYTES = 480 * 1024;
-const MAX_HEADS = 800; // ≈ 375 MB
-const HEAD_FETCH_CONCURRENCY = 3;
+/** Whole-library job. ~2.4 GB at 15 s / 256 kbps. Browser quota stops us earlier. */
+const MAX_HEADS = 5000;
+const HEAD_FETCH_CONCURRENCY = 2;
+const HEAD_CURSOR = "/__polarr/head-cursor";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -274,8 +276,16 @@ self.addEventListener("message", (event) => {
       break;
     case "cache-heads":
       if (Array.isArray(data.urls)) {
-        event.waitUntil(enqueueHeads(data.urls.filter((u) => typeof u === "string")));
+        event.waitUntil(
+          enqueueHeads(
+            data.urls.filter((u) => typeof u === "string"),
+            true,
+          ),
+        );
       }
+      break;
+    case "sync-library":
+      event.waitUntil(syncLibrary(typeof data.quality === "string" ? data.quality : "high"));
       break;
     case "clear":
       event.waitUntil(caches.delete(CACHE));
@@ -297,7 +307,7 @@ self.addEventListener("message", (event) => {
     default:
       break;
   }
-}
+});
 
 /** Complete body for replays. */
 async function cacheFull(url) {
@@ -338,10 +348,14 @@ async function cacheFull(url) {
   }
 }
 
-/** Queue heads; most recently requested first (what's on screen now wins). */
-async function enqueueHeads(urls) {
+let quotaExceeded = false;
+let librarySyncing = false;
+
+/** Queue heads. `front` is for rows on screen; the library job appends. */
+async function enqueueHeads(urls, front) {
   const cache = await caches.open(CACHE);
-  for (const url of urls.slice().reverse()) {
+  const list = front ? urls.slice().reverse() : urls;
+  for (const url of list) {
     let parsed;
     try {
       parsed = new URL(url, self.location.origin);
@@ -358,7 +372,9 @@ async function enqueueHeads(urls) {
     }
     const i = headQueue.findIndex((item) => item.key === key);
     if (i >= 0) headQueue.splice(i, 1);
-    headQueue.unshift({ key, url: parsed.toString() });
+    const item = { key, url: parsed.toString() };
+    if (front) headQueue.unshift(item);
+    else headQueue.push(item);
   }
   while (headQueue.length > MAX_HEADS) headQueue.pop();
   while (headWorkers < HEAD_FETCH_CONCURRENCY && headQueue.length) {
@@ -415,7 +431,92 @@ async function fetchHead(key, url) {
   };
   const q = res.headers.get("X-Polarr-Stream-Quality");
   if (q) headers["X-Polarr-Stream-Quality"] = q;
-  await cache.put(headKeyFor(key), new Response(body, { status: 200, headers }));
+  try {
+    await cache.put(headKeyFor(key), new Response(body, { status: 200, headers }));
+  } catch {
+    quotaExceeded = true;
+    return;
+  }
   await touch(cache, HEAD_INDEX, key);
   await trim(cache, HEAD_INDEX, MAX_HEADS, headKeyFor);
+}
+
+const QUALITIES = new Set(["high", "standard", "compact", "lossless"]);
+
+async function readCursor(cache) {
+  try {
+    const res = await cache.match(HEAD_CURSOR);
+    if (!res) return { offset: 0, quality: "" };
+    const parsed = await res.json();
+    return {
+      offset: Number(parsed.offset) || 0,
+      quality: typeof parsed.quality === "string" ? parsed.quality : "",
+    };
+  } catch {
+    return { offset: 0, quality: "" };
+  }
+}
+
+async function writeCursor(cache, offset, quality) {
+  await cache.put(
+    HEAD_CURSOR,
+    new Response(JSON.stringify({ offset, quality }), {
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Page through /api/library/ids and store a head for every on-server track.
+ * One run at a time; resumes after reload. Stops when the Cache API is full.
+ */
+async function syncLibrary(rawQuality) {
+  if (librarySyncing || quotaExceeded) return;
+  const quality = QUALITIES.has(rawQuality) ? rawQuality : "high";
+  librarySyncing = true;
+  try {
+    const cache = await caches.open(CACHE);
+    const cursor = await readCursor(cache);
+    let offset = cursor.quality === quality ? cursor.offset : 0;
+    for (;;) {
+      if (quotaExceeded) break;
+      const res = await fetch(`/api/library/ids?offset=${offset}&limit=80`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (!res.ok) break;
+      const data = await res.json();
+      const ids = Array.isArray(data.ids) ? data.ids : [];
+      if (!ids.length) {
+        await writeCursor(cache, 0, quality);
+        break;
+      }
+      const urls = ids
+        .filter((id) => typeof id === "string" && id && !id.includes("/"))
+        .map(
+          (id) => `${self.location.origin}/api/stream/${encodeURIComponent(id)}?quality=${quality}`,
+        );
+      await enqueueHeads(urls, false);
+      // Don't page ahead of the download workers. Bail if they stall so the
+      // cursor is saved and the next launch resumes instead of spinning.
+      let spins = 0;
+      while (headQueue.length > 24 && !quotaExceeded && spins < 150) {
+        await sleep(400);
+        spins += 1;
+      }
+      if (quotaExceeded || headQueue.length > 24) break;
+      offset += ids.length;
+      await writeCursor(cache, data.done ? 0 : offset, quality);
+      if (data.done) break;
+      await sleep(250);
+    }
+  } catch {
+    /* next launch resumes from the cursor */
+  } finally {
+    librarySyncing = false;
+  }
 }

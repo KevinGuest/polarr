@@ -11,7 +11,13 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { usePathname } from "next/navigation";
-import { nativeAssetUrl, ensureNativeMediaTicket, isNativeClient, nativeClientPlatform, nativeSessionToken } from "@/lib/native-client";
+import {
+  nativeAssetUrl,
+  ensureNativeMediaTicket,
+  isNativeClient,
+  nativeClientPlatform,
+  nativeSessionToken,
+} from "@/lib/native-client";
 import {
   bindMediaSessionActions,
   mediaSessionArtworkUrl,
@@ -39,11 +45,7 @@ import {
   usesSystemVolume,
   writeSystemVolume,
 } from "@/lib/ios-system-volume";
-import {
-  durableCoverPath,
-  isEphemeralCoverUrl,
-  needsDurableCover,
-} from "@/lib/player-cover";
+import { durableCoverPath, isEphemeralCoverUrl, needsDurableCover } from "@/lib/player-cover";
 import { primaryArtistName } from "@/lib/track-match";
 import { pushRecentPlayedTrack } from "@/lib/recent-searches";
 import { formatDuration, titleLooksExplicit } from "@/lib/utils";
@@ -52,8 +54,10 @@ import { LISTEN_HEARTBEAT_SECONDS } from "@/lib/listen";
 import { offlineStreamUrl } from "@/lib/desktop-offline";
 import {
   audioCacheSupported,
+  audioPrefetchAllowed,
   cacheHeadUrls,
   cacheTrackUrl,
+  startLibraryHeadSync,
 } from "@/lib/audio-cache";
 import {
   detectConnectDevice,
@@ -87,13 +91,7 @@ type AudioEffectsGraph = {
   monoRight: GainNode;
 };
 
-export type KaraokeUiStatus =
-  | "idle"
-  | "ready"
-  | "processing"
-  | "queued"
-  | "unavailable"
-  | "error";
+export type KaraokeUiStatus = "idle" | "ready" | "processing" | "queued" | "unavailable" | "error";
 
 /** Where the audio bytes are coming from right now. */
 export type PlaybackQuality = "local" | "youtube";
@@ -177,9 +175,7 @@ export function isKaraokeEligible(track: PlayerTrack | null | undefined): boolea
 
 function withExplicit(track: PlayerTrack): PlayerTrack {
   if (track.explicit) return track;
-  return titleLooksExplicit(track.title)
-    ? { ...track, explicit: true }
-    : track;
+  return titleLooksExplicit(track.title) ? { ...track, explicit: true } : track;
 }
 
 function withPlayerMeta(track: PlayerTrack): PlayerTrack {
@@ -230,20 +226,21 @@ async function fetchLikedPlayerTracks(): Promise<PlayerTrack[]> {
     if (!res.ok) return [];
     const data = await res.json();
     const list = Array.isArray(data.tracks) ? data.tracks : [];
-    return list.map((t: {
-      id: string;
-      title: string;
-      artist: string;
-      album?: string;
-      coverPath?: string | null;
-    }) =>
-      withExplicit({
-        id: t.id,
-        title: t.title,
-        artist: t.artist,
-        album: t.album || "",
-        coverPath: t.coverPath,
-      }),
+    return list.map(
+      (t: {
+        id: string;
+        title: string;
+        artist: string;
+        album?: string;
+        coverPath?: string | null;
+      }) =>
+        withExplicit({
+          id: t.id,
+          title: t.title,
+          artist: t.artist,
+          album: t.album || "",
+          coverPath: t.coverPath,
+        }),
     );
   } catch {
     return [];
@@ -267,9 +264,7 @@ async function fetchTasteAutoplayTracks(
       qs.set("trackId", current.id);
     }
     const artist =
-      (current.resolveArtist || "").trim() ||
-      primaryArtistName(current.artist) ||
-      current.artist;
+      (current.resolveArtist || "").trim() || primaryArtistName(current.artist) || current.artist;
     if (artist) qs.set("artist", artist);
     if (current.album) qs.set("album", current.album);
     if (excludeIds.length) {
@@ -404,9 +399,7 @@ type SyncPayload = {
   updatedAt: number;
 };
 
-type SyncMsg =
-  | { kind: "sync"; payload: SyncPayload }
-  | { kind: "hello"; tabId: string };
+type SyncMsg = { kind: "sync"; payload: SyncPayload } | { kind: "hello"; tabId: string };
 
 function newCommandId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -530,24 +523,19 @@ async function openConnectEventStream(
 function audioSrcFor(track: PlayerTrack): string {
   const offline = offlineStreamUrl(track.id);
   if (offline) return offline;
-  let src =
-    track.streamUrl
-      ? nativeAssetUrl(track.streamUrl) || track.streamUrl
-      : nativeAssetUrl(`/api/stream/${track.id}`) || `/api/stream/${track.id}`;
+  let src = track.streamUrl
+    ? nativeAssetUrl(track.streamUrl) || track.streamUrl
+    : nativeAssetUrl(`/api/stream/${track.id}`) || `/api/stream/${track.id}`;
   // iOS HTMLAudio cannot decode FLAC — ask the server for a phone encode.
   if (
     typeof navigator !== "undefined" &&
-    (nativeClientPlatform() === "ios" ||
-      /iPhone|iPad|iPod/i.test(navigator.userAgent || ""))
+    (nativeClientPlatform() === "ios" || /iPhone|iPad|iPod/i.test(navigator.userAgent || ""))
   ) {
     try {
       const url = new URL(src, window.location.origin);
       if (/\/api\/(stream|live)\//.test(url.pathname)) {
         url.searchParams.set("compat", "1");
-        url.searchParams.set(
-          "quality",
-          readPlaybackSettings().streamQuality || "high",
-        );
+        url.searchParams.set("quality", readPlaybackSettings().streamQuality || "high");
         src = url.toString();
       }
     } catch {
@@ -593,11 +581,13 @@ function safePlay(audio: HTMLAudioElement): Promise<boolean> {
   try {
     const p = audio.play();
     if (p === undefined) return Promise.resolve(true);
-    return p.then(() => true).catch((err: unknown) => {
-      if (isBenignPlayError(err)) return false;
-      console.warn("[player] play() failed", err);
-      return false;
-    });
+    return p
+      .then(() => true)
+      .catch((err: unknown) => {
+        if (isBenignPlayError(err)) return false;
+        console.warn("[player] play() failed", err);
+        return false;
+      });
   } catch (err) {
     if (isBenignPlayError(err)) return Promise.resolve(false);
     console.warn("[player] play() failed", err);
@@ -710,9 +700,7 @@ function nativeLoadMeta(track: {
     album: track.album?.trim() || "",
     artworkUrl: mediaSessionArtworkUrl(track.coverPath),
     durationHint:
-      typeof track.duration === "number" && track.duration > 0
-        ? track.duration
-        : undefined,
+      typeof track.duration === "number" && track.duration > 0 ? track.duration : undefined,
   };
 }
 
@@ -856,9 +844,7 @@ async function resolveIfNeeded(
 
   try {
     const resolveArtist =
-      (track.resolveArtist || "").trim() ||
-      primaryArtistName(track.artist) ||
-      track.artist;
+      (track.resolveArtist || "").trim() || primaryArtistName(track.artist) || track.artist;
     const libraryTrackId = isLibraryTrackId(track.id) ? track.id : undefined;
     const res = await fetch("/api/live", {
       method: "POST",
@@ -875,9 +861,7 @@ async function resolveIfNeeded(
     const data = await res.json().catch(() => null);
     if (res.status === 403) {
       const msg =
-        typeof data?.error === "string"
-          ? data.error
-          : "Playback isn’t allowed on your account.";
+        typeof data?.error === "string" ? data.error : "Playback isn’t allowed on your account.";
       try {
         const { toastError } = await import("@/lib/toast");
         toastError(msg);
@@ -1051,12 +1035,49 @@ export function prefetchHeads(tracks: readonly (PlayerTrack | null | undefined)[
   else cacheHeadUrls(urls);
 }
 
+const NATIVE_HEAD_CURSOR = "polarr-native-head-cursor";
+
+/** Page the whole library into the iOS head cache. Resumes from localStorage. */
+async function syncNativeLibraryHeads(quality: string, cancelled: () => boolean) {
+  if (!audioPrefetchAllowed()) return;
+  let offset = 0;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(NATIVE_HEAD_CURSOR) || "null") as {
+      quality?: string;
+      offset?: number;
+    } | null;
+    if (parsed?.quality === quality && Number.isFinite(parsed.offset)) {
+      offset = Math.max(0, Number(parsed.offset));
+    }
+  } catch {
+    offset = 0;
+  }
+  for (;;) {
+    if (cancelled()) return;
+    const res = await fetch(`/api/library/ids?offset=${offset}&limit=80`, {
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    if (!res.ok) return;
+    const data = (await res.json()) as { ids?: string[]; done?: boolean };
+    const ids = (data.ids ?? []).filter((id) => isLibraryTrackId(id));
+    if (!ids.length) {
+      localStorage.setItem(NATIVE_HEAD_CURSOR, JSON.stringify({ quality, offset: 0 }));
+      return;
+    }
+    prefetchHeads(ids.map((id) => ({ id, title: "", artist: "", album: "" })));
+    offset += data.ids?.length ?? ids.length;
+    localStorage.setItem(
+      NATIVE_HEAD_CURSOR,
+      JSON.stringify({ quality, offset: data.done ? 0 : offset }),
+    );
+    if (data.done) return;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
+
 /** Swap a queue entry when a stream/catalog id resolves to a real track. */
-function replaceInQueue(
-  queue: PlayerTrack[],
-  fromId: string,
-  ready: PlayerTrack,
-): PlayerTrack[] {
+function replaceInQueue(queue: PlayerTrack[], fromId: string, ready: PlayerTrack): PlayerTrack[] {
   if (fromId === ready.id) return queue;
   return queue.map((t) => (t.id === fromId ? ready : t));
 }
@@ -1068,10 +1089,7 @@ function replaceInQueue(
  */
 function withDurableCovers(payload: SyncPayload): SyncPayload {
   const ephemeral = (t: PlayerTrack) => isEphemeralCoverUrl(t.coverPath);
-  if (
-    !(payload.track && ephemeral(payload.track)) &&
-    !payload.queue?.some(ephemeral)
-  ) {
+  if (!(payload.track && ephemeral(payload.track)) && !payload.queue?.some(ephemeral)) {
     return payload;
   }
   return {
@@ -1079,10 +1097,11 @@ function withDurableCovers(payload: SyncPayload): SyncPayload {
     track: payload.track
       ? { ...payload.track, coverPath: durableCoverPath(payload.track.coverPath) }
       : payload.track,
-    queue: payload.queue?.map((t) => ({
-      ...t,
-      coverPath: durableCoverPath(t.coverPath),
-    })) ?? payload.queue,
+    queue:
+      payload.queue?.map((t) => ({
+        ...t,
+        coverPath: durableCoverPath(t.coverPath),
+      })) ?? payload.queue,
   };
 }
 
@@ -1100,10 +1119,7 @@ function readStored(): SyncPayload | null {
 
 function writeStored(payload: SyncPayload) {
   try {
-    localStorage.setItem(
-      PLAYER_STORAGE_KEY,
-      JSON.stringify(withDurableCovers(payload)),
-    );
+    localStorage.setItem(PLAYER_STORAGE_KEY, JSON.stringify(withDurableCovers(payload)));
   } catch {
     /* ignore quota / private mode */
   }
@@ -1143,12 +1159,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   } | null>(null);
   const volumeRef = useRef(0.8);
   const vocalLevelRef = useRef(1);
-  const attachAudioListenersRef = useRef<(el: HTMLAudioElement) => void>(
-    () => {},
-  );
-  const detachAudioListenersRef = useRef<(el: HTMLAudioElement) => void>(
-    () => {},
-  );
+  const attachAudioListenersRef = useRef<(el: HTMLAudioElement) => void>(() => {});
+  const detachAudioListenersRef = useRef<(el: HTMLAudioElement) => void>(() => {});
   const shuffleRef = useRef(false);
   const ownerIdRef = useRef<string | null>(null);
   /** Bumps on each play request so stale play()/resolve races are ignored. */
@@ -1169,21 +1181,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   );
   const followingRemoteRef = useRef(false);
   /** Owner heartbeats must apply the snapshot their POST already consumed. */
-  const applyConnectSyncRef = useRef<(data: ConnectSyncResponse) => void>(
-    () => {},
-  );
+  const applyConnectSyncRef = useRef<(data: ConnectSyncResponse) => void>(() => {});
   /** Installed by the connect effect; drops presence after playback stops in the background. */
   const suspendIdleConnectRef = useRef<() => void>(() => {});
   const sendConnectCommandRef = useRef<
-    (
-      command:
-        | ConnectCommand
-        | { id: string; type: "transfer"; targetId: string },
-    ) => void
+    (command: ConnectCommand | { id: string; type: "transfer"; targetId: string }) => void
   >(() => {});
-  const playRef = useRef<(track: PlayerTrack, queue?: PlayerTrack[]) => void>(
-    () => {},
-  );
+  const playRef = useRef<(track: PlayerTrack, queue?: PlayerTrack[]) => void>(() => {});
   const lastPushedStateAtRef = useRef(0);
   /** Follower UI clock: progress at server `updatedAt`, then extrapolate while playing. */
   const remoteEpochRef = useRef<{
@@ -1210,8 +1214,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [karaokeStatus]);
   const [shuffle, setShuffle] = useState(false);
   const [connectDevices, setConnectDevices] = useState<ConnectDeviceInfo[]>([]);
-  const [activeConnectDevice, setActiveConnectDevice] =
-    useState<ConnectDeviceInfo | null>(null);
+  const [activeConnectDevice, setActiveConnectDevice] = useState<ConnectDeviceInfo | null>(null);
   const [isRemotePlayback, setIsRemotePlayback] = useState(false);
   const [openPanels, setOpenPanelsState] = useState<OpenPanels>(DEFAULT_PANELS);
   const setOpenPanels = setOpenPanelsState;
@@ -1248,10 +1251,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!queuePreferenceReady) return;
     try {
-      localStorage.setItem(
-        QUEUE_RAIL_STORAGE_KEY,
-        openPanels.queue ? "1" : "0",
-      );
+      localStorage.setItem(QUEUE_RAIL_STORAGE_KEY, openPanels.queue ? "1" : "0");
     } catch {
       /* private mode */
     }
@@ -1275,9 +1275,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     queueRef.current = queue;
     const currentId = trackRef.current?.id;
-    const currentIndex = currentId
-      ? queue.findIndex((item) => item.id === currentId)
-      : -1;
+    const currentIndex = currentId ? queue.findIndex((item) => item.id === currentId) : -1;
     if (currentIndex >= 0 && currentIndex < queue.length - 1) {
       transitionExhaustedTrackRef.current = null;
     }
@@ -1312,17 +1310,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // On iOS, hardware volume is separate — keep element gain full.
     const vol = usesSystemVolume() ? 1 : volumeRef.current;
     const level = vocalLevelRef.current;
-    const settingsGain = volumeLevelGain(
-      playbackSettingsRef.current.volumeLevel,
-    );
+    const settingsGain = volumeLevelGain(playbackSettingsRef.current.volumeLevel);
     const mixGraph =
-      effectsGraphsRef.current.find(
-        (graph) => graph.source.mediaElement === mix,
-      ) || null;
+      effectsGraphsRef.current.find((graph) => graph.source.mediaElement === mix) || null;
     const instGraph = inst
-      ? effectsGraphsRef.current.find(
-          (graph) => graph.source.mediaElement === inst,
-        ) || null
+      ? effectsGraphsRef.current.find((graph) => graph.source.mediaElement === inst) || null
       : null;
     // createMediaElementSource bypasses element.volume — drive Web Audio gain.
     const webAudio =
@@ -1385,19 +1377,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     return true;
   }, []);
 
-  const syncInstToMix = useCallback(() => {
-    const mix = audioRef.current;
-    const inst = instAudioRef.current;
-    if (!mix || !inst || !instReadyRef.current || !inst.src) return;
-    try {
-      if (Math.abs(inst.currentTime - mix.currentTime) > 0.1) {
-        inst.currentTime = mix.currentTime;
-      }
-    } catch {
-      /* not ready */
-    }
-  }, []);
-
   const configureEffectsGraph = useCallback(
     (graph: AudioEffectsGraph, settings: PlaybackSettings) => {
       const context = audioContextRef.current;
@@ -1427,9 +1406,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       graph.filters.forEach((filter, index) => {
         filter.frequency.value = EQ_FREQUENCIES[index];
         filter.Q.value = 1;
-        filter.gain.value = settings.equalizerEnabled
-          ? settings.equalizerBands[index] || 0
-          : 0;
+        filter.gain.value = settings.equalizerEnabled ? settings.equalizerBands[index] || 0 : 0;
         const next = graph.filters[index + 1];
         filter.connect(next || graph.master);
       });
@@ -1441,9 +1418,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const applyOutputDevice = useCallback(async (settings: PlaybackSettings) => {
     const sinkId = settings.outputDeviceId || "default";
-    const context = audioContextRef.current as (AudioContext & {
-      setSinkId?: (id: string) => Promise<void>;
-    }) | null;
+    const context = audioContextRef.current as
+      | (AudioContext & {
+          setSinkId?: (id: string) => Promise<void>;
+        })
+      | null;
 
     try {
       // Media elements connected through createMediaElementSource() are heard
@@ -1453,16 +1432,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (typeof context.setSinkId === "function") {
           await context.setSinkId(sinkId);
         } else if (sinkId !== "default") {
-          throw new Error(
-            "This platform cannot route processed audio to an individual device.",
-          );
+          throw new Error("This platform cannot route processed audio to an individual device.");
         }
       } else {
-        for (const element of [
-          audioRef.current,
-          instAudioRef.current,
-          nextAudioRef.current,
-        ]) {
+        for (const element of [audioRef.current, instAudioRef.current, nextAudioRef.current]) {
           if (!element) continue;
           const selectable = element as HTMLAudioElement & {
             setSinkId?: (id: string) => Promise<void>;
@@ -1482,10 +1455,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const fallback = { ...settings, outputDeviceId: "default" };
         playbackSettingsRef.current = fallback;
         try {
-          localStorage.setItem(
-            PLAYBACK_SETTINGS_KEY,
-            JSON.stringify(fallback),
-          );
+          localStorage.setItem(PLAYBACK_SETTINGS_KEY, JSON.stringify(fallback));
         } catch {
           /* private mode */
         }
@@ -1496,9 +1466,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             ok: false,
             deviceId: sinkId,
             error:
-              error instanceof Error
-                ? error.message
-                : "The selected audio output is unavailable.",
+              error instanceof Error ? error.message : "The selected audio output is unavailable.",
           },
         }),
       );
@@ -1529,17 +1497,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (!playbackNeedsWebAudio(playbackSettingsRef.current)) return;
     const AudioContextCtor =
       window.AudioContext ||
-      (window as typeof window & { webkitAudioContext?: typeof AudioContext })
-        .webkitAudioContext;
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextCtor) return;
     try {
       const context = new AudioContextCtor();
       audioContextRef.current = context;
-      effectsGraphsRef.current = [
-        audioRef.current,
-        instAudioRef.current,
-        nextAudioRef.current,
-      ].map((element) => {
+      effectsGraphsRef.current = [audioRef.current, instAudioRef.current, nextAudioRef.current].map(
+        (element) => {
           // Required before createMediaElementSource for cross-origin streams.
           if (isNativeClient() && !element.crossOrigin) {
             element.crossOrigin = "anonymous";
@@ -1562,7 +1526,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             monoLeft,
             monoRight,
           };
-      });
+        },
+      );
       effectsGraphsRef.current.forEach((graph) =>
         configureEffectsGraph(graph, playbackSettingsRef.current),
       );
@@ -1612,11 +1577,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const graphFor = useCallback((element: HTMLAudioElement | null) => {
     if (!element) return null;
-    return (
-      effectsGraphsRef.current.find(
-        (graph) => graph.source.mediaElement === element,
-      ) || null
-    );
+    return effectsGraphsRef.current.find((graph) => graph.source.mediaElement === element) || null;
   }, []);
 
   const cancelTransition = useCallback(() => {
@@ -1641,8 +1602,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (context && spareGraph) {
       spareGraph.master.gain.cancelScheduledValues(context.currentTime);
       spareGraph.master.gain.setValueAtTime(
-        volumeLevelGain(playbackSettingsRef.current.volumeLevel) *
-          volumeRef.current,
+        volumeLevelGain(playbackSettingsRef.current.volumeLevel) * volumeRef.current,
         context.currentTime,
       );
     }
@@ -1653,9 +1613,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       cancelTransition();
       playbackSettingsRef.current = settings;
       if (playbackNeedsWebAudio(settings)) ensureAudioEffects();
-      effectsGraphsRef.current.forEach((graph) =>
-        configureEffectsGraph(graph, settings),
-      );
+      effectsGraphsRef.current.forEach((graph) => configureEffectsGraph(graph, settings));
       void applyOutputDevice(settings);
       applyMixVolumes();
     };
@@ -1665,18 +1623,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       applySettings(detail || readPlaybackSettings());
     };
     window.addEventListener(PLAYBACK_SETTINGS_EVENT, onSettings);
-    return () =>
-      window.removeEventListener(PLAYBACK_SETTINGS_EVENT, onSettings);
-  }, [applyMixVolumes, applyOutputDevice, cancelTransition, configureEffectsGraph, ensureAudioEffects]);
+    return () => window.removeEventListener(PLAYBACK_SETTINGS_EVENT, onSettings);
+  }, [
+    applyMixVolumes,
+    applyOutputDevice,
+    cancelTransition,
+    configureEffectsGraph,
+    ensureAudioEffects,
+  ]);
 
   useEffect(() => {
     shuffleRef.current = shuffle;
   }, [shuffle]);
 
-  const isOwner = useCallback(
-    () => ownerIdRef.current === tabIdRef.current,
-    [],
-  );
+  const isOwner = useCallback(() => ownerIdRef.current === tabIdRef.current, []);
 
   const publish = useCallback((partial?: Partial<SyncPayload>) => {
     if (applyingRemoteRef.current) return;
@@ -1716,13 +1676,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           volume: payload.volume,
           shuffle: Boolean(payload.shuffle),
         },
-      }).then((data) => {
-        // snapshotConnect takes this device's queue. Dropping the body
-        // silently discards pause / seek / transfer while the heartbeat
-        // is the only channel (SSE down, or it won the race).
-        if (!data?.commands?.length) return;
-        applyConnectSyncRef.current(data);
-      }).catch(() => null);
+      })
+        .then((data) => {
+          // snapshotConnect takes this device's queue. Dropping the body
+          // silently discards pause / seek / transfer while the heartbeat
+          // is the only channel (SSE down, or it won the race).
+          if (!data?.commands?.length) return;
+          applyConnectSyncRef.current(data);
+        })
+        .catch(() => null);
     }
   }, []);
 
@@ -1745,11 +1707,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       // Nothing upcoming — grow the queue from this user’s listen taste
       const exclude = new Set(q.map((t) => t.id));
       exclude.add(current.id);
-      let fill = await fetchTasteAutoplayTracks(
-        current,
-        [...exclude],
-        24,
-      );
+      let fill = await fetchTasteAutoplayTracks(current, [...exclude], 24);
       fill = fill.filter((t) => !exclude.has(t.id));
 
       // Fallback: liked songs when the library/taste pool is thin
@@ -1759,10 +1717,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (fill.length > 0) {
-        const nextQ =
-          idx >= 0
-            ? [...q.slice(0, idx + 1), ...fill]
-            : [current, ...fill];
+        const nextQ = idx >= 0 ? [...q.slice(0, idx + 1), ...fill] : [current, ...fill];
         queueRef.current = nextQ;
         setQueue(nextQ);
         publishRef.current({
@@ -1823,10 +1778,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         transitionBusyRef.current = false;
         return;
       }
-      if (
-        transitionGen !== playGenRef.current ||
-        trackRef.current?.id !== current.id
-      ) {
+      if (transitionGen !== playGenRef.current || trackRef.current?.id !== current.id) {
         transitionBusyRef.current = false;
         return;
       }
@@ -1869,10 +1821,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
       const audibleLead = crossfadeSeconds > 0 ? crossfadeSeconds : 0.05;
       while (stillCurrent()) {
-        const nowRemaining = Math.max(
-          0,
-          (oldAudio.duration || 0) - oldAudio.currentTime,
-        );
+        const nowRemaining = Math.max(0, (oldAudio.duration || 0) - oldAudio.currentTime);
         if (nowRemaining <= audibleLead + 0.12) break;
         await new Promise<void>((resolve) => window.setTimeout(resolve, 80));
       }
@@ -1887,8 +1836,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
       const oldGraph = graphFor(oldAudio);
       const warmGraph = graphFor(warmAudio);
-      const baseGain =
-        volumeLevelGain(settings.volumeLevel) * volumeRef.current;
+      const baseGain = volumeLevelGain(settings.volumeLevel) * volumeRef.current;
       if (context && oldGraph && warmGraph) {
         const now = context.currentTime;
         oldGraph.master.gain.cancelScheduledValues(now);
@@ -1944,15 +1892,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       pushRecentPlayedTrack({
         id: ready.id,
         title: ready.title,
-        artist:
-          ready.resolveArtist || primaryArtistName(ready.artist) || ready.artist,
+        artist: ready.resolveArtist || primaryArtistName(ready.artist) || ready.artist,
         album: ready.album,
         coverPath: ready.coverPath,
         quality: ready.quality ?? undefined,
-        localTrackId:
-          ready.quality === "local" && !isEphemeralTrack(ready)
-            ? ready.id
-            : undefined,
+        localTrackId: ready.quality === "local" && !isEphemeralTrack(ready) ? ready.id : undefined,
         onPolarr: ready.quality === "local",
       });
       publishRef.current({
@@ -1963,14 +1907,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         ownerId: tabIdRef.current,
       });
 
-      const fadeRemaining = Math.max(
-        0,
-        (oldAudio.duration || 0) - oldAudio.currentTime,
-      );
+      const fadeRemaining = Math.max(0, (oldAudio.duration || 0) - oldAudio.currentTime);
       const fadeSeconds =
-        crossfadeSeconds > 0
-          ? Math.max(0.15, Math.min(crossfadeSeconds, fadeRemaining))
-          : 0.04;
+        crossfadeSeconds > 0 ? Math.max(0.15, Math.min(crossfadeSeconds, fadeRemaining)) : 0.04;
       if (context && oldGraph && warmGraph) {
         const now = context.currentTime;
         const points = 48;
@@ -1987,32 +1926,33 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         oldAudio.pause();
       }
 
-      transitionTimerRef.current = window.setTimeout(() => {
-        transitionTimerRef.current = null;
-        oldAudio.pause();
-        oldAudio.removeAttribute("src");
-        try {
-          oldAudio.load();
-        } catch {
-          /* ignore */
-        }
-        if (context && oldGraph) {
-          oldGraph.master.gain.cancelScheduledValues(context.currentTime);
-          oldGraph.master.gain.setValueAtTime(baseGain, context.currentTime);
-        }
-        transitionBusyRef.current = false;
-        const qi = nextQ.findIndex((item) => item.id === ready.id);
-        prefetchStream(qi >= 0 ? nextQ[qi + 1] : undefined);
-      }, Math.ceil(fadeSeconds * 1_000) + 40);
+      transitionTimerRef.current = window.setTimeout(
+        () => {
+          transitionTimerRef.current = null;
+          oldAudio.pause();
+          oldAudio.removeAttribute("src");
+          try {
+            oldAudio.load();
+          } catch {
+            /* ignore */
+          }
+          if (context && oldGraph) {
+            oldGraph.master.gain.cancelScheduledValues(context.currentTime);
+            oldGraph.master.gain.setValueAtTime(baseGain, context.currentTime);
+          }
+          transitionBusyRef.current = false;
+          const qi = nextQ.findIndex((item) => item.id === ready.id);
+          prefetchStream(qi >= 0 ? nextQ[qi + 1] : undefined);
+        },
+        Math.ceil(fadeSeconds * 1_000) + 40,
+      );
     } catch {
       transitionBusyRef.current = false;
     }
   }, [ensureAudioEffects, graphFor, isOwner]);
 
   const autoplayTopUpBusyRef = useRef(false);
-  const topUpQueueFromTasteRef = useRef(
-    async (_current: PlayerTrack): Promise<void> => {},
-  );
+  const topUpQueueFromTasteRef = useRef(async (_current: PlayerTrack): Promise<void> => {});
   topUpQueueFromTasteRef.current = async (current: PlayerTrack) => {
     if (autoplayTopUpBusyRef.current) return;
     autoplayTopUpBusyRef.current = true;
@@ -2024,9 +1964,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
       const exclude = new Set(q.map((t) => t.id));
       exclude.add(current.id);
-      const fill = (
-        await fetchTasteAutoplayTracks(current, [...exclude], 16)
-      ).filter((t) => !exclude.has(t.id));
+      const fill = (await fetchTasteAutoplayTracks(current, [...exclude], 16)).filter(
+        (t) => !exclude.has(t.id),
+      );
       if (fill.length === 0) return;
 
       const head = idx >= 0 ? q.slice(0, idx + 1) : [];
@@ -2043,45 +1983,37 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const primeTrack = useCallback(
-    (raw: PlayerTrack) => {
-      if (followingRemoteRef.current) return;
-      if (transitionBusyRef.current) return;
-      if (isEphemeralTrack(raw)) return;
-      if (isNativeIosPlayerOwning()) return;
-      const spare = nextAudioRef.current;
-      if (!spare) return;
-      // Don't steal the spare bus right before a gapless/crossfade hand-off.
-      const main = audioRef.current;
-      if (main && playingRef.current && Number.isFinite(main.duration)) {
-        const settings = playbackSettingsRef.current;
-        const lead =
-          (settings.crossfadeEnabled ? settings.crossfadeSeconds : 0) + 8;
-        if (
-          (settings.gaplessEnabled || settings.crossfadeEnabled) &&
-          main.duration - main.currentTime <= lead
-        ) {
-          return;
-        }
-      }
-      const next = withPlayerMeta(raw);
-      if (trackRef.current?.id === next.id && playingRef.current) return;
-      const src = audioSrcFor(next);
-      if (!src.includes("/api/stream/") && !offlineStreamUrl(next.id)) return;
+  const primeTrack = useCallback((raw: PlayerTrack) => {
+    if (followingRemoteRef.current) return;
+    if (transitionBusyRef.current) return;
+    if (isEphemeralTrack(raw)) return;
+    if (isNativeIosPlayerOwning()) return;
+    const spare = nextAudioRef.current;
+    if (!spare) return;
+    // Don't steal the spare bus right before a gapless/crossfade hand-off.
+    const main = audioRef.current;
+    if (main && playingRef.current && Number.isFinite(main.duration)) {
+      const settings = playbackSettingsRef.current;
+      const lead = (settings.crossfadeEnabled ? settings.crossfadeSeconds : 0) + 8;
       if (
-        primedTrackIdRef.current === next.id &&
-        spare.src &&
-        sameStreamUrl(spare.src, src)
+        (settings.gaplessEnabled || settings.crossfadeEnabled) &&
+        main.duration - main.currentTime <= lead
       ) {
         return;
       }
-      primedTrackIdRef.current = next.id;
-      spare.preload = "auto";
-      spare.volume = volumeRef.current;
-      setAudioSrc(spare, src);
-    },
-    [],
-  );
+    }
+    const next = withPlayerMeta(raw);
+    if (trackRef.current?.id === next.id && playingRef.current) return;
+    const src = audioSrcFor(next);
+    if (!src.includes("/api/stream/") && !offlineStreamUrl(next.id)) return;
+    if (primedTrackIdRef.current === next.id && spare.src && sameStreamUrl(spare.src, src)) {
+      return;
+    }
+    primedTrackIdRef.current = next.id;
+    spare.preload = "auto";
+    spare.volume = volumeRef.current;
+    setAudioSrc(spare, src);
+  }, []);
 
   const warmLibraryStreamCb = useCallback((track: PlayerTrack) => {
     warmLibraryStream(track);
@@ -2169,8 +2101,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
         if (!current()) return;
 
-        const useNative =
-          (await probeNativeIosPlayer()) && !followingRemoteRef.current;
+        const useNative = (await probeNativeIosPlayer()) && !followingRemoteRef.current;
         if (useNative) {
           silenceHtmlAudio(audio);
           silenceHtmlAudio(instAudioRef.current);
@@ -2356,9 +2287,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       ? payload.progress + Math.max(0, (Date.now() - epochAt) / 1000)
       : payload.progress;
     const capped =
-      payload.duration > 0
-        ? Math.min(payload.duration, displayProgress)
-        : displayProgress;
+      payload.duration > 0 ? Math.min(payload.duration, displayProgress) : displayProgress;
     progressRef.current = capped;
 
     setQueue(payload.queue);
@@ -2399,11 +2328,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const onMeta = () => {
       const audio = audioRef.current;
       if (!audio || !isOwner()) return;
-      const next = finiteDuration(
-        audio.duration,
-        trackRef.current?.duration,
-        durationRef.current,
-      );
+      const next = finiteDuration(audio.duration, trackRef.current?.duration, durationRef.current);
       durationRef.current = next;
       setDuration(next);
     };
@@ -2659,21 +2584,20 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const stored = readStored();
     const staleOwnerId =
-      stored?.ownerId && stored.ownerId !== tabIdRef.current
-        ? stored.ownerId
-        : null;
+      stored?.ownerId && stored.ownerId !== tabIdRef.current ? stored.ownerId : null;
     if (stored?.track) {
       applyingRemoteRef.current = true;
       // Another tab owns active playback — mirror UI only until hello/sync.
-      const remoteOwner =
-        Boolean(stored.ownerId) && stored.ownerId !== tabIdRef.current;
+      const remoteOwner = Boolean(stored.ownerId) && stored.ownerId !== tabIdRef.current;
       ownerIdRef.current = stored.ownerId || null;
       queueRef.current = stored.queue ?? [];
       trackRef.current = stored.track;
-      // Never autoplay in a freshly opened tab (dual audio + autoplay block).
-      // Keep UI `playing` from store when following so controls don't flash.
-      const uiPlaying = remoteOwner ? Boolean(stored.playing) : false;
-      playingRef.current = uiPlaying;
+      // A new document gets a new tab id, so the stored owner always looks
+      // "remote" on a cold start — including after the app was killed while
+      // playing. Showing that stored `playing` flag paints a pause icon for
+      // audio that is not running. Stay paused until this tab actually starts
+      // playback, or a live peer answers hello and syncs.
+      playingRef.current = false;
       progressRef.current = stored.progress ?? 0;
       durationRef.current = stored.duration ?? 0;
       const restoredVolume = stored.volume ?? 0.8;
@@ -2682,7 +2606,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       shuffleRef.current = storedShuffle;
       setQueue(stored.queue ?? []);
       setTrack(stored.track);
-      setPlaying(uiPlaying);
+      setPlaying(false);
       setProgress(stored.progress ?? 0);
       setDuration(stored.duration ?? 0);
       setVolumeState(restoredVolume);
@@ -2813,6 +2737,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const staleOwnerTimer = window.setTimeout(() => {
       if (remoteTabAlive || !staleOwnerId) return;
       ownerIdRef.current = tabIdRef.current;
+      playingRef.current = false;
+      setPlaying(false);
       publishRef.current({
         ownerId: tabIdRef.current,
         playing: false,
@@ -2898,35 +2824,31 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
   }, [applyRemote, isOwner, startTransition]);
 
-  const applyConnectDevices = useCallback(
-    (devices: ConnectDevice[], ownerId: string | null) => {
-      const self = localDeviceRef.current;
-      const infos: ConnectDeviceInfo[] = devices.map((d) => ({
-        id: d.id,
-        name: d.id === self.id ? self.name : d.name,
-        kind: d.kind,
-        self: d.id === self.id,
-        active: Boolean(ownerId) ? d.id === ownerId : d.id === self.id,
-      }));
-      if (!infos.some((d) => d.self) && self.id) {
-        infos.unshift({
-          id: self.id,
-          name: self.name,
-          kind: self.kind,
-          self: true,
-          active: !ownerId || ownerId === self.id,
-        });
-      }
-      setConnectDevices(infos);
-      const active =
-        infos.find((d) => d.active) ?? infos.find((d) => d.self) ?? null;
-      setActiveConnectDevice(active);
-      const remote = Boolean(ownerId) && ownerId !== self.id;
-      followingRemoteRef.current = remote;
-      setIsRemotePlayback(remote);
-    },
-    [],
-  );
+  const applyConnectDevices = useCallback((devices: ConnectDevice[], ownerId: string | null) => {
+    const self = localDeviceRef.current;
+    const infos: ConnectDeviceInfo[] = devices.map((d) => ({
+      id: d.id,
+      name: d.id === self.id ? self.name : d.name,
+      kind: d.kind,
+      self: d.id === self.id,
+      active: Boolean(ownerId) ? d.id === ownerId : d.id === self.id,
+    }));
+    if (!infos.some((d) => d.self) && self.id) {
+      infos.unshift({
+        id: self.id,
+        name: self.name,
+        kind: self.kind,
+        self: true,
+        active: !ownerId || ownerId === self.id,
+      });
+    }
+    setConnectDevices(infos);
+    const active = infos.find((d) => d.active) ?? infos.find((d) => d.self) ?? null;
+    setActiveConnectDevice(active);
+    const remote = Boolean(ownerId) && ownerId !== self.id;
+    followingRemoteRef.current = remote;
+    setIsRemotePlayback(remote);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2963,8 +2885,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           const epoch = remoteEpochRef.current;
           let resumeAt = progressRef.current;
           if (epoch?.playing) {
-            resumeAt =
-              epoch.progress + Math.max(0, (Date.now() - epoch.at) / 1000);
+            resumeAt = epoch.progress + Math.max(0, (Date.now() - epoch.at) / 1000);
           } else if (epoch && Number.isFinite(epoch.progress)) {
             resumeAt = epoch.progress;
           }
@@ -3013,11 +2934,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             if (!audio || trackRef.current?.id !== trackId) return;
             setAudioSrc(audio, audioSrcFor(current));
             const disarm = armResumeSeek(audio, resumeAt);
-            await waitForCanPlay(
-              audio,
-              () => trackRef.current?.id === trackId,
-              10_000,
-            );
+            await waitForCanPlay(audio, () => trackRef.current?.id === trackId, 10_000);
             seekAudioTo(audio, resumeAt);
             if (shouldPlay && trackRef.current?.id === trackId) {
               await playBoth();
@@ -3034,10 +2951,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
         if (command.type === "play-track") {
           followingRemoteRef.current = false;
-          playRef.current(
-            connectToTrack(command.track),
-            command.queue?.map(connectToTrack),
-          );
+          playRef.current(connectToTrack(command.track), command.queue?.map(connectToTrack));
           continue;
         }
         if (command.type === "play") {
@@ -3365,9 +3279,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // must not drop it — playback keeps the page schedulable, and other
     // devices still need to reach it. pagehide is the real unload.
     const ownsAudiblePlayback = () =>
-      playingRef.current &&
-      !followingRemoteRef.current &&
-      ownerIdRef.current === tabIdRef.current;
+      playingRef.current && !followingRemoteRef.current && ownerIdRef.current === tabIdRef.current;
 
     const backgrounded = () => pageHidden || appInactive;
 
@@ -3538,10 +3450,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (!isNativeIosPlayerOwning() && !audio) return;
     const anchor = listenAnchorRef.current;
     if (!anchor || anchor.trackId !== t.id) return;
-    const delta = Math.max(
-      0,
-      Math.min(3600, Math.floor(position - anchor.at)),
-    );
+    const delta = Math.max(0, Math.min(3600, Math.floor(position - anchor.at)));
     if (delta <= 0) return;
     listenAnchorRef.current = { trackId: t.id, at: position };
     postListenCredit(delta, t);
@@ -3590,10 +3499,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     const pushPresence = async () => {
       try {
-        if (
-          discordPresenceCache.at === 0 ||
-          Date.now() - discordPresenceCache.at > 60_000
-        ) {
+        if (discordPresenceCache.at === 0 || Date.now() - discordPresenceCache.at > 60_000) {
           const res = await fetch("/api/account", { cache: "no-store" });
           if (!res.ok) return;
           const data = await res.json();
@@ -3601,17 +3507,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             at: Date.now(),
             presenceOn: Boolean(data.discord?.presenceEnabled),
             appId:
-              typeof data.discordClientId === "string" &&
-              data.discordClientId.trim()
+              typeof data.discordClientId === "string" && data.discordClientId.trim()
                 ? data.discordClientId.trim()
                 : null,
           };
         }
         if (cancelled) return;
-        if (
-          !discordPresenceCache.presenceOn ||
-          !discordPresenceCache.appId
-        ) {
+        if (!discordPresenceCache.presenceOn || !discordPresenceCache.appId) {
           const { clearDiscordActivity } = await import("@/lib/discord-rpc");
           if (!cancelled) await clearDiscordActivity();
           return;
@@ -3629,13 +3531,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
 
         const durationSec =
-          durationRef.current ||
-          (typeof track.duration === "number" ? track.duration : 0) ||
-          0;
+          durationRef.current || (typeof track.duration === "number" ? track.duration : 0) || 0;
         let clock = presenceClockRef.current;
         if (!clock || clock.trackId !== track.id) {
-          const progressSec =
-            audioRef.current?.currentTime ?? progressRef.current ?? 0;
+          const progressSec = audioRef.current?.currentTime ?? progressRef.current ?? 0;
           const now = Math.floor(Date.now() / 1000);
           clock = {
             trackId: track.id,
@@ -3649,17 +3548,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
 
         const now = Math.floor(Date.now() / 1000);
-        const result = await setDiscordListeningActivity(
-          discordPresenceCache.appId,
-          {
-            title: track.title,
-            artist: track.artist,
-            album: track.album,
-            coverUrl: track.coverPath,
-            progressSec: Math.max(0, now - clock.startUnix),
-            durationSec: clock.durationSec,
-          },
-        );
+        const result = await setDiscordListeningActivity(discordPresenceCache.appId, {
+          title: track.title,
+          artist: track.artist,
+          album: track.album,
+          coverUrl: track.coverPath,
+          progressSec: Math.max(0, now - clock.startUnix),
+          durationSec: clock.durationSec,
+        });
         if (!result.ok && process.env.NODE_ENV === "development") {
           console.warn("[discord-presence]", result.error);
         }
@@ -3753,9 +3649,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         coverPath: next.coverPath,
         quality: next.quality ?? undefined,
         localTrackId:
-          next.quality === "local" &&
-          !next.id.startsWith("stream:") &&
-          !next.id.startsWith("live:")
+          next.quality === "local" && !next.id.startsWith("stream:") && !next.id.startsWith("live:")
             ? next.id
             : undefined,
         onPolarr: next.quality === "local",
@@ -3766,7 +3660,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           next.streamUrl && /\/api\/live\//i.test(next.streamUrl)
             ? { ...next, streamUrl: null, quality: "local" as const }
             : { ...next, quality: next.quality ?? ("local" as const) };
-        let queue = nextQueue?.map(withExplicit);
+        const queue = nextQueue?.map(withExplicit);
         if (queue) fallbackQueueRef.current = null;
         claimAndPlay(ready, queue, gen);
         return;
@@ -3841,10 +3735,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const fromId = track.id;
         ready = await resolveIfNeeded({ ...track, streamUrl: null });
         if (!currentGen()) return;
-        if (
-          trackRef.current?.id !== fromId &&
-          trackRef.current?.id !== ready.id
-        ) {
+        if (trackRef.current?.id !== fromId && trackRef.current?.id !== ready.id) {
           return;
         }
         const nextQ = replaceInQueue(queueRef.current, fromId, ready);
@@ -4106,8 +3997,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setAudioSrc(inst, streamUrl);
       const ready = await waitForCanPlay(
         inst,
-        () =>
-          gen === karaokeGenRef.current && trackRef.current?.id === trackId,
+        () => gen === karaokeGenRef.current && trackRef.current?.id === trackId,
         20_000,
       );
       if (gen !== karaokeGenRef.current) return;
@@ -4166,15 +4056,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const poll = async () => {
         if (cancelled || gen !== karaokeGenRef.current) return;
         try {
-          const res = await fetch(
-            `/api/karaoke/${encodeURIComponent(trackId)}`,
-            {
-              method: "POST",
-              cache: "no-store",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ artist, title, album }),
-            },
-          );
+          const res = await fetch(`/api/karaoke/${encodeURIComponent(trackId)}`, {
+            method: "POST",
+            cache: "no-store",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ artist, title, album }),
+          });
           const data = (await res.json()) as {
             status?: KaraokeUiStatus;
             progress?: number;
@@ -4248,12 +4135,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setKaraokeError(null);
         if (t && isKaraokeEligible(t)) {
           karaokePrepActiveRef.current = true;
-          prepareKaraoke(
-            t.id,
-            t.artist,
-            t.title,
-            t.album || undefined,
-          );
+          prepareKaraoke(t.id, t.artist, t.title, t.album || undefined);
         }
       }
 
@@ -4305,22 +4187,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (instReadyRef.current || karaokePrepActiveRef.current) return;
 
     karaokePrepActiveRef.current = true;
-    const stop = prepareKaraoke(
-      track.id,
-      track.artist,
-      track.title,
-      track.album || undefined,
-    );
+    const stop = prepareKaraoke(track.id, track.artist, track.title, track.album || undefined);
     return () => {
       stop();
       karaokePrepActiveRef.current = false;
       karaokeGenRef.current += 1;
     };
-  }, [
-    track?.id,
-    singingActive,
-    prepareKaraoke,
-  ]);
+  }, [track?.id, singingActive, prepareKaraoke]);
 
   // Skip / play a stream while karaoke is open — dump the mix, don't yt-dlp
   useEffect(() => {
@@ -4388,9 +4261,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
     const audio = audioRef.current;
     ownerIdRef.current = tabIdRef.current;
-    const position = isNativeIosPlayerOwning()
-      ? progressRef.current
-      : (audio?.currentTime ?? 0);
+    const position = isNativeIosPlayerOwning() ? progressRef.current : (audio?.currentTime ?? 0);
     if (position > 3) {
       if (isNativeIosPlayerOwning()) {
         void nativeIosPlayerSeek(0).then(() => {
@@ -4442,7 +4313,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       },
       getPosition: () =>
         isNativeIosPlayerOwning()
-          ? progressRef.current ?? 0
+          ? (progressRef.current ?? 0)
           : (audioRef.current?.currentTime ?? progressRef.current ?? 0),
       getDuration: () => durationRef.current || 0,
     });
@@ -4459,13 +4330,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
       const add = async <
         K extends
-          | "timeupdate"
-          | "playing"
-          | "paused"
-          | "ended"
-          | "error"
-          | "remote"
-          | "trackchange",
+          "timeupdate" | "playing" | "paused" | "ended" | "error" | "remote" | "trackchange",
       >(
         event: K,
         handler: Parameters<typeof subscribeNativeIosPlayer<K>>[1],
@@ -4590,15 +4455,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const items = window.map((t) => ({
         id: t.id,
         title: t.title,
-        artist:
-          t.resolveArtist || primaryArtistName(t.artist) || t.artist || "",
+        artist: t.resolveArtist || primaryArtistName(t.artist) || t.artist || "",
         album: t.album || "",
         url: audioSrcFor(t),
         artworkUrl: mediaSessionArtworkUrl(t.coverPath),
-        durationHint:
-          typeof t.duration === "number" && t.duration > 0
-            ? t.duration
-            : undefined,
+        durationHint: typeof t.duration === "number" && t.duration > 0 ? t.duration : undefined,
       }));
       await nativeIosPlayerSyncBrowse({
         items,
@@ -4619,8 +4480,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
     void updateMediaSessionMetadata({
       title: track.title,
-      artist:
-        track.resolveArtist || primaryArtistName(track.artist) || track.artist,
+      artist: track.resolveArtist || primaryArtistName(track.artist) || track.artist,
       album: track.album,
       coverPath: track.coverPath,
     });
@@ -4641,8 +4501,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       if (audio && isOwner()) restampAudioTicket(audio);
       void updateMediaSessionMetadata({
         title: track.title,
-        artist:
-          track.resolveArtist || primaryArtistName(track.artist) || track.artist,
+        artist: track.resolveArtist || primaryArtistName(track.artist) || track.artist,
         album: track.album,
         coverPath: track.coverPath,
       });
@@ -4735,30 +4594,41 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const run = async () => {
       if (cancelled) return;
       try {
-        if (iosNative && !(await probeNativeIosPlayer())) return;
-        const [recentRes, likesRes] = await Promise.all([
-          fetch("/api/recent?limit=100", { credentials: "same-origin" }),
-          fetch("/api/likes", { credentials: "same-origin" }),
-        ]);
-        if (cancelled) return;
-        const recent = recentRes.ok
-          ? ((await recentRes.json()) as { items?: { id: string }[] }).items ?? []
-          : [];
-        const likes = likesRes.ok
-          ? ((await likesRes.json()) as {
-              tracks?: { id: string; streamOnly?: boolean }[];
-            }).tracks ?? []
-          : [];
-        const ids: string[] = [];
-        for (const t of recent) if (t?.id) ids.push(t.id);
-        for (const t of likes) if (t?.id && !t.streamOnly) ids.push(t.id);
-        const tracks: PlayerTrack[] = ids
-          .filter((id) => isLibraryTrackId(id))
-          .slice(0, 300)
-          .map((id) => ({ id, title: "", artist: "", album: "" }));
-        prefetchHeads(tracks);
+        if (!iosNative || (await probeNativeIosPlayer())) {
+          const [recentRes, likesRes] = await Promise.all([
+            fetch("/api/recent?limit=100", { credentials: "same-origin" }),
+            fetch("/api/likes", { credentials: "same-origin" }),
+          ]);
+          if (cancelled) return;
+          const recent = recentRes.ok
+            ? (((await recentRes.json()) as { items?: { id: string }[] }).items ?? [])
+            : [];
+          const likes = likesRes.ok
+            ? ((
+                (await likesRes.json()) as {
+                  tracks?: { id: string; streamOnly?: boolean }[];
+                }
+              ).tracks ?? [])
+            : [];
+          const ids: string[] = [];
+          for (const t of recent) if (t?.id) ids.push(t.id);
+          for (const t of likes) if (t?.id && !t.streamOnly) ids.push(t.id);
+          const tracks: PlayerTrack[] = ids
+            .filter((id) => isLibraryTrackId(id))
+            .slice(0, 300)
+            .map((id) => ({ id, title: "", artist: "", album: "" }));
+          prefetchHeads(tracks);
+        }
       } catch {
-        /* best effort */
+        /* likes/recent are optional; the library walk still runs */
+      }
+      if (cancelled) return;
+      const quality = readPlaybackSettings().streamQuality || "high";
+      if (iosNative) {
+        if (!(await probeNativeIosPlayer())) return;
+        await syncNativeLibraryHeads(quality, () => cancelled);
+      } else {
+        startLibraryHeadSync(quality);
       }
     };
     const w = window as Window & {
@@ -4776,7 +4646,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!track || isRemotePlayback) return;
-    setMediaSessionPositionState(progress, duration, playing ? 1 : 1);
+    setMediaSessionPositionState(progress, duration, playing ? 1 : 0);
   }, [progress, duration, playing, track, isRemotePlayback]);
 
   /**
@@ -4794,23 +4664,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       if (!inReplaceSession) {
         if (prevQ.length > 0) fallbackQueueRef.current = prevQ.slice();
         if (current) {
-          nextQ =
-            current.id === normalized.id
-              ? [current]
-              : [current, normalized];
+          nextQ = current.id === normalized.id ? [current] : [current, normalized];
         } else {
           nextQ = [normalized];
         }
       } else {
-        const base =
-          prevQ.length > 0
-            ? prevQ
-            : current
-              ? [current]
-              : [];
-        nextQ = base.some((t) => t.id === normalized.id)
-          ? base
-          : [...base, normalized];
+        const base = prevQ.length > 0 ? prevQ : current ? [current] : [];
+        nextQ = base.some((t) => t.id === normalized.id) ? base : [...base, normalized];
       }
 
       queueRef.current = nextQ;
@@ -4828,12 +4688,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const removeFromQueue = useCallback(
     (trackId: string) => {
       setQueue((prev) => {
-        const currentIdx = track
-          ? prev.findIndex((t) => t.id === track.id)
-          : -1;
-        const removeIdx = prev.findIndex(
-          (t, i) => i > currentIdx && t.id === trackId,
-        );
+        const currentIdx = track ? prev.findIndex((t) => t.id === track.id) : -1;
+        const removeIdx = prev.findIndex((t, i) => i > currentIdx && t.id === trackId);
         if (removeIdx < 0) return prev;
         const nextQ = prev.filter((_, i) => i !== removeIdx);
         queueRef.current = nextQ;
@@ -4853,38 +4709,35 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [play, queue],
   );
 
-  const patchTrackCovers = useCallback(
-    (covers: Record<string, string>) => {
-      const entries = Object.entries(covers).filter(([, url]) => Boolean(url));
-      if (entries.length === 0) return;
-      const map = new Map(entries);
+  const patchTrackCovers = useCallback((covers: Record<string, string>) => {
+    const entries = Object.entries(covers).filter(([, url]) => Boolean(url));
+    if (entries.length === 0) return;
+    const map = new Map(entries);
 
-      setQueue((prev) => {
-        let changed = false;
-        const nextQ = prev.map((t) => {
-          const url = map.get(t.id);
-          if (!url) return t;
-          if (!needsDurableCover(t.coverPath)) return t;
-          changed = true;
-          return { ...t, coverPath: url };
-        });
-        if (!changed) return prev;
-        queueRef.current = nextQ;
-        return nextQ;
+    setQueue((prev) => {
+      let changed = false;
+      const nextQ = prev.map((t) => {
+        const url = map.get(t.id);
+        if (!url) return t;
+        if (!needsDurableCover(t.coverPath)) return t;
+        changed = true;
+        return { ...t, coverPath: url };
       });
+      if (!changed) return prev;
+      queueRef.current = nextQ;
+      return nextQ;
+    });
 
-      setTrack((prev) => {
-        if (!prev) return prev;
-        const url = map.get(prev.id);
-        if (!url) return prev;
-        if (!needsDurableCover(prev.coverPath)) return prev;
-        const next = { ...prev, coverPath: url };
-        trackRef.current = next;
-        return next;
-      });
-    },
-    [],
-  );
+    setTrack((prev) => {
+      if (!prev) return prev;
+      const url = map.get(prev.id);
+      if (!url) return prev;
+      if (!needsDurableCover(prev.coverPath)) return prev;
+      const next = { ...prev, coverPath: url };
+      trackRef.current = next;
+      return next;
+    });
+  }, []);
 
   // Resolve missing covers so the full player + Lock Screen/Dynamic Island get art.
   useEffect(() => {
@@ -4904,9 +4757,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       .then(async (res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (cancelled || !data?.track) return;
-        const cover = durableCoverPath(
-          data.track.coverUrl || data.track.coverPath,
-        );
+        const cover = durableCoverPath(data.track.coverUrl || data.track.coverPath);
         if (!cover) return;
         patchTrackCovers({ [track.id]: cover });
       })
@@ -4916,201 +4767,212 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
   }, [track?.id, track?.coverPath, isRemotePlayback, patchTrackCovers]);
 
-  const isPanelOpen = useCallback(
-    (id: PlayerPanelId) => openPanels[id],
-    [openPanels],
+  const isPanelOpen = useCallback((id: PlayerPanelId) => openPanels[id], [openPanels]);
+
+  const closePanel = useCallback(
+    (id: PlayerPanelId) => {
+      setOpenPanels((prev) => ({ ...prev, [id]: false }));
+    },
+    [setOpenPanels],
   );
 
-  const closePanel = useCallback((id: PlayerPanelId) => {
-    setOpenPanels((prev) => ({ ...prev, [id]: false }));
-  }, [setOpenPanels]);
+  const setPanel = useCallback(
+    (next: PlayerPanel) => {
+      if (next === "none") {
+        setOpenPanels((prev) => ({
+          ...prev,
+          lyrics: false,
+          devices: false,
+          nowPlaying: false,
+        }));
+        return;
+      }
+      if (next === "queue") {
+        setOpenPanels((prev) => ({ ...prev, queue: true }));
+        return;
+      }
+      setOpenPanels((prev) => ({ ...prev, [next]: true }));
+    },
+    [setOpenPanels],
+  );
 
-  const setPanel = useCallback((next: PlayerPanel) => {
-    if (next === "none") {
-      setOpenPanels((prev) => ({
-        ...prev,
-        lyrics: false,
-        devices: false,
-        nowPlaying: false,
-      }));
-      return;
-    }
-    if (next === "queue") {
+  const togglePanel = useCallback(
+    (next: PlayerPanelId) => {
+      setOpenPanels((prev) => ({ ...prev, [next]: !prev[next] }));
+    },
+    [setOpenPanels],
+  );
+
+  const openQueue = useCallback(
+    (tab?: QueueTab) => {
+      if (tab) setQueueTab(tab);
       setOpenPanels((prev) => ({ ...prev, queue: true }));
-      return;
-    }
-    setOpenPanels((prev) => ({ ...prev, [next]: true }));
-  }, [setOpenPanels]);
+    },
+    [setOpenPanels],
+  );
 
-  const togglePanel = useCallback((next: PlayerPanelId) => {
-    setOpenPanels((prev) => ({ ...prev, [next]: !prev[next] }));
-  }, [setOpenPanels]);
+  const transferPlayback = useCallback(
+    (deviceId: string) => {
+      const self = localDeviceRef.current;
+      if (!deviceId) return;
+      // Selecting the device that already owns playback is informational only.
+      // Re-sending a transfer reapplies remote state and can replace the queue.
+      if (activeConnectDevice?.id === deviceId) return;
 
-  const openQueue = useCallback((tab?: QueueTab) => {
-    if (tab) setQueueTab(tab);
-    setOpenPanels((prev) => ({ ...prev, queue: true }));
-  }, [setOpenPanels]);
+      const audio = audioRef.current;
+      const wasFollowing = followingRemoteRef.current;
+      const epoch = remoteEpochRef.current;
+      let resumeAt = progressRef.current;
+      if (!wasFollowing) {
+        resumeAt = isNativeIosPlayerOwning()
+          ? progressRef.current
+          : audio?.currentTime || progressRef.current;
+      } else if (epoch?.playing) {
+        resumeAt = epoch.progress + Math.max(0, (Date.now() - epoch.at) / 1000);
+      } else if (epoch && Number.isFinite(epoch.progress)) {
+        resumeAt = epoch.progress;
+      }
+      if (durationRef.current > 0) {
+        resumeAt = Math.min(durationRef.current, Math.max(0, resumeAt));
+      }
+      progressRef.current = resumeAt;
+      setProgress(resumeAt);
 
-  const transferPlayback = useCallback((deviceId: string) => {
-    const self = localDeviceRef.current;
-    if (!deviceId) return;
-    // Selecting the device that already owns playback is informational only.
-    // Re-sending a transfer reapplies remote state and can replace the queue.
-    if (activeConnectDevice?.id === deviceId) return;
+      // Owner flushes exact position in the same request as transfer.
+      if (!wasFollowing && trackRef.current && self.id) {
+        lastPushedStateAtRef.current = Date.now();
+        void postConnectSync({
+          device: self,
+          state: {
+            track: trackToConnect(trackRef.current),
+            queue: queueRef.current.map(trackToConnect),
+            playing: playingRef.current,
+            progress: resumeAt,
+            duration: durationRef.current,
+            volume: volumeRef.current,
+            shuffle: shuffleRef.current,
+          },
+          command: {
+            id: newCommandId(),
+            type: "transfer",
+            targetId: deviceId,
+          },
+        }).then((data) => {
+          if (!data) return;
+          applyConnectDevices(data.devices ?? [], data.state?.ownerId ?? null);
+          if (data.commands?.length) {
+            // Local command runner lives in the connect effect; nudge via sync tick.
+          }
+        });
+      } else {
+        sendConnectCommandRef.current({
+          id: newCommandId(),
+          type: "transfer",
+          targetId: deviceId,
+        });
+      }
 
-    const audio = audioRef.current;
-    const wasFollowing = followingRemoteRef.current;
-    const epoch = remoteEpochRef.current;
-    let resumeAt = progressRef.current;
-    if (!wasFollowing) {
-      resumeAt = isNativeIosPlayerOwning()
-        ? progressRef.current
-        : (audio?.currentTime || progressRef.current);
-    } else if (epoch?.playing) {
-      resumeAt = epoch.progress + Math.max(0, (Date.now() - epoch.at) / 1000);
-    } else if (epoch && Number.isFinite(epoch.progress)) {
-      resumeAt = epoch.progress;
-    }
-    if (durationRef.current > 0) {
-      resumeAt = Math.min(durationRef.current, Math.max(0, resumeAt));
-    }
-    progressRef.current = resumeAt;
-    setProgress(resumeAt);
-
-    // Owner flushes exact position in the same request as transfer.
-    if (!wasFollowing && trackRef.current && self.id) {
-      lastPushedStateAtRef.current = Date.now();
-      void postConnectSync({
-        device: self,
-        state: {
-          track: trackToConnect(trackRef.current),
-          queue: queueRef.current.map(trackToConnect),
+      if (deviceId === self.id) {
+        followingRemoteRef.current = false;
+        setIsRemotePlayback(false);
+        ownerIdRef.current = tabIdRef.current;
+        const current = trackRef.current;
+        if (current) {
+          remoteEpochRef.current = null;
+          const shouldPlay = playingRef.current;
+          const trackId = current.id;
+          void (async () => {
+            if (await probeNativeIosPlayer()) {
+              silenceHtmlAudio(audio);
+              silenceHtmlAudio(instAudioRef.current);
+              silenceHtmlAudio(nextAudioRef.current);
+              try {
+                const loaded = await nativeIosPlayerLoad({
+                  url: audioSrcFor(current),
+                  track: nativeLoadMeta(current),
+                  autoplay: shouldPlay,
+                  position: resumeAt > 0.25 ? resumeAt : 0,
+                });
+                if (loaded && trackRef.current?.id === trackId) {
+                  if (loaded.duration > 0) {
+                    durationRef.current = loaded.duration;
+                    setDuration(loaded.duration);
+                  }
+                  progressRef.current = loaded.position || resumeAt;
+                  setProgress(progressRef.current);
+                  playingRef.current = shouldPlay;
+                  setPlaying(shouldPlay);
+                  publish({
+                    ownerId: tabIdRef.current,
+                    playing: shouldPlay,
+                    progress: progressRef.current,
+                  });
+                  return;
+                }
+                setNativeIosPlayerOwning(false);
+              } catch {
+                setNativeIosPlayerOwning(false);
+              }
+            }
+            if (!audio || trackRef.current?.id !== trackId) return;
+            setAudioSrc(audio, audioSrcFor(current));
+            const disarm = armResumeSeek(audio, resumeAt);
+            await waitForCanPlay(audio, () => trackRef.current?.id === trackId, 10_000);
+            seekAudioTo(audio, resumeAt);
+            if (shouldPlay && trackRef.current?.id === trackId) {
+              await playBoth();
+              seekAudioTo(audio, resumeAt);
+            }
+            window.setTimeout(disarm, 2_500);
+            publish({
+              ownerId: tabIdRef.current,
+              playing: shouldPlay,
+              progress: resumeAt,
+            });
+          })();
+        }
+        applyConnectDevices(
+          connectDevices.map((d) => ({
+            id: d.id,
+            name: d.name,
+            kind: d.kind,
+            lastSeen: Date.now(),
+          })),
+          self.id,
+        );
+      } else {
+        followingRemoteRef.current = true;
+        setIsRemotePlayback(true);
+        remoteEpochRef.current = {
+          progress: resumeAt,
+          at: Date.now(),
+          playing: playingRef.current,
+          trackId: trackRef.current?.id ?? null,
+        };
+        applyRemote({
+          track: trackRef.current,
+          queue: queueRef.current,
           playing: playingRef.current,
           progress: resumeAt,
           duration: durationRef.current,
           volume: volumeRef.current,
           shuffle: shuffleRef.current,
-        },
-        command: {
-          id: newCommandId(),
-          type: "transfer",
-          targetId: deviceId,
-        },
-      }).then((data) => {
-        if (!data) return;
-        applyConnectDevices(data.devices ?? [], data.state?.ownerId ?? null);
-        if (data.commands?.length) {
-          // Local command runner lives in the connect effect; nudge via sync tick.
-        }
-      });
-    } else {
-      sendConnectCommandRef.current({
-        id: newCommandId(),
-        type: "transfer",
-        targetId: deviceId,
-      });
-    }
-
-    if (deviceId === self.id) {
-      followingRemoteRef.current = false;
-      setIsRemotePlayback(false);
-      ownerIdRef.current = tabIdRef.current;
-      const current = trackRef.current;
-      if (current) {
-        remoteEpochRef.current = null;
-        const shouldPlay = playingRef.current;
-        const trackId = current.id;
-        void (async () => {
-          if (await probeNativeIosPlayer()) {
-            silenceHtmlAudio(audio);
-            silenceHtmlAudio(instAudioRef.current);
-            silenceHtmlAudio(nextAudioRef.current);
-            try {
-              const loaded = await nativeIosPlayerLoad({
-                url: audioSrcFor(current),
-                track: nativeLoadMeta(current),
-                autoplay: shouldPlay,
-                position: resumeAt > 0.25 ? resumeAt : 0,
-              });
-              if (loaded && trackRef.current?.id === trackId) {
-                if (loaded.duration > 0) {
-                  durationRef.current = loaded.duration;
-                  setDuration(loaded.duration);
-                }
-                progressRef.current = loaded.position || resumeAt;
-                setProgress(progressRef.current);
-                playingRef.current = shouldPlay;
-                setPlaying(shouldPlay);
-                publish({
-                  ownerId: tabIdRef.current,
-                  playing: shouldPlay,
-                  progress: progressRef.current,
-                });
-                return;
-              }
-              setNativeIosPlayerOwning(false);
-            } catch {
-              setNativeIosPlayerOwning(false);
-            }
-          }
-          if (!audio || trackRef.current?.id !== trackId) return;
-          setAudioSrc(audio, audioSrcFor(current));
-          const disarm = armResumeSeek(audio, resumeAt);
-          await waitForCanPlay(
-            audio,
-            () => trackRef.current?.id === trackId,
-            10_000,
-          );
-          seekAudioTo(audio, resumeAt);
-          if (shouldPlay && trackRef.current?.id === trackId) {
-            await playBoth();
-            seekAudioTo(audio, resumeAt);
-          }
-          window.setTimeout(disarm, 2_500);
-          publish({
-            ownerId: tabIdRef.current,
-            playing: shouldPlay,
-            progress: resumeAt,
-          });
-        })();
+          ownerId: deviceId,
+          updatedAt: Date.now(),
+        });
+        applyConnectDevices(
+          connectDevices.map((d) => ({
+            id: d.id,
+            name: d.name,
+            kind: d.kind,
+            lastSeen: Date.now(),
+          })),
+          deviceId,
+        );
       }
-      applyConnectDevices(connectDevices.map((d) => ({
-        id: d.id,
-        name: d.name,
-        kind: d.kind,
-        lastSeen: Date.now(),
-      })), self.id);
-    } else {
-      followingRemoteRef.current = true;
-      setIsRemotePlayback(true);
-      remoteEpochRef.current = {
-        progress: resumeAt,
-        at: Date.now(),
-        playing: playingRef.current,
-        trackId: trackRef.current?.id ?? null,
-      };
-      applyRemote({
-        track: trackRef.current,
-        queue: queueRef.current,
-        playing: playingRef.current,
-        progress: resumeAt,
-        duration: durationRef.current,
-        volume: volumeRef.current,
-        shuffle: shuffleRef.current,
-        ownerId: deviceId,
-        updatedAt: Date.now(),
-      });
-      applyConnectDevices(
-        connectDevices.map((d) => ({
-          id: d.id,
-          name: d.name,
-          kind: d.kind,
-          lastSeen: Date.now(),
-        })),
-        deviceId,
-      );
-    }
-  }, [activeConnectDevice?.id, applyConnectDevices, applyRemote, connectDevices, playBoth, publish]);
+    },
+    [activeConnectDevice?.id, applyConnectDevices, applyRemote, connectDevices, playBoth, publish],
+  );
 
   const panel: PlayerPanel = openPanels.nowPlaying
     ? "nowPlaying"
@@ -5207,9 +5069,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     ],
   );
 
-  return (
-    <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>
-  );
+  return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;
 }
 
 export function usePlayer() {
@@ -5235,17 +5095,11 @@ const HOVER_PRIME_MS = 150;
  *    tapping any row starts instantly.
  * Re-runs when the list identity changes; all helpers de-dupe internally.
  */
-export function usePrimeFirstTrack(
-  queue: readonly PlayerTrack[],
-  primeFirst = true,
-) {
+export function usePrimeFirstTrack(queue: readonly PlayerTrack[], primeFirst = true) {
   const { warmLibraryStream, primeTrack } = usePlayer();
   const first = queue[0];
   const firstId = first && !isEphemeralTrack(first) ? first.id : null;
-  const listKey = useMemo(
-    () => queue.map((t) => t.id).join("\u0000"),
-    [queue],
-  );
+  const listKey = useMemo(() => queue.map((t) => t.id).join("\u0000"), [queue]);
 
   useEffect(() => {
     if (!primeFirst || !firstId) return;
@@ -5269,10 +5123,7 @@ export function usePrimeFirstTrack(
 
 /** Heads only (no first-track prime) — for search results / artist pages. */
 export function usePrefetchHeads(tracks: readonly PlayerTrack[]) {
-  const listKey = useMemo(
-    () => tracks.map((t) => t.id).join("\u0000"),
-    [tracks],
-  );
+  const listKey = useMemo(() => tracks.map((t) => t.id).join("\u0000"), [tracks]);
   useEffect(() => {
     if (!listKey) return;
     const id = window.setTimeout(() => prefetchHeads(tracks), 1_200);
@@ -5310,10 +5161,7 @@ export function useWarmLibraryTrack() {
         },
         onMouseEnter: () => {
           clearHover();
-          if (
-            typeof window !== "undefined" &&
-            !window.matchMedia("(hover: hover)").matches
-          ) {
+          if (typeof window !== "undefined" && !window.matchMedia("(hover: hover)").matches) {
             return;
           }
           hoverTimerRef.current = window.setTimeout(() => {

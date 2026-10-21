@@ -1,0 +1,11 @@
+.next
+node_modules
+out
+build
+coverage
+package-lock.json
+apps/desktop/package-lock.json
+apps/desktop/src-tauri/target
+apps/mobile/ios
+apps/mobile/dist
+*.min.js

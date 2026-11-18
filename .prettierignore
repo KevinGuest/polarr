@@ -9,3 +9,4 @@ apps/desktop/src-tauri/target
 apps/mobile/ios
 apps/mobile/dist
 *.min.js
+apps/desktop/src-tauri/gen

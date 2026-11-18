@@ -14,6 +14,7 @@ import { avatarsDir, dbPath, playlistCoversDir, unlinkManagedAudioFile } from ".
 import { parseNotifyEvents, serializeNotifyEvents, type NotifyEventFlags } from "./notify-events";
 import { LISTEN_HEARTBEAT_SECONDS, LISTEN_QUALIFY_SECONDS } from "./listen";
 import { isUserRole, type UserRole } from "./roles";
+import { globalSingleton } from "./ttl-cache";
 import {
   DEFAULT_DOWNLOAD_QUALITY,
   isDownloadQuality,
@@ -1091,12 +1092,42 @@ function setSetting(key: string, value: string) {
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     )
     .run(key, value);
+  settingsRows.map = null;
+}
+
+/**
+ * All settings rows, read in one query and held briefly.
+ *
+ * getSettings() used to run ~40 single-key queries (each re-preparing its
+ * statement) and is called on nearly every request — including every byte-range
+ * request of every audio stream. Writes through setSetting() drop the copy at
+ * once; the short TTL only covers edits made to the file from outside.
+ * On globalThis because Next's page and route bundles each load this module.
+ */
+const SETTINGS_ROWS_TTL_MS = 5_000;
+const settingsRows = globalSingleton("settings-rows", () => ({
+  at: 0,
+  map: null as Map<string, string> | null,
+}));
+
+function settingsMap(): Map<string, string> {
+  const now = Date.now();
+  if (settingsRows.map && now - settingsRows.at < SETTINGS_ROWS_TTL_MS) {
+    return settingsRows.map;
+  }
+  const rows = getDb().prepare(`SELECT key, value FROM settings`).all() as {
+    key: string;
+    value: string;
+  }[];
+  const map = new Map<string, string>();
+  for (const row of rows) map.set(row.key, row.value);
+  settingsRows.map = map;
+  settingsRows.at = now;
+  return map;
 }
 
 function getSetting(key: string, fallback = ""): string {
-  const row = getDb().prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as
-    { value: string } | undefined;
-  return row?.value ?? fallback;
+  return settingsMap().get(key) ?? fallback;
 }
 
 export function getSettings(): Settings {
@@ -1211,6 +1242,28 @@ export function hasUsers(): boolean {
 export function countUsers(): number {
   const row = getDb().prepare(`SELECT COUNT(*) as c FROM users`).get() as { c: number };
   return row.c;
+}
+
+/** Users with a live session seen within `withinMs`, most recent first. */
+export function listRecentlyActiveUserIds(withinMs: number, limit = 10): string[] {
+  const now = Date.now();
+  const rows = getDb()
+    .prepare(
+      `SELECT s.user_id as userId,
+              MAX(COALESCE(s.last_seen_at, s.created_at)) as seenAt
+       FROM sessions s JOIN users u ON u.id = s.user_id
+       WHERE s.expires_at > ? AND u.access_revoked_at IS NULL
+       GROUP BY s.user_id
+       HAVING seenAt >= ?
+       ORDER BY seenAt DESC
+       LIMIT ?`,
+    )
+    .all(
+      new Date(now).toISOString(),
+      new Date(now - withinMs).toISOString(),
+      Math.max(1, Math.floor(limit)),
+    ) as { userId: string }[];
+  return rows.map((row) => row.userId);
 }
 
 export function countAdmins(): number {

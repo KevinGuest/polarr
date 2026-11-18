@@ -7,9 +7,14 @@ import { relaunch } from "@tauri-apps/plugin-process";
  * plus `-app` / Windows NSIS variants). Do not pass a custom `target` —
  * CI publishes those keys for the universal `.app.tar.gz`, not `macos-universal`.
  */
-export function updaterCheckOptions(): Record<string, never> {
-  return {};
+export function updaterCheckOptions(): { timeout: number } {
+  // The updater window gates startup, so a slow or unreachable GitHub must not
+  // hold the app closed. A missed check simply retries on the next launch.
+  return { timeout: UPDATE_CHECK_TIMEOUT_MS };
 }
+
+/** Longest the startup update check may delay the app (ms). */
+export const UPDATE_CHECK_TIMEOUT_MS = 5_000;
 
 export type UpdateProgress = {
   received: number;
@@ -26,7 +31,12 @@ export async function getAppVersion(): Promise<string> {
 
 export async function findAppUpdate(): Promise<Update | null> {
   try {
-    return (await check(updaterCheckOptions())) ?? null;
+    // Belt and braces: the plugin timeout covers the request, this covers a
+    // stalled DNS lookup / IPC call that never reaches it.
+    const timedOut = new Promise<null>((resolve) => {
+      setTimeout(() => resolve(null), UPDATE_CHECK_TIMEOUT_MS + 1_500);
+    });
+    return (await Promise.race([check(updaterCheckOptions()), timedOut])) ?? null;
   } catch (err) {
     console.error("polarr updater: check failed", err);
     return null;

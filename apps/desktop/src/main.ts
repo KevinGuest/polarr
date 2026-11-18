@@ -1014,9 +1014,18 @@ async function bootstrap() {
   // The updater exclusively owns startup visibility. If no update is found it
   // closes and Polarr opens; if an update is found it installs and relaunches
   // without the full desktop window ever appearing behind it.
-  await openUpdaterWindow();
+  //
+  // Connect to the saved server while that check runs instead of after it, so
+  // the interface is already mounted and painting from its local cache by the
+  // time the window is revealed.
+  const updaterDone = openUpdaterWindow();
+  const connected = connectSavedServer();
+  await updaterDone;
   await revealMainWindow();
+  await connected;
+}
 
+async function connectSavedServer() {
   try {
     const saved = await invoke<{
       url: string | null;

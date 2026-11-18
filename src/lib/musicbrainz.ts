@@ -3,6 +3,7 @@
  * foreignAlbumId from Lidarr is typically a MusicBrainz release-group MBID.
  */
 
+import { globalSingleton } from "@/lib/ttl-cache";
 import {
   namesMatch,
   normalizeTitle,
@@ -67,7 +68,11 @@ type MbRelease = {
 
 const UA = "Polarr/1.0 (https://github.com/KevinGuest/polarr)";
 const MB_TTL_MS = 6 * 60 * 60 * 1000; // 6h
-const mbCache = new Map<string, { at: number; value: unknown }>();
+// Shared across Next's page / route / instrumentation module graphs.
+const mbCache = globalSingleton(
+  "musicbrainz",
+  () => new Map<string, { at: number; value: unknown }>(),
+);
 
 function cacheGet<T>(key: string): T | undefined {
   const hit = mbCache.get(key);
@@ -95,6 +100,8 @@ async function mbFetch<T>(path: string): Promise<T | null> {
     const res = await fetch(`https://musicbrainz.org/ws/2${path}`, {
       headers: { Accept: "application/json", "User-Agent": UA },
       next: { revalidate: 3600 },
+      // No timeout meant a stalled MusicBrainz held the caller indefinitely.
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as T;

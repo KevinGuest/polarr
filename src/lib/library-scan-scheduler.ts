@@ -97,9 +97,9 @@ async function tick() {
  * Boot-time fill: pre-encode AAC sidecars for the existing library even when
  * periodic scans are disabled (scans themselves re-trigger this).
  */
-function queueSidecarWarm() {
+async function queueSidecarWarm() {
   try {
-    const { queued, removed } = warmLibrarySidecars(listLibraryTrackPaths());
+    const { queued, removed } = await warmLibrarySidecars(listLibraryTrackPaths());
     if (queued || removed) {
       console.info(
         `[polarr] sidecar pre-encode · ${queued} queued · ${removed} orphans removed`,
@@ -128,7 +128,7 @@ export function startLibraryScanScheduler() {
   }, BOOT_DELAY_MS);
 
   // Even with periodic scans disabled, fill sidecars for the existing library once.
-  setTimeout(queueSidecarWarm, BOOT_DELAY_MS + 10_000);
+  setTimeout(() => void queueSidecarWarm(), BOOT_DELAY_MS + 10_000);
 
   setInterval(() => {
     void tick();

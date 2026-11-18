@@ -16,7 +16,7 @@ import {
 import { fetchTrendingAlbums } from "@/lib/trending";
 import { resolveArtistPortrait } from "@/lib/artist-portrait";
 import { ytDlpAvailable } from "@/lib/fallback-download";
-import { TtlCache } from "@/lib/ttl-cache";
+import { globalSingleton, TtlCache } from "@/lib/ttl-cache";
 import type {
   DiscoverPayload,
   DiscoverReleaseCard,
@@ -25,7 +25,24 @@ import type {
 export type { DiscoverPayload, DiscoverReleaseCard };
 
 const DISCOVER_TTL_MS = 10 * 60 * 1000;
-const discoverCache = new TtlCache<DiscoverPayload>(DISCOVER_TTL_MS, 48);
+/** Expired feeds stay servable while a background rebuild runs. */
+const DISCOVER_STALE_MS = 24 * 60 * 60 * 1000;
+/** A feed built with a source missing is retried sooner. */
+const DISCOVER_PARTIAL_TTL_MS = 60 * 1000;
+/**
+ * No single upstream may hold the feed longer than this. A cold build fans out
+ * to Lidarr, MusicBrainz and Deezer; one slow host used to stall the lot.
+ */
+const SOURCE_BUDGET_MS = 8_000;
+const ANON_KEY = "anon";
+// Shared across the page, route-handler and instrumentation module graphs —
+// each used to hold its own copy and rebuild the same feed (see ttl-cache.ts).
+const discoverCache = globalSingleton(
+  "discover-feed",
+  () => new TtlCache<DiscoverPayload>(DISCOVER_TTL_MS, 48, DISCOVER_STALE_MS),
+);
+
+type BuildResult = { payload: DiscoverPayload; partial: boolean };
 
 type ReleaseCard = DiscoverReleaseCard;
 
@@ -55,9 +72,30 @@ function mergeByKey(items: ReleaseCard[]): ReleaseCard[] {
   return out;
 }
 
-async function buildDiscoverPayload(
-  userId: string | null,
-): Promise<DiscoverPayload> {
+async function buildDiscoverPayload(userId: string | null): Promise<BuildResult> {
+  const startedAt = Date.now();
+  const timings: string[] = [];
+  let partial = false;
+  /** Time a source and cap it at the budget, falling back instead of hanging. */
+  function source<T>(name: string, work: Promise<T>, fallback: T): Promise<T> {
+    const began = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const capped = new Promise<T>((resolve) => {
+      timer = setTimeout(() => {
+        partial = true;
+        timings.push(`${name} timeout`);
+        resolve(fallback);
+      }, SOURCE_BUDGET_MS);
+    });
+    return Promise.race([
+      work.then((value) => {
+        timings.push(`${name} ${Date.now() - began}ms`);
+        return value;
+      }),
+      capped,
+    ]).finally(() => clearTimeout(timer));
+  }
+
   const settings = getSettings();
   const client = LidarrClient.fromSettings();
 
@@ -76,8 +114,8 @@ async function buildDiscoverPayload(
     moreFrom,
     fallbackReady,
   ] = await Promise.all([
-    browseReleaseGroups(36, { monthsBack: 4 }).catch(() => []),
-    (async () => {
+    source("mbNew", browseReleaseGroups(36, { monthsBack: 4 }).catch(() => []), []),
+    source("tasteAlbums", (async () => {
       if (tasteNames.length === 0) return [] as MbCatalogRelease[];
       const batches = await Promise.all(
         tasteNames.slice(0, 8).map((name) =>
@@ -87,20 +125,16 @@ async function buildDiscoverPayload(
         ),
       );
       return batches.flat();
-    })(),
-    userId
-      ? expandTasteNeighborhood(userId, 8).catch(() => ({
-          albums: [] as ExploreAlbum[],
-          graph: new Map<string, number>(),
-          heardAlbums: new Set<string>(),
-        }))
-      : Promise.resolve({
-          albums: [] as ExploreAlbum[],
-          graph: new Map<string, number>(),
-          heardAlbums: new Set<string>(),
-        }),
-    fetchTrendingAlbums(28).catch(() => []),
-    (async () => {
+    })(), [] as MbCatalogRelease[]),
+    source(
+      "neighborhood",
+      userId
+        ? expandTasteNeighborhood(userId, 8).catch(emptyNeighborhood)
+        : Promise.resolve(emptyNeighborhood()),
+      emptyNeighborhood(),
+    ),
+    source("trending", fetchTrendingAlbums(28).catch(() => []), []),
+    source("lidarr", (async () => {
       if (!client) return null;
       try {
         const [rel, arts] = await Promise.all([
@@ -113,11 +147,15 @@ async function buildDiscoverPayload(
           err instanceof Error ? err.message : "Lidarr discover failed";
         return null;
       }
-    })(),
-    pickMoreFromArtists(5).catch(() => []),
-    settings.fallbackEnabled
-      ? ytDlpAvailable().catch(() => false)
-      : Promise.resolve(false),
+    })(), null),
+    source("moreFrom", pickMoreFromArtists(5).catch(() => []), []),
+    source(
+      "ytDlp",
+      settings.fallbackEnabled
+        ? ytDlpAvailable().catch(() => false)
+        : Promise.resolve(false),
+      false,
+    ),
   ]);
 
   if (lidarrBundle) {
@@ -126,12 +164,16 @@ async function buildDiscoverPayload(
   }
 
   const [artists, moreFromFresh] = await Promise.all([
-    buildHomeArtists({
-      userId,
-      limit: 48,
-      lidarrArtists,
-    }).catch(() => [] as Awaited<ReturnType<typeof buildHomeArtists>>),
-    Promise.all(
+    source(
+      "homeArtists",
+      buildHomeArtists({
+        userId,
+        limit: 48,
+        lidarrArtists,
+      }).catch(() => [] as Awaited<ReturnType<typeof buildHomeArtists>>),
+      [],
+    ),
+    source("portraits", Promise.all(
       moreFrom.map(async (cat) => {
         if (cat.image && /^https?:\/\//i.test(cat.image)) {
           return cat;
@@ -144,7 +186,7 @@ async function buildDiscoverPayload(
           image: fresh || cat.image,
         };
       }),
-    ),
+    ), moreFrom),
   ]);
 
   const releases = mergeByKey([
@@ -234,7 +276,14 @@ async function buildDiscoverPayload(
     }),
   }));
 
-  return {
+  const elapsed = Date.now() - startedAt;
+  if (elapsed > 3_000 || partial) {
+    console.info(
+      `[polarr] discover build ${elapsed}ms${partial ? " (partial)" : ""} · ${timings.join(" · ")}`,
+    );
+  }
+
+  const payload: DiscoverPayload = {
     catalog,
     releases: releases.slice(0, 36),
     artists,
@@ -245,17 +294,66 @@ async function buildDiscoverPayload(
     fallbackReady: Boolean(fallbackReady),
     streamDefault: fallbackReady ? "fallback" : "library",
   };
+  return { payload, partial };
+}
+
+function emptyNeighborhood() {
+  return {
+    albums: [] as ExploreAlbum[],
+    graph: new Map<string, number>(),
+    heardAlbums: new Set<string>(),
+  };
+}
+
+function rebuild(key: string, userId: string | null): Promise<DiscoverPayload> {
+  let partial = false;
+  const run = discoverCache.refresh(key, async () => {
+    const built = await buildDiscoverPayload(userId);
+    partial = built.partial;
+    return built.payload;
+  });
+  // refresh() stores the feed at full TTL; one built with a source missing is
+  // re-stored with a short TTL so it is retried soon (still served meanwhile).
+  void run
+    .then((payload) => {
+      if (partial) discoverCache.set(key, payload, DISCOVER_PARTIAL_TTL_MS);
+    })
+    .catch(() => {});
+  return run;
 }
 
 /**
- * Home / explore feed. Cached ~10m per user so the always-on container
- * serves warm shelves after the first visitor.
+ * Home / explore feed. Fresh for ~10m per user; after that the previous feed is
+ * returned immediately and rebuilt in the background, so only a user's very
+ * first request after a restart ever waits on the upstreams.
  */
 export async function getDiscoverFeed(
   userId: string | null,
 ): Promise<DiscoverPayload> {
-  const key = userId || "anon";
-  return discoverCache.getOrSet(key, () => buildDiscoverPayload(userId));
+  const key = userId || ANON_KEY;
+  return discoverCache.getOrRevalidate(key, () => rebuild(key, userId));
+}
+
+/**
+ * Whatever can be painted right now, without waiting: this user's feed (even
+ * expired), else the generic feed the boot warmer keeps hot, else null. Starts
+ * a background build when the user's own feed is missing or expired.
+ *
+ * The home page renders with this so its HTML is never held behind Lidarr /
+ * MusicBrainz / Deezer; the client then swaps in the personal feed.
+ */
+export function peekDiscoverFeed(userId: string | null): DiscoverPayload | null {
+  const key = userId || ANON_KEY;
+  if (discoverCache.get(key) === undefined) {
+    void rebuild(key, userId).catch(() => {});
+  }
+  return discoverCache.getStale(key) ?? discoverCache.getStale(ANON_KEY) ?? null;
+}
+
+/** Rebuild a feed now regardless of age (boot / interval warmers). */
+export function warmDiscoverFeed(userId: string | null): Promise<DiscoverPayload> {
+  const key = userId || ANON_KEY;
+  return rebuild(key, userId);
 }
 
 export function invalidateDiscoverCache(userId?: string | null) {
@@ -263,5 +361,5 @@ export function invalidateDiscoverCache(userId?: string | null) {
     discoverCache.invalidate();
     return;
   }
-  discoverCache.invalidate(userId || "anon");
+  discoverCache.invalidate(userId || ANON_KEY);
 }

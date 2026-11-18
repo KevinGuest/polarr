@@ -9,6 +9,7 @@
  * 5) Diversity-cap so one artist doesn’t own the shelf
  */
 
+import { globalSingleton } from "@/lib/ttl-cache";
 import {
   listLikedTracks,
   listTasteExcludeIds,
@@ -108,12 +109,20 @@ type DeezerAlbumHit = {
   artist?: { name?: string };
 };
 
-const artistIdCache = new Map<string, { at: number; id: number | null }>();
-const relatedCache = new Map<
-  string,
-  { at: number; artists: { id: number; name: string }[] }
->();
-const albumCache = new Map<string, { at: number; albums: ExploreAlbum[] }>();
+// Shared across Next's page / route / instrumentation module graphs.
+const artistIdCache = globalSingleton(
+  "explore-artist-id",
+  () => new Map<string, { at: number; id: number | null }>(),
+);
+const relatedCache = globalSingleton(
+  "explore-related",
+  () =>
+    new Map<string, { at: number; artists: { id: number; name: string }[] }>(),
+);
+const albumCache = globalSingleton(
+  "explore-albums",
+  () => new Map<string, { at: number; albums: ExploreAlbum[] }>(),
+);
 const CACHE_TTL = 45 * 60 * 1000;
 
 async function deezerJson<T>(url: string): Promise<T | null> {
@@ -121,6 +130,7 @@ async function deezerJson<T>(url: string): Promise<T | null> {
     const res = await fetch(url, {
       headers: { Accept: "application/json" },
       next: { revalidate: 1800 },
+      signal: AbortSignal.timeout(8_000),
     });
     if (!res.ok) return null;
     return (await res.json()) as T;

@@ -35,14 +35,24 @@ const AUDIO_EXT = new Set([
 /** How many ffprobe workers at once. */
 const PROBE_CONCURRENCY = 4;
 
-function walk(dir: string, out: string[] = []): string[] {
-  if (!fs.existsSync(dir)) return out;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+/**
+ * Async on purpose: a synchronous walk of a large library (or a slow / sleeping
+ * disk) froze the whole server — pages, API and audio streams — for as long as
+ * the listing took, every scan interval.
+ */
+async function walk(dir: string, out: string[] = []): Promise<string[]> {
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
     // Never follow symlinks — shared Umbrel Downloads mounts can plant
     // evil.mp3 → /immich/... links that would otherwise be indexed+streamed.
     if (entry.isSymbolicLink()) continue;
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) walk(full, out);
+    if (entry.isDirectory()) await walk(full, out);
     else if (
       entry.isFile() &&
       AUDIO_EXT.has(path.extname(entry.name).toLowerCase())
@@ -218,7 +228,8 @@ export async function scanMusicLibrary(): Promise<{
     dirIsScannable("/music") ? "/music" : null,
   ].filter((dir): dir is string => Boolean(dir && dirIsScannable(dir)));
   const roots = collapseNestedRoots([root, dlRoot, ...aliasRoots]);
-  const files = roots.flatMap((dir) => walk(dir));
+  const files: string[] = [];
+  for (const dir of roots) await walk(dir, files);
   let probed = 0;
   let added = 0;
 
@@ -233,7 +244,7 @@ export async function scanMusicLibrary(): Promise<{
     let fileSize = 0;
     let mtimeMs = 0;
     try {
-      const st = fs.statSync(file);
+      const st = await fs.promises.stat(file);
       fileSize = st.size;
       mtimeMs = st.mtimeMs;
     } catch {
@@ -332,7 +343,7 @@ export async function scanMusicLibrary(): Promise<{
   try {
     const { warmLibrarySidecars } = await import("@/lib/stream-compat");
     const { listLibraryTrackPaths } = await import("@/lib/db");
-    const { queued, removed: sidecarOrphans } = warmLibrarySidecars(
+    const { queued, removed: sidecarOrphans } = await warmLibrarySidecars(
       listLibraryTrackPaths(),
     );
     if (queued || sidecarOrphans) {

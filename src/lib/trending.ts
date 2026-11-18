@@ -47,6 +47,7 @@ export async function fetchTrendingAlbums(
       {
         headers: { Accept: "application/json" },
         next: { revalidate: 1800 },
+        signal: AbortSignal.timeout(8_000),
       },
     );
     if (!res.ok) return trendCache?.items.slice(0, limit) || [];
@@ -106,6 +107,7 @@ export async function fetchTrendingArtists(
       {
         headers: { Accept: "application/json" },
         next: { revalidate: 1800 },
+        signal: AbortSignal.timeout(8_000),
       },
     );
     if (!res.ok) return trendArtistCache?.items.slice(0, limit) || [];

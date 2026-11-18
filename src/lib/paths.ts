@@ -10,13 +10,30 @@ function canWriteDir(dir: string): boolean {
   }
 }
 
+/**
+ * These resolvers run on hot paths (every byte-range request of every audio
+ * stream goes through musicDir() + downloadsDir()), and each call did a
+ * synchronous mkdir + access on disk. Remember a positive answer briefly;
+ * failures are always re-checked so a late mount is picked up immediately.
+ */
+const WRITABLE_DIR_TTL_MS = 30_000;
+const writableDirSeen = new Map<string, number>();
+
 function tryEnsureWritableDir(dir: string): string | null {
+  const seen = writableDirSeen.get(dir);
+  if (seen !== undefined && Date.now() - seen < WRITABLE_DIR_TTL_MS) return dir;
   try {
     fs.mkdirSync(dir, { recursive: true });
   } catch {
+    writableDirSeen.delete(dir);
     return null;
   }
-  return canWriteDir(dir) ? dir : null;
+  if (!canWriteDir(dir)) {
+    writableDirSeen.delete(dir);
+    return null;
+  }
+  writableDirSeen.set(dir, Date.now());
+  return dir;
 }
 
 /** Data dir must be writable — SQLite lives here. */

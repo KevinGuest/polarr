@@ -1,5 +1,6 @@
 import { getSettings } from "./db";
 import { namesMatch, titlesMatch } from "./track-match";
+import { globalSingleton } from "./ttl-cache";
 
 export type LidarrArtist = {
   id?: number;
@@ -130,14 +131,63 @@ let coverMapsCache: {
   albums: Map<string, string>;
   artists: Map<string, string>;
 } | null = null;
+const LIDARR_TIMEOUT_MS = 20_000;
+/** Whole-library dumps are legitimately slow; they refresh in the background. */
+const LIDARR_DUMP_TIMEOUT_MS = 60_000;
 const COVER_MAP_TTL_MS = 5 * 60_000;
+const COVER_MAP_MAX_WAIT_MS = 1_500;
 
 /** Shared Lidarr /album + /artist dumps — one cold trip feeds discover, nav, covers. */
 const LIDARR_LIST_TTL_MS = 3 * 60_000;
-let albumDumpCache: { at: number; items: LidarrAlbum[] } | null = null;
-let artistDumpCache: { at: number; items: LidarrArtist[] } | null = null;
-let albumDumpInflight: Promise<LidarrAlbum[]> | null = null;
-let artistDumpInflight: Promise<LidarrArtist[]> | null = null;
+/**
+ * After the TTL the previous dump is still returned at once while a refresh
+ * runs in the background. These calls return Lidarr's whole library and take
+ * 10+ s on a real one; awaiting them every 3 minutes froze the sidebar
+ * (/api/library/nav), covers and the home feed for whoever came next. A dump
+ * this old or older is not served — the caller waits for a fresh one.
+ */
+const LIDARR_LIST_STALE_MS = 12 * 60 * 60_000;
+
+type Dump<T> = { at: number; items: T[] | null; inflight: Promise<T[]> | null };
+// On globalThis: Next's page / route / instrumentation bundles each load this
+// module, and each used to pay for its own copy of the dumps.
+const dumps = globalSingleton("lidarr-dumps", () => ({
+  album: { at: 0, items: null, inflight: null } as Dump<LidarrAlbum>,
+  artist: { at: 0, items: null, inflight: null } as Dump<LidarrArtist>,
+}));
+
+/** Expire both dumps (kept as stale fallback) after Polarr changes Lidarr. */
+function expireDumps() {
+  dumps.album.at = 0;
+  dumps.artist.at = 0;
+}
+
+function readDump<T>(
+  dump: Dump<T>,
+  load: () => Promise<T[]>,
+  /** Decisions that write to Lidarr must not act on an expired copy. */
+  fresh = false,
+): Promise<T[]> {
+  const age = Date.now() - dump.at;
+  if (dump.items && age < LIDARR_LIST_TTL_MS) return Promise.resolve(dump.items);
+  if (!dump.inflight) {
+    dump.inflight = load()
+      .then((items) => {
+        dump.items = items;
+        dump.at = Date.now();
+        return items;
+      })
+      .finally(() => {
+        dump.inflight = null;
+      });
+    // Stale readers below do not await this; keep a failure from going unhandled.
+    dump.inflight.catch(() => {});
+  }
+  if (!fresh && dump.items && age < LIDARR_LIST_STALE_MS) {
+    return Promise.resolve(dump.items);
+  }
+  return dump.inflight;
+}
 
 async function loadCoverMaps(): Promise<{
   albums: Map<string, string>;
@@ -155,10 +205,25 @@ async function loadCoverMaps(): Promise<{
     };
     return coverMapsCache;
   }
-  const [albums, artists] = await Promise.all([
+  // Covers are decoration: right after a restart, before the first dump has
+  // landed, answer without them rather than hold the sidebar / library / likes
+  // for as long as Lidarr takes. The empty answer is not cached, so the next
+  // call (dump ready by then) fills them in.
+  const lists = Promise.all([
     client.listAlbums().catch(() => [] as LidarrAlbum[]),
     client.listArtists().catch(() => [] as LidarrArtist[]),
   ]);
+  let waited: ReturnType<typeof setTimeout> | undefined;
+  const ready = await Promise.race([
+    lists,
+    new Promise<null>((resolve) => {
+      waited = setTimeout(() => resolve(null), COVER_MAP_MAX_WAIT_MS);
+    }),
+  ]).finally(() => clearTimeout(waited));
+  if (!ready) {
+    return { albums: new Map(), artists: new Map() };
+  }
+  const [albums, artists] = ready;
   const artistById = new Map<number, string>();
   const artistMap = new Map<string, string>();
   for (const a of artists) {
@@ -286,6 +351,9 @@ export class LidarrClient {
         ...(init?.headers || {}),
       },
       cache: "no-store",
+      // A hung Lidarr (restarting, indexing, asleep disk) used to hold every
+      // caller — home feed, search, requests — until the socket gave up.
+      signal: init?.signal ?? AbortSignal.timeout(LIDARR_TIMEOUT_MS),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -325,42 +393,23 @@ export class LidarrClient {
     });
   }
 
-  async listArtists(): Promise<LidarrArtist[]> {
-    if (
-      artistDumpCache &&
-      Date.now() - artistDumpCache.at < LIDARR_LIST_TTL_MS
-    ) {
-      return artistDumpCache.items;
-    }
-    if (artistDumpInflight) return artistDumpInflight;
-    artistDumpInflight = this.request<LidarrArtist[]>("/artist")
-      .then((items) => {
-        artistDumpCache = { at: Date.now(), items };
-        return items;
-      })
-      .finally(() => {
-        artistDumpInflight = null;
-      });
-    return artistDumpInflight;
+  async listArtists(opts?: { fresh?: boolean }): Promise<LidarrArtist[]> {
+    return readDump(
+      dumps.artist,
+      () =>
+        this.request<LidarrArtist[]>("/artist", {
+          signal: AbortSignal.timeout(LIDARR_DUMP_TIMEOUT_MS),
+        }),
+      opts?.fresh,
+    );
   }
 
   async listAlbums(): Promise<LidarrAlbum[]> {
-    if (
-      albumDumpCache &&
-      Date.now() - albumDumpCache.at < LIDARR_LIST_TTL_MS
-    ) {
-      return albumDumpCache.items;
-    }
-    if (albumDumpInflight) return albumDumpInflight;
-    albumDumpInflight = this.request<LidarrAlbum[]>("/album")
-      .then((items) => {
-        albumDumpCache = { at: Date.now(), items };
-        return items;
-      })
-      .finally(() => {
-        albumDumpInflight = null;
-      });
-    return albumDumpInflight;
+    return readDump(dumps.album, () =>
+      this.request<LidarrAlbum[]>("/album", {
+        signal: AbortSignal.timeout(LIDARR_DUMP_TIMEOUT_MS),
+      }),
+    );
   }
 
   async getAlbum(id: number): Promise<LidarrAlbum> {
@@ -529,10 +578,12 @@ export class LidarrClient {
   }
 
   async addArtist(payload: Record<string, unknown>) {
-    return this.request<LidarrArtist>("/artist", {
+    const added = await this.request<LidarrArtist>("/artist", {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    expireDumps();
+    return added;
   }
 
   async searchCommands(name: string, body: Record<string, unknown> = {}) {
@@ -608,7 +659,7 @@ export class LidarrClient {
   }
 
   async requestArtist(foreignArtistId: string, artistName: string) {
-    const existing = await this.listArtists();
+    const existing = await this.listArtists({ fresh: true });
     const found = existing.find((a) => a.foreignArtistId === foreignArtistId);
     if (found) {
       await this.searchCommands("ArtistSearch", { artistId: found.id });

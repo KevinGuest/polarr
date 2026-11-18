@@ -212,16 +212,21 @@ function safeDataDir(): string {
   }
 }
 
+function sidecarPathFor(
+  filePath: string,
+  quality: StreamQuality,
+  st: { mtimeMs: number; size: number },
+): string {
+  const key = createHash("sha1")
+    .update(`${filePath}\0${quality}\0${st.mtimeMs}\0${st.size}\0m4a-v2`)
+    .digest("hex")
+    .slice(0, 20);
+  return path.join(encodeCacheDir(), `${SIDECAR_PREFIX}${key}.m4a`);
+}
+
 function compatCachePath(filePath: string, quality: StreamQuality): string | null {
   try {
-    const st = fs.statSync(filePath);
-    const key = createHash("sha1")
-      .update(
-        `${filePath}\0${quality}\0${st.mtimeMs}\0${st.size}\0m4a-v2`,
-      )
-      .digest("hex")
-      .slice(0, 20);
-    return path.join(encodeCacheDir(), `${SIDECAR_PREFIX}${key}.m4a`);
+    return sidecarPathFor(filePath, quality, fs.statSync(filePath));
   } catch {
     return null;
   }
@@ -313,6 +318,9 @@ const g = globalThis as typeof globalThis & {
     encoded: number;
     failed: number;
     lastSweep: number;
+    /** Tracked sidecar bytes; -1 until first measured. */
+    cacheBytes: number;
+    cacheBytesAt: number;
   };
 };
 function preState() {
@@ -324,18 +332,39 @@ function preState() {
       encoded: 0,
       failed: 0,
       lastSweep: 0,
+      cacheBytes: -1,
+      cacheBytesAt: 0,
     };
+  }
+  // State created by an older build of this module (dev hot reload).
+  if (typeof g.__polarrPreencode.cacheBytes !== "number") {
+    g.__polarrPreencode.cacheBytes = -1;
+    g.__polarrPreencode.cacheBytesAt = 0;
   }
   return g.__polarrPreencode;
 }
 
-function cacheDirBytes(): number {
+const CACHE_BYTES_REMEASURE_MS = 15 * 60_000;
+
+/**
+ * Size of the sidecar cache. Measured off the event loop and then tracked
+ * incrementally: the pre-encoder used to re-stat every sidecar synchronously
+ * before each encode, so filling a library of N tracks cost N² blocking stats
+ * and stalled streams / pages more and more as the cache grew.
+ */
+async function cacheDirBytes(): Promise<number> {
+  const s = preState();
+  if (s.cacheBytes >= 0 && Date.now() - s.cacheBytesAt < CACHE_BYTES_REMEASURE_MS) {
+    return s.cacheBytes;
+  }
   let total = 0;
   try {
-    for (const name of fs.readdirSync(encodeCacheDir())) {
+    const dir = encodeCacheDir();
+    const names = await fs.promises.readdir(dir);
+    for (const name of names) {
       if (!name.startsWith(SIDECAR_PREFIX)) continue;
       try {
-        total += fs.statSync(path.join(encodeCacheDir(), name)).size;
+        total += (await fs.promises.stat(path.join(dir, name))).size;
       } catch {
         /* ignore */
       }
@@ -343,6 +372,8 @@ function cacheDirBytes(): number {
   } catch {
     /* ignore */
   }
+  s.cacheBytes = total;
+  s.cacheBytesAt = Date.now();
   return total;
 }
 
@@ -378,7 +409,7 @@ async function drainPreencodeQueue() {
       const quality = key.slice(0, sep) as StreamQuality;
       const filePath = key.slice(sep + 1);
       if (getCachedCompatM4a(filePath, quality)) continue;
-      if (cacheDirBytes() >= PREENCODE_MAX_BYTES) {
+      if ((await cacheDirBytes()) >= PREENCODE_MAX_BYTES) {
         console.warn(
           `[polarr] encode cache at limit (${(PREENCODE_MAX_BYTES / 1024 ** 3).toFixed(0)} GB) — skipping pre-encode; raise POLARR_ENCODE_CACHE_MAX_GB`,
         );
@@ -387,8 +418,10 @@ async function drainPreencodeQueue() {
         break;
       }
       const ok = await ensureCompatM4a(filePath, quality);
-      if (ok) s.encoded += 1;
-      else s.failed += 1;
+      if (ok) {
+        s.encoded += 1;
+        if (s.cacheBytes >= 0) s.cacheBytes += ok.size;
+      } else s.failed += 1;
       // Yield between files so request handlers / scans interleave.
       await new Promise((r) => setTimeout(r, 150));
     }
@@ -401,20 +434,33 @@ async function drainPreencodeQueue() {
  * Enqueue sidecars for every library track that needs one (newest first) and
  * drop sidecars whose source no longer exists. Called after each library scan.
  */
-export function warmLibrarySidecars(paths: string[]): {
+export async function warmLibrarySidecars(paths: string[]): Promise<{
   queued: number;
   removed: number;
-} {
+}> {
   if (PREENCODE_DISABLED || !ffmpegBin()) return { queued: 0, removed: 0 };
   const s = preState();
   const expected = new Set<string>();
   let queued = 0;
+  // One directory listing instead of an existsSync per track, and async stats:
+  // this runs over the whole library after every scan and must not block.
+  let present: Set<string> | null = null;
+  try {
+    present = new Set(await fs.promises.readdir(encodeCacheDir()));
+  } catch {
+    present = null;
+  }
   for (const p of paths) {
     if (!p || !needsEncode(path.extname(p))) continue;
-    const out = compatCachePath(p, SIDECAR_QUALITY);
-    if (!out) continue;
-    expected.add(path.basename(out));
-    if (fs.existsSync(out)) continue;
+    let out: string;
+    try {
+      out = sidecarPathFor(p, SIDECAR_QUALITY, await fs.promises.stat(p));
+    } catch {
+      continue;
+    }
+    const name = path.basename(out);
+    expected.add(name);
+    if (present ? present.has(name) : fs.existsSync(out)) continue;
     const key = `${SIDECAR_QUALITY}\0${p}`;
     if (s.queued.has(key)) continue;
     s.queued.add(key);
@@ -429,13 +475,14 @@ export function warmLibrarySidecars(paths: string[]): {
   if (now - s.lastSweep > 24 * 3600_000) {
     s.lastSweep = now;
     try {
-      for (const name of fs.readdirSync(encodeCacheDir())) {
+      const dir = encodeCacheDir();
+      for (const name of await fs.promises.readdir(dir)) {
         if (!name.startsWith(SIDECAR_PREFIX) || expected.has(name)) continue;
-        const full = path.join(encodeCacheDir(), name);
+        const full = path.join(dir, name);
         try {
-          const st = fs.statSync(full);
+          const st = await fs.promises.stat(full);
           if (now - st.mtimeMs < 7 * 24 * 3600_000) continue;
-          fs.unlinkSync(full);
+          await fs.promises.unlink(full);
           removed += 1;
         } catch {
           /* ignore */
@@ -444,6 +491,7 @@ export function warmLibrarySidecars(paths: string[]): {
     } catch {
       /* ignore */
     }
+    if (removed) s.cacheBytesAt = 0; // re-measure after a sweep
   }
 
   if (queued) void drainPreencodeQueue();
@@ -452,6 +500,7 @@ export function warmLibrarySidecars(paths: string[]): {
 
 export function getPreencodeStatus() {
   const s = preState();
+  void cacheDirBytes().catch(() => {});
   return {
     enabled: !PREENCODE_DISABLED && Boolean(ffmpegBin()),
     quality: SIDECAR_QUALITY,
@@ -460,7 +509,8 @@ export function getPreencodeStatus() {
     encoded: s.encoded,
     failed: s.failed,
     cacheDir: encodeCacheDir(),
-    cacheBytes: cacheDirBytes(),
+    // Last measured size (refreshed in the background, never on this request).
+    cacheBytes: Math.max(0, s.cacheBytes),
   };
 }
 

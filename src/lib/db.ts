@@ -204,6 +204,38 @@ export function requestNormalizedKey(
   return `track:${a}|${al}|${t}`;
 }
 
+/**
+ * Opt-in diagnostics: set POLARR_SQL_SLOW_MS=50 to log every statement that
+ * takes at least that long. Queries run synchronously on the server's only
+ * thread, so one slow statement delays every request in flight — this is how
+ * to find them on a real library.
+ */
+function logSlowQueries(database: Database.Database) {
+  const threshold = Number(process.env.POLARR_SQL_SLOW_MS);
+  if (!Number.isFinite(threshold) || threshold <= 0) return;
+  const prepare = database.prepare.bind(database);
+  database.prepare = ((sql: string) => {
+    const statement = prepare(sql);
+    for (const method of ["get", "all", "run"] as const) {
+      const original = statement[method].bind(statement) as (...args: unknown[]) => unknown;
+      (statement as unknown as Record<string, unknown>)[method] = (...args: unknown[]) => {
+        const started = performance.now();
+        try {
+          return original(...args);
+        } finally {
+          const elapsed = performance.now() - started;
+          if (elapsed >= threshold) {
+            console.warn(
+              `[polarr] slow sql ${elapsed.toFixed(0)}ms · ${sql.replace(/\s+/g, " ").trim().slice(0, 220)}`,
+            );
+          }
+        }
+      };
+    }
+    return statement;
+  }) as typeof database.prepare;
+}
+
 export function getDb(): Database.Database {
   if (db) return db;
   const file = dbPath();
@@ -228,6 +260,12 @@ export function getDb(): Database.Database {
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
   db.pragma("synchronous = NORMAL");
+  // SQLite's default page cache is ~2 MB — a library of tens of thousands of
+  // tracks does not fit, so hot lookups kept re-reading pages from disk.
+  db.pragma("cache_size = -65536"); // 64 MB
+  db.pragma("mmap_size = 268435456"); // 256 MB
+  db.pragma("temp_store = MEMORY");
+  logSlowQueries(db);
   migrate(db);
   return db;
 }
@@ -988,6 +1026,11 @@ function migrate(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_tracks_source ON tracks(source);
     CREATE INDEX IF NOT EXISTS idx_tracks_updated ON tracks(updated_at);
     CREATE INDEX IF NOT EXISTS idx_tracks_match_key ON tracks(match_key);
+    -- Lookups compare lower(artist) / lower(title) / lower(album), which the
+    -- plain column indexes above cannot serve: every album open, play resolve
+    -- and availability check scanned the whole table once per track.
+    CREATE INDEX IF NOT EXISTS idx_tracks_artist_title_ci ON tracks(lower(artist), lower(title));
+    CREATE INDEX IF NOT EXISTS idx_tracks_artist_album_ci ON tracks(lower(artist), lower(album));
 
     CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
     CREATE INDEX IF NOT EXISTS idx_requests_artist ON requests(artist);
@@ -1021,6 +1064,7 @@ function migrate(database: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_track_deletions_deleted ON track_deletions(deleted_at);
   `);
 
+  migrateLibraryFlag(database);
   migrateTracksFts(database);
 
   database
@@ -1035,6 +1079,41 @@ function migrate(database: Database.Database) {
  * External-content FTS5 over library metadata. Triggers keep the index in sync
  * with upsertTrack / deletes; version 4 rebuilds once on upgrade.
  */
+/** Maintain tracks.is_library (see libraryTrackExpr). */
+function migrateLibraryFlag(database: Database.Database) {
+  ensureColumn(database, "tracks", "is_library", "is_library INTEGER");
+  const flag = `CASE WHEN (${libraryTrackExpr()}) THEN 1 ELSE 0 END`;
+  // Drop + recreate so a change to the expression applies on upgrade.
+  database.exec(`
+    DROP TRIGGER IF EXISTS tracks_is_library_ai;
+    DROP TRIGGER IF EXISTS tracks_is_library_au;
+    CREATE TRIGGER tracks_is_library_ai AFTER INSERT ON tracks BEGIN
+      UPDATE tracks SET is_library = ${flag} WHERE rowid = new.rowid;
+    END;
+    CREATE TRIGGER tracks_is_library_au AFTER UPDATE OF title, path, source ON tracks BEGIN
+      UPDATE tracks SET is_library = ${flag} WHERE rowid = new.rowid;
+    END;
+  `);
+  // Backfill rows that predate the column, or all rows when the rule changed.
+  const version = database
+    .prepare(`SELECT 1 as ok FROM schema_migrations WHERE version = ?`)
+    .get(LIBRARY_FLAG_MIGRATION) as { ok: number } | undefined;
+  if (!version) {
+    database.exec(`UPDATE tracks SET is_library = ${flag}`);
+    database
+      .prepare(`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`)
+      .run(LIBRARY_FLAG_MIGRATION, new Date().toISOString());
+  } else {
+    database.exec(`UPDATE tracks SET is_library = ${flag} WHERE is_library IS NULL`);
+  }
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_tracks_library_added ON tracks(is_library, added_at);
+    CREATE INDEX IF NOT EXISTS idx_tracks_library_updated ON tracks(is_library, updated_at);
+  `);
+}
+/** Bump when libraryTrackExpr() changes so every row is recomputed once. */
+const LIBRARY_FLAG_MIGRATION = 9001;
+
 function migrateTracksFts(database: Database.Database) {
   database.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5(
@@ -2832,8 +2911,20 @@ function notArtworkTrackSql(alias = ""): string {
 }
 
 /** Real library files only — excludes stream history stubs used for Recently played. */
-const LIBRARY_TRACK_FILTER = `source != 'stream' AND path NOT LIKE 'stream:%' AND path NOT LIKE 'stream://%' AND ${notArtworkTrackSql()}`;
-const LIBRARY_TRACK_FILTER_T = `t.source != 'stream' AND t.path NOT LIKE 'stream:%' AND t.path NOT LIKE 'stream://%' AND ${notArtworkTrackSql("t.")}`;
+/**
+ * What counts as a real library track: a file on disk (not a stream stub) that
+ * is not artwork saved with an audio extension.
+ *
+ * This expression is ~35 lower()/trim()/GLOB calls per row and used to be
+ * inlined into every library query, so each one re-evaluated it across the
+ * whole table. It is now computed once per row into `tracks.is_library`
+ * (kept current by triggers — see migrateLibraryFlag) and queries test the flag.
+ */
+function libraryTrackExpr(): string {
+  return `source != 'stream' AND path NOT LIKE 'stream:%' AND path NOT LIKE 'stream://%' AND ${notArtworkTrackSql()}`;
+}
+const LIBRARY_TRACK_FILTER = `is_library = 1`;
+const LIBRARY_TRACK_FILTER_T = `t.is_library = 1`;
 
 /** Stream stubs + library, still hide artwork-named junk. */
 const NON_ARTWORK_TRACK_FILTER = notArtworkTrackSql();
@@ -3502,6 +3593,25 @@ export function findTrackFast(artist: string, title: string): TrackRow | null {
   return null;
 }
 
+/**
+ * Fuzzy-match results, remembered until the library next changes.
+ *
+ * Search hydrates every catalog hit through findTrack(); a miss costs several
+ * full-text queries, and search-as-you-type asks about the same hits over and
+ * over. Entries are dropped whenever a track is added, changed or removed
+ * (libraryChanged), so a hit never goes stale. On globalThis because Next's
+ * page / route / instrumentation bundles each load this module.
+ */
+const FIND_TRACK_MEMO_MAX = 5000;
+const findTrackMemo = globalSingleton("find-track-memo", () => ({
+  hits: new Map<string, string | null>(),
+}));
+
+/** Call after any insert / update / delete on `tracks`. */
+function libraryChanged() {
+  if (findTrackMemo.hits.size) findTrackMemo.hits.clear();
+}
+
 export function findTrack(artist: string, title: string): TrackRow | null {
   const rawArtist = artist.trim();
   const rawTitle = title.trim();
@@ -3510,6 +3620,20 @@ export function findTrack(artist: string, title: string): TrackRow | null {
   const fast = findTrackFast(rawArtist, rawTitle);
   if (fast) return fast;
 
+  const memoKey = `${rawArtist.toLowerCase()}\0${rawTitle.toLowerCase()}`;
+  const memo = findTrackMemo.hits.get(memoKey);
+  if (memo === null) return null;
+  if (memo) {
+    const row = getTrack(memo);
+    if (row) return row;
+  }
+  const found = findTrackFuzzy(rawArtist, rawTitle);
+  if (findTrackMemo.hits.size >= FIND_TRACK_MEMO_MAX) findTrackMemo.hits.clear();
+  findTrackMemo.hits.set(memoKey, found ? found.id : null);
+  return found;
+}
+
+function findTrackFuzzy(rawArtist: string, rawTitle: string): TrackRow | null {
   const primary = primaryArtistName(rawArtist);
   const candidates = new Map<string, TrackRow>();
   for (const q of matchSearchQueries(rawArtist, rawTitle)) {
@@ -3632,7 +3756,10 @@ function ftsTokenClause(raw: string): string {
   const clean = raw.replace(/[^a-z0-9']/gi, "").toLowerCase();
   if (clean.length < 2) return "";
   const stripped = clean.replace(/'/g, "");
-  const parts = [`${clean}*`];
+  // An apostrophe is not legal in an FTS5 bareword (`don't*` is a syntax
+  // error, which sent every such search to the full-table LIKE fallback).
+  // Quote it instead: the tokenizer splits it into the phrase "don t".
+  const parts = [clean.includes("'") ? `"${clean}"*` : `${clean}*`];
   if (stripped && stripped !== clean && stripped.length >= 2) {
     parts.push(`${stripped}*`);
   }
@@ -3798,6 +3925,7 @@ export function getTrack(id: string): TrackRow | null {
 export function deleteTrack(id: string, options?: { deleteFiles?: boolean }): TrackRow | null {
   const track = getTrack(id);
   if (!track) return null;
+  libraryChanged();
   const db = getDb();
   // Keep likes as stream-only entries so hearts survive library removal
   const likeRows = db
@@ -3991,6 +4119,7 @@ export function upsertTrack(
 ) {
   // Never persist album-art filenames as playable tracks.
   if (isArtworkAudioPath(track.path)) return;
+  libraryChanged();
 
   let title = cleanAudioTag(track.title) || track.title.trim();
   if (isArtworkFilename(title)) {
@@ -5623,32 +5752,76 @@ export function isTrackTasteExcluded(userId: string, trackId: string): boolean {
 export function listTracksByArtist(artist: string, limit = 100): TrackRow[] {
   const a = artist.trim().toLowerCase();
   if (!a) return [];
-  const like = `${a}%`;
-  const featLike = `%feat.%${a}%`;
-  const ftLike = `%ft.%${a}%`;
-  return (
-    getDb()
-      .prepare(
-        `${TRACK_SELECT}
-         WHERE (
-           lower(artist) = ?
-           OR lower(artist) LIKE ?
-           OR lower(artist) LIKE ? || ', %'
-           OR lower(artist) LIKE ? || ' & %'
-           OR lower(artist) LIKE ? || ' and %'
-           OR lower(artist) LIKE ? || ' x %'
-           OR lower(artist) LIKE ? || ' with %'
-           OR lower(title) LIKE ?
-           OR lower(title) LIKE ?
-         )
-           AND ${LIBRARY_TRACK_FILTER}
-         ORDER BY
-           CASE WHEN lower(artist) = ? THEN 0 ELSE 1 END,
-           album ASC, title ASC
-         LIMIT ?`,
-      )
-      .all(a, like, a, a, a, a, a, featLike, ftLike, a, limit) as Record<string, unknown>[]
-  ).map(mapTrack);
+  const db = getDb();
+  // Every artist-credit form the old query listed ("x", "x, y", "x & y",
+  // "x and y", "x x y", "x with y") starts with the name, so they are all one
+  // prefix range — served by idx_tracks_artist_title_ci instead of a scan.
+  const byCredit = db
+    .prepare(
+      `${TRACK_SELECT}
+       WHERE lower(artist) >= ? AND lower(artist) < ?
+         AND ${LIBRARY_TRACK_FILTER}
+       ORDER BY
+         CASE WHEN lower(artist) = ? THEN 0 ELSE 1 END,
+         album ASC, title ASC
+       LIMIT ?`,
+    )
+    .all(a, `${a}\uffff`, a, limit) as Record<string, unknown>[];
+
+  // Guest spots credited only in the title: "Song (feat. X)" / "ft. X".
+  let byFeature: Record<string, unknown>[] = [];
+  const featureMatch = ftsFeatureQuery(a);
+  if (featureMatch) {
+    try {
+      byFeature = db
+        .prepare(
+          `SELECT t.id, t.title, t.artist, t.album, t.duration, t.path,
+                  t.cover_path as coverPath, t.source, t.external_id as externalId,
+                  t.file_size as fileSize, t.mtime_ms as mtimeMs,
+                  t.added_at as addedAt, t.updated_at as updatedAt
+           FROM tracks t
+           JOIN tracks_fts ON t.rowid = tracks_fts.rowid
+           WHERE tracks_fts MATCH ?
+             AND (${LIBRARY_TRACK_FILTER_T})
+           LIMIT ?`,
+        )
+        .all(featureMatch, limit * 2) as Record<string, unknown>[];
+    } catch {
+      byFeature = [];
+    }
+  }
+  const featured = byFeature.filter((row) => {
+    const title = String(row.title || "").toLowerCase();
+    const at = Math.max(title.indexOf("feat."), title.indexOf("ft."));
+    return at >= 0 && title.indexOf(a, at) > at;
+  });
+  featured.sort(
+    (x, y) =>
+      String(x.album || "").localeCompare(String(y.album || "")) ||
+      String(x.title || "").localeCompare(String(y.title || "")),
+  );
+
+  const seen = new Set<string>();
+  const out: Record<string, unknown>[] = [];
+  for (const row of [...byCredit, ...featured]) {
+    const id = String(row.id);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(row);
+    if (out.length >= limit) break;
+  }
+  return out.map(mapTrack);
+}
+
+/** FTS query: titles containing feat/ft plus every word of the artist name. */
+function ftsFeatureQuery(artistLower: string): string | null {
+  const words = artistLower
+    .split(/[^a-z0-9]+/i)
+    .filter((w) => w.length >= 1)
+    .slice(0, 6);
+  if (!words.length) return null;
+  const name = words.map((w) => `"${w}"`).join(" AND ");
+  return `title : ((feat OR ft) AND ${name})`;
 }
 
 /** Tracks matching artist + album title (case-insensitive). */

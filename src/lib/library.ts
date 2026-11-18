@@ -277,6 +277,18 @@ export async function scanMusicLibrary(): Promise<{
       return;
     }
 
+    const source = classifyIndexedTrackSource(file);
+    if (
+      existing &&
+      unchanged &&
+      existing.title === title &&
+      existing.artist === artist &&
+      existing.album === album &&
+      existing.source === source
+    ) {
+      return;
+    }
+
     const isNew = !existing;
     upsertTrack({
       id: existing?.id || randomBytes(12).toString("hex"),
@@ -286,7 +298,7 @@ export async function scanMusicLibrary(): Promise<{
       duration,
       path: file,
       coverPath: existing?.coverPath ?? null,
-      source: classifyIndexedTrackSource(file),
+      source,
       externalId: existing?.externalId ?? null,
       fileSize,
       mtimeMs,

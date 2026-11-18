@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { json, getAdminUser, getStaffUser } from "@/lib/api";
+import { recordAudit } from "@/lib/audit-log";
+import { getRequestIpFromRequest } from "@/lib/request-client";
 import {
   listPublicProfiles,
   setUserRole,
@@ -53,9 +55,7 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const parsed = roleSchema.safeParse(body);
   if (!parsed.success) {
-    const legacy = z
-      .object({ userId: z.string().min(1), isAdmin: z.boolean() })
-      .safeParse(body);
+    const legacy = z.object({ userId: z.string().min(1), isAdmin: z.boolean() }).safeParse(body);
     if (!legacy.success) {
       return json({ error: "Invalid payload" }, { status: 400 });
     }
@@ -65,16 +65,17 @@ export async function POST(req: Request) {
       return json({ error: "You cannot demote yourself" }, { status: 400 });
     }
     try {
-      const user = setUserRole(
-        targetId,
-        legacy.data.isAdmin ? "admin" : "member",
-      );
+      const user = setUserRole(targetId, legacy.data.isAdmin ? "admin" : "member");
+      recordAudit({
+        event: "user.role_changed",
+        actor: admin_(actor),
+        target: user?.username ?? targetId,
+        ip: getRequestIpFromRequest(req),
+        detail: { role: legacy.data.isAdmin ? "admin" : "member" },
+      });
       return json({ user: user ? publicUser(user) : null });
     } catch (err) {
-      return json(
-        { error: err instanceof Error ? err.message : "Update failed" },
-        { status: 400 },
-      );
+      return json({ error: err instanceof Error ? err.message : "Update failed" }, { status: 400 });
     }
   }
 
@@ -95,16 +96,12 @@ export async function POST(req: Request) {
   // Ownership transfer: only current server owner, confirmed from dialog.
   if (role === "owner") {
     if (!roleIsOwner(actor.role)) {
-      return json(
-        { error: "Only the Server Owner can transfer ownership" },
-        { status: 403 },
-      );
+      return json({ error: "Only the Server Owner can transfer ownership" }, { status: 403 });
     }
     if (!parsed.data.confirmTransfer) {
       return json(
         {
-          error:
-            "Confirm ownership transfer to proceed. You will become a regular member.",
+          error: "Confirm ownership transfer to proceed. You will become a regular member.",
           requiresTransferConfirm: true,
         },
         { status: 400 },
@@ -112,6 +109,12 @@ export async function POST(req: Request) {
     }
     try {
       const user = transferServerOwnership(actor.id, targetId);
+      recordAudit({
+        event: "user.ownership_transferred",
+        actor: admin_(actor),
+        target: user?.username ?? targetId,
+        ip: getRequestIpFromRequest(req),
+      });
       return json({
         user: user ? publicUser(user) : null,
         transferred: true,
@@ -131,13 +134,21 @@ export async function POST(req: Request) {
 
   try {
     const user = setUserRole(targetId, role);
+    recordAudit({
+      event: "user.role_changed",
+      actor: admin_(actor),
+      target: user?.username ?? targetId,
+      ip: getRequestIpFromRequest(req),
+      detail: { role },
+    });
     return json({ user: user ? publicUser(user) : null });
   } catch (err) {
-    return json(
-      { error: err instanceof Error ? err.message : "Update failed" },
-      { status: 400 },
-    );
+    return json({ error: err instanceof Error ? err.message : "Update failed" }, { status: 400 });
   }
+}
+
+function admin_(u: { id: string; username: string }) {
+  return { id: u.id, username: u.username };
 }
 
 const revokeSchema = z.object({
@@ -163,12 +174,15 @@ export async function DELETE(req: Request) {
 
   try {
     revokeUserAccess(targetId);
+    recordAudit({
+      event: "user.access_revoked",
+      actor: admin_(admin),
+      target: targetId,
+      ip: getRequestIpFromRequest(req),
+    });
     return json({ ok: true });
   } catch (err) {
-    return json(
-      { error: err instanceof Error ? err.message : "Revoke failed" },
-      { status: 400 },
-    );
+    return json({ error: err instanceof Error ? err.message : "Revoke failed" }, { status: 400 });
   }
 }
 
@@ -193,15 +207,18 @@ export async function PATCH(req: Request) {
 
   try {
     restoreUserAccess(targetId);
+    recordAudit({
+      event: "user.access_restored",
+      actor: admin_(admin),
+      target: targetId,
+      ip: getRequestIpFromRequest(req),
+    });
     const profile = listPublicProfiles().find((u) => u.id === targetId);
     return json({
       ok: true,
       user: profile ? publicUser(profile) : null,
     });
   } catch (err) {
-    return json(
-      { error: err instanceof Error ? err.message : "Restore failed" },
-      { status: 400 },
-    );
+    return json({ error: err instanceof Error ? err.message : "Restore failed" }, { status: 400 });
   }
 }

@@ -60,9 +60,7 @@ function maskSecrets(settings: ReturnType<typeof getSettings>) {
   };
 }
 
-const notifyEventsSchema = z
-  .record(z.string(), z.boolean())
-  .optional();
+const notifyEventsSchema = z.record(z.string(), z.boolean()).optional();
 
 function mergeNotifyEvents(
   current: NotifyEventFlags,
@@ -104,12 +102,12 @@ const bodySchema = z.object({
   lidarrUrl: z.string().url().or(z.literal("")).optional(),
   lidarrApiKey: z.string().optional(),
   saveOnPlay: z.boolean().optional(),
-  libraryScanMinutes: z.union([z.literal(0), z.literal(15), z.literal(30), z.literal(60)]).optional(),
+  libraryScanMinutes: z
+    .union([z.literal(0), z.literal(15), z.literal(30), z.literal(60)])
+    .optional(),
   musicRoot: z.string().optional(),
   fallbackEnabled: z.boolean().optional(),
-  downloadQuality: z
-    .enum(DOWNLOAD_QUALITIES.map((q) => q.id) as [string, ...string[]])
-    .optional(),
+  downloadQuality: z.enum(DOWNLOAD_QUALITIES.map((q) => q.id) as [string, ...string[]]).optional(),
   publicUrl: z.string().optional(),
   testLidarr: z.boolean().optional(),
   testDiscord: z.boolean().optional(),
@@ -184,10 +182,15 @@ export async function POST(req: Request) {
     body.notifyEmailEvents !== undefined ||
     body.notifyDiscordEvents !== undefined;
 
-  if (touchesLidarr || touchesSmtp || touchesNotify || touchesServer) {
-    const admin = await getAdminUser();
-    if (!admin) return json({ error: "Admin only" }, { status: 403 });
-  }
+  // Every write here is server configuration. Require an admin outright: the
+  // old per-field list meant a newly added field was member-writable until
+  // someone remembered to add it.
+  const admin = await getAdminUser();
+  if (!admin) return json({ error: "Admin only" }, { status: 403 });
+  void touchesLidarr;
+  void touchesSmtp;
+  void touchesNotify;
+  void touchesServer;
 
   if (body.revealDiscordSecrets) {
     const password = (body.password || "").trim();
@@ -200,6 +203,12 @@ export async function POST(req: Request) {
       return json({ error: "Incorrect password" }, { status: 403 });
     }
     const s = getSettings();
+    const { recordAudit } = await import("@/lib/audit-log");
+    recordAudit({
+      event: "settings.secrets_revealed",
+      actor: { id: admin.id, username: admin.username },
+      target: "discord credentials",
+    });
     return json({
       ok: true,
       secrets: {
@@ -286,8 +295,7 @@ export async function POST(req: Request) {
     if (!owner) {
       return json(
         {
-          error:
-            "Server Owner has no email on file. Set an email on the owner account first.",
+          error: "Server Owner has no email on file. Set an email on the owner account first.",
         },
         { status: 400 },
       );
@@ -343,8 +351,7 @@ export async function POST(req: Request) {
       if (!normalized) {
         return json(
           {
-            error:
-              "Public URL must be a reachable http(s) address — not 0.0.0.0, ::, or blank",
+            error: "Public URL must be a reachable http(s) address — not 0.0.0.0, ::, or blank",
           },
           { status: 400 },
         );
@@ -361,8 +368,7 @@ export async function POST(req: Request) {
         ? body.lidarrApiKey
         : current.lidarrApiKey,
     saveOnPlay: body.saveOnPlay ?? current.saveOnPlay,
-    libraryScanMinutes:
-      body.libraryScanMinutes ?? current.libraryScanMinutes,
+    libraryScanMinutes: body.libraryScanMinutes ?? current.libraryScanMinutes,
     musicRoot: (() => {
       if (body.musicRoot === undefined) return current.musicRoot;
       return persistMusicRoot(body.musicRoot);
@@ -382,20 +388,13 @@ export async function POST(req: Request) {
     smtpFrom: body.smtpFrom ?? current.smtpFrom,
     smtpSecure: body.smtpSecure ?? current.smtpSecure,
     notifyEmailEnabled: body.notifyEmailEnabled ?? current.notifyEmailEnabled,
-    notifyDiscordEnabled:
-      body.notifyDiscordEnabled ?? current.notifyDiscordEnabled,
+    notifyDiscordEnabled: body.notifyDiscordEnabled ?? current.notifyDiscordEnabled,
     discordWebhookUrl:
       body.discordWebhookUrl !== undefined
         ? body.discordWebhookUrl.trim()
         : current.discordWebhookUrl,
-    notifyEmailEvents: mergeNotifyEvents(
-      current.notifyEmailEvents,
-      body.notifyEmailEvents,
-    ),
-    notifyDiscordEvents: mergeNotifyEvents(
-      current.notifyDiscordEvents,
-      body.notifyDiscordEvents,
-    ),
+    notifyEmailEvents: mergeNotifyEvents(current.notifyEmailEvents, body.notifyEmailEvents),
+    notifyDiscordEvents: mergeNotifyEvents(current.notifyDiscordEvents, body.notifyDiscordEvents),
     spotifyClientId: body.spotifyClientId ?? current.spotifyClientId,
     spotifyClientSecret:
       body.spotifyClientSecret && body.spotifyClientSecret !== "••••••••"
@@ -421,6 +420,20 @@ export async function POST(req: Request) {
         ? body.discordClientSecret
         : current.discordClientSecret,
   });
+
+  // Names of the settings in this write — never their values (secrets).
+  const changedKeys = Object.keys(body).filter(
+    (key) => (body as Record<string, unknown>)[key] !== undefined && key !== "password",
+  );
+  if (changedKeys.length > 0) {
+    const { recordAudit } = await import("@/lib/audit-log");
+    recordAudit({
+      event: "settings.changed",
+      actor: { id: admin.id, username: admin.username },
+      target: "server settings",
+      detail: { keys: changedKeys },
+    });
+  }
 
   const isAdmin = Boolean(user.isAdmin);
   return json({

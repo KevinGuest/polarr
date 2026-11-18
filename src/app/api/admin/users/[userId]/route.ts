@@ -13,9 +13,7 @@ export const dynamic = "force-dynamic";
 function tokenFromRequest(req: Request): string | null {
   const auth = req.headers.get("authorization");
   if (auth?.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
-  const match = /(?:^|;\s*)polarr_token=([^;]+)/.exec(
-    req.headers.get("cookie") || "",
-  );
+  const match = /(?:^|;\s*)polarr_token=([^;]+)/.exec(req.headers.get("cookie") || "");
   if (!match?.[1]) return null;
   try {
     return decodeURIComponent(match[1]);
@@ -24,10 +22,7 @@ function tokenFromRequest(req: Request): string | null {
   }
 }
 
-export async function GET(
-  req: Request,
-  ctx: { params: Promise<{ userId: string }> },
-) {
+export async function GET(req: Request, ctx: { params: Promise<{ userId: string }> }) {
   const staff = await getStaffUser();
   if (!staff) return json({ error: "Staff only" }, { status: 403 });
 
@@ -72,23 +67,24 @@ export async function GET(
 
 const revokeSessionSchema = z.object({ sessionId: z.string().min(1).max(64) });
 
-export async function DELETE(
-  req: Request,
-  ctx: { params: Promise<{ userId: string }> },
-) {
+export async function DELETE(req: Request, ctx: { params: Promise<{ userId: string }> }) {
   const admin = await getAdminUser();
   if (!admin) return json({ error: "Admin only" }, { status: 403 });
   const { userId: token } = await ctx.params;
   const userId = unscrambleUserId(decodeURIComponent(token || ""));
   if (!userId) return json({ error: "Not found" }, { status: 404 });
-  const parsed = revokeSessionSchema.safeParse(
-    await req.json().catch(() => null),
-  );
+  const parsed = revokeSessionSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return json({ error: "Invalid session" }, { status: 400 });
   }
   if (!revokeAdminUserSession(userId, parsed.data.sessionId)) {
     return json({ error: "Session not found" }, { status: 404 });
   }
+  const { recordAudit } = await import("@/lib/audit-log");
+  recordAudit({
+    event: "user.session_revoked",
+    actor: { id: admin.id, username: admin.username },
+    target: userId,
+  });
   return json({ ok: true });
 }

@@ -57,10 +57,7 @@ const patchSchema = z
     currentPassword: z.string().min(1).max(128).optional(),
     newPassword: z
       .string()
-      .min(
-        MIN_PASSWORD_LENGTH,
-        `Password must be at least ${MIN_PASSWORD_LENGTH} characters`,
-      )
+      .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
       .max(128)
       .optional(),
     confirmPassword: z.string().min(1).max(128).optional(),
@@ -133,15 +130,18 @@ export async function PATCH(req: Request) {
     } catch (error) {
       return json(
         {
-          error:
-            error instanceof Error
-              ? error.message
-              : "Could not send the confirmation email",
+          error: error instanceof Error ? error.message : "Could not send the confirmation email",
         },
         { status: 502 },
       );
     }
     emailConfirmationSent = true;
+    const { recordAudit } = await import("@/lib/audit-log");
+    recordAudit({
+      event: "account.email_change_requested",
+      actor: { id: user.id, username: user.username },
+      target: user.username,
+    });
     pendingEmail = result.email;
   }
 
@@ -152,36 +152,30 @@ export async function PATCH(req: Request) {
     if (body.confirmPassword !== undefined && body.newPassword !== body.confirmPassword) {
       return json({ error: "New passwords do not match" }, { status: 400 });
     }
-    const result = updateUserPassword(
-      user.id,
-      body.currentPassword,
-      body.newPassword,
-    );
+    const result = updateUserPassword(user.id, body.currentPassword, body.newPassword);
+    const { recordAudit } = await import("@/lib/audit-log");
+    recordAudit({
+      event: "account.password_changed",
+      actor: { id: user.id, username: user.username },
+      target: user.username,
+      outcome: result.ok ? "success" : "failure",
+    });
     if (!result.ok) return json({ error: result.error }, { status: 400 });
   }
 
   if (body.discordPresenceEnabled !== undefined) {
     if (!discordPresenceAppConfigured()) {
-      return json(
-        { error: "Discord Client ID is not configured on this server" },
-        { status: 400 },
-      );
+      return json({ error: "Discord Client ID is not configured on this server" }, { status: 400 });
     }
     if (body.discordPresenceEnabled && !getDiscordLink(user.id)) {
-      return json(
-        { error: "Link your Discord account first" },
-        { status: 400 },
-      );
+      return json({ error: "Link your Discord account first" }, { status: 400 });
     }
     setDiscordPresenceEnabled(user.id, body.discordPresenceEnabled);
   }
 
   if (body.discordLoginEnabled !== undefined) {
     if (!getDiscordLink(user.id)) {
-      return json(
-        { error: "Link your Discord account first" },
-        { status: 400 },
-      );
+      return json({ error: "Link your Discord account first" }, { status: 400 });
     }
     setDiscordLoginEnabled(user.id, body.discordLoginEnabled);
   }

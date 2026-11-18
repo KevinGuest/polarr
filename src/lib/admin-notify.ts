@@ -3,6 +3,7 @@
  * Fire-and-forget — never blocks the request path.
  */
 
+import { recordAudit } from "@/lib/audit-log";
 import { discordConfigured, sendDiscordWebhook } from "@/lib/discord";
 import { getSettings } from "@/lib/db";
 import type { NotifyEventId } from "@/lib/notify-events";
@@ -26,15 +27,16 @@ const COLORS: Partial<Record<NotifyEventId, number>> = {
   streamError: 0xed4245,
 };
 
+/** Operational noise, not security events — kept out of the audit trail. */
+const AUDIT_SKIP = new Set<NotifyEventId>(["streamError", "trackAdded", "downloadStarted"]);
+
 export type DiscordNotifyField = {
   name: string;
   value: string;
   inline?: boolean;
 };
 
-export function notifyIpField(
-  ip: string | null | undefined,
-): DiscordNotifyField {
+export function notifyIpField(ip: string | null | undefined): DiscordNotifyField {
   const value = (ip || "").trim() || "unknown";
   return { name: "IP", value, inline: true };
 }
@@ -43,13 +45,9 @@ export function notifyIpField(
  * Sign-in/out alert fields describing the client: the platform the user
  * connected from, plus a device model when the User-Agent exposes one.
  */
-export function notifyPlatformFields(
-  ua: string | null | undefined,
-): DiscordNotifyField[] {
+export function notifyPlatformFields(ua: string | null | undefined): DiscordNotifyField[] {
   const { platform, device } = describeUserAgent(ua);
-  const fields: DiscordNotifyField[] = [
-    { name: "Platform", value: platform, inline: true },
-  ];
+  const fields: DiscordNotifyField[] = [{ name: "Platform", value: platform, inline: true }];
   if (device) fields.push({ name: "Device", value: device, inline: true });
   return fields;
 }
@@ -57,9 +55,7 @@ export function notifyPlatformFields(
 /** Platform fields that recognize the Polarr desktop shell. */
 export function notifyRequestPlatformFields(req: Request): DiscordNotifyField[] {
   const { platform, device } = describeRequestClient(req);
-  const fields: DiscordNotifyField[] = [
-    { name: "Platform", value: platform, inline: true },
-  ];
+  const fields: DiscordNotifyField[] = [{ name: "Platform", value: platform, inline: true }];
   if (device) fields.push({ name: "Device", value: device, inline: true });
   return fields;
 }
@@ -77,6 +73,21 @@ export function notifyDiscord(
     href?: string | null;
   },
 ): void {
+  // Durable record first: the Discord alert below is optional and best-effort.
+  if (!AUDIT_SKIP.has(event)) {
+    const fields: Record<string, string> = {};
+    for (const f of input.fields ?? []) fields[f.name] = f.value;
+    const ip = fields.IP && fields.IP !== "unknown" ? fields.IP : null;
+    delete fields.IP;
+    recordAudit({
+      event: `notify.${event}`,
+      actor: { username: fields.By || fields.User || null },
+      target: fields.User || null,
+      ip,
+      outcome: event === "requestFailed" ? "failure" : "success",
+      detail: { summary: input.description || input.title, ...fields },
+    });
+  }
   try {
     const settings = getSettings();
     if (!settings.notifyDiscordEnabled || !discordConfigured(settings)) return;

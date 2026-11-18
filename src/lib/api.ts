@@ -1,6 +1,7 @@
 import { cookies, headers } from "next/headers";
 import { getUserByToken } from "./db";
 import { getUserByNativeMediaTicket } from "./native-media-ticket";
+import { isNativeMediaApiPath } from "./public-api";
 import { roleIsAdmin, roleIsStaff } from "./roles";
 
 function tokenFromCookieHeader(cookieHeader: string | null): string | null {
@@ -24,7 +25,13 @@ export function getAuthUserFromRequest(req: Request) {
   if (auth?.toLowerCase().startsWith("bearer ")) {
     return getUserByToken(auth.slice(7).trim());
   }
-  const mediaTicket = new URL(req.url).searchParams.get("mediaTicket");
+  // A media ticket is a bearer credential carried in the URL, so it ends up
+  // in proxy logs and history. It must only ever unlock media bytes — never
+  // the JSON API (it used to be accepted on every route using this helper).
+  const url = new URL(req.url);
+  const mediaTicket = isNativeMediaApiPath(url.pathname)
+    ? url.searchParams.get("mediaTicket")
+    : null;
   if (mediaTicket) {
     const fromTicket = getUserByNativeMediaTicket(mediaTicket);
     if (fromTicket) return fromTicket;
@@ -75,10 +82,7 @@ export async function getStaffUser() {
   return user;
 }
 
-export function json(
-  data: unknown,
-  init?: { status?: number; headers?: Record<string, string> },
-) {
+export function json(data: unknown, init?: { status?: number; headers?: Record<string, string> }) {
   return Response.json(data, {
     status: init?.status ?? 200,
     headers: init?.headers,

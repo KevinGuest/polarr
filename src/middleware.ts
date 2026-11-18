@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { isPublicApiRoute } from "@/lib/public-api";
+import { isNativeMediaApiPath, isPublicApiRoute } from "@/lib/public-api";
 import { SESSION_COOKIE_NAME } from "@/lib/session-cookie";
 
 const NATIVE_ORIGINS = new Set([
@@ -32,16 +32,17 @@ function withNativeCors(response: NextResponse, origin: string | null) {
     "Access-Control-Allow-Headers",
     "Authorization, Content-Type, Range, x-polarr-mobile-platform, x-polarr-desktop-platform",
   );
-  response.headers.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+  response.headers.set(
+    "Access-Control-Expose-Headers",
+    "Content-Length, Content-Range, Accept-Ranges",
+  );
   response.headers.set("Vary", "Origin");
   return response;
 }
 
 function isNativeMediaRequest(req: NextRequest): boolean {
   if (!req.nextUrl.searchParams.get("mediaTicket")) return false;
-  return /^\/api\/(stream\/|live\/|lidarr\/cover|playlists\/[^/]+\/cover|profiles\/avatar\/|karaoke\/[^/]+\/stream)/.test(
-    req.nextUrl.pathname,
-  );
+  return isNativeMediaApiPath(req.nextUrl.pathname);
 }
 
 function hasAuthCredential(req: NextRequest): boolean {
@@ -77,10 +78,7 @@ export function middleware(req: NextRequest) {
   }
 
   if (!hasAuthCredential(req)) {
-    return withNativeCors(
-      NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
-      origin,
-    );
+    return withNativeCors(NextResponse.json({ error: "Unauthorized" }, { status: 401 }), origin);
   }
 
   return withNativeCors(NextResponse.next(), origin);

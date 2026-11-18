@@ -5234,12 +5234,15 @@ export function getPlaylistCoverPath(userId: string, playlistId: string): string
   return resolvePlaylistCoverFile(id, userId, row.coverPath);
 }
 
-/** Cover path for any playlist (viewer need not be owner). */
+/** Cover path for any public playlist (viewer need not be owner). */
 export function getPlaylistCoverPathById(playlistId: string): string | null {
   const id = normalizePlaylistId(playlistId);
   if (!id) return null;
   const row = getDb()
-    .prepare(`SELECT user_id as userId, cover_path as coverPath FROM playlists WHERE id = ?`)
+    .prepare(
+      `SELECT user_id as userId, cover_path as coverPath FROM playlists
+       WHERE id = ? AND COALESCE(is_private, 0) = 0`,
+    )
     .get(id) as { userId: string; coverPath: string | null } | undefined;
   if (!row) return null;
   return resolvePlaylistCoverFile(id, row.userId, row.coverPath);
@@ -5309,7 +5312,8 @@ export function deletePlaylist(
 export function adminDeletePlaylist(playlistId: string): { ok: boolean; error?: string } {
   const existing = getPlaylistById(playlistId);
   if (!existing) return { ok: false, error: "Playlist not found" };
-  const cover = getPlaylistCoverPathById(existing.id);
+  // Owner-scoped lookup: the by-id helper hides private playlists.
+  const cover = getPlaylistCoverPath(existing.userId, existing.id);
   getDb().prepare(`DELETE FROM playlists WHERE id = ?`).run(existing.id);
   if (cover) {
     try {

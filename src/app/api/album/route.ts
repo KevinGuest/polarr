@@ -1,4 +1,6 @@
 import { json, requireAuth } from "@/lib/api";
+import { deslug, slugify } from "@/lib/album-ref";
+import { findLibraryAlbumBySlugs } from "@/lib/db";
 import {
   findTrackFast,
   getSettings,
@@ -14,11 +16,7 @@ import {
   resolveTrackCover,
   type LidarrAlbum,
 } from "@/lib/lidarr";
-import {
-  findReleaseGroupId,
-  releaseGroupMeta,
-  tracksForReleaseGroup,
-} from "@/lib/musicbrainz";
+import { findReleaseGroupId, releaseGroupMeta, tracksForReleaseGroup } from "@/lib/musicbrainz";
 import { ytDlpAvailable } from "@/lib/fallback-download";
 import { resolveArtistPortrait } from "@/lib/artist-portrait";
 import { namesMatch, primaryArtistName } from "@/lib/track-match";
@@ -62,10 +60,7 @@ type AlbumPayload = {
   error: string | null;
 };
 
-const albumResponseCache = new Map<
-  string,
-  { at: number; payload: AlbumPayload }
->();
+const albumResponseCache = new Map<string, { at: number; payload: AlbumPayload }>();
 const ALBUM_CACHE_TTL_MS = 30 * 60 * 1000;
 
 function coverFromAlbum(a: LidarrAlbum): string | undefined {
@@ -90,9 +85,7 @@ function mapLocalFallback(
     : listTracksForAlbum(artist, albumTitle);
   return rows.map((t, i) => {
     const isStream =
-      t.source === "stream" ||
-      t.path.startsWith("stream:") ||
-      t.path.startsWith("stream://");
+      t.source === "stream" || t.path.startsWith("stream:") || t.path.startsWith("stream://");
     return {
       key: `local-${t.id}`,
       title: t.title,
@@ -110,10 +103,7 @@ function mapLocalFallback(
   });
 }
 
-function mergeAvailability(
-  tracks: AlbumTrackDto[],
-  artist: string,
-): AlbumTrackDto[] {
+function mergeAvailability(tracks: AlbumTrackDto[], artist: string): AlbumTrackDto[] {
   return tracks.map((t) => {
     const local = findTrackFast(artist, t.title);
     if (!local) return t;
@@ -132,10 +122,7 @@ function mergeAvailability(
  * `downloaded` is per-user (offline marks) while the payload cache is shared —
  * so the cache stores neutral flags and each response overlays the viewer's.
  */
-function withUserDownloads(
-  payload: AlbumPayload,
-  offline: Set<string>,
-): AlbumPayload {
+function withUserDownloads(payload: AlbumPayload, offline: Set<string>): AlbumPayload {
   return {
     ...payload,
     tracks: payload.tracks.map((t) => ({
@@ -151,9 +138,67 @@ function cacheKey(params: URLSearchParams): string {
     params.get("artist") || "",
     params.get("foreignAlbumId") || "",
     params.get("lidarrAlbumId") || "",
+    params.get("artistSlug") || "",
+    params.get("titleSlug") || "",
   ]
     .map((s) => s.trim().toLowerCase())
     .join("|");
+}
+
+/**
+ * Real album behind a pair of URL slugs: Lidarr's library first, then local
+ * files. Null when neither knows it — the caller then searches by the words.
+ */
+async function resolveAlbumSlugs(
+  artistSlug: string,
+  titleSlug: string,
+): Promise<{
+  title: string;
+  artist: string;
+  lidarrAlbumId?: number;
+  foreignAlbumId?: string;
+  /** Names are only the slug's words — not yet matched to a real album. */
+  guessed?: boolean;
+} | null> {
+  const client = LidarrClient.fromSettings();
+  if (client) {
+    const albums = await client.listAlbums().catch(() => []);
+    const a = lidarrSlugIndex(albums).get(`${artistSlug}/${titleSlug}`);
+    if (a) {
+      return {
+        title: (a.title || "").trim(),
+        artist: (a.artist?.artistName || "").trim(),
+        lidarrAlbumId: typeof a.id === "number" && a.id > 0 ? a.id : undefined,
+        foreignAlbumId: a.foreignAlbumId || undefined,
+      };
+    }
+  }
+  const local = findLibraryAlbumBySlugs(artistSlug, titleSlug, slugify);
+  if (local) return local;
+  // Unknown here: search by the words; the reply carries the proper names.
+  return {
+    title: deslug(titleSlug),
+    artist: deslug(artistSlug),
+    guessed: true,
+  };
+}
+
+/** "artist-slug/title-slug" → album, built once per Lidarr library dump. */
+const lidarrSlugIndexes = new WeakMap<LidarrAlbum[], Map<string, LidarrAlbum>>();
+function lidarrSlugIndex(albums: LidarrAlbum[]): Map<string, LidarrAlbum> {
+  let index = lidarrSlugIndexes.get(albums);
+  if (!index) {
+    index = new Map();
+    for (const a of albums) {
+      const aTitle = slugify((a.title || "").trim());
+      const aArtist = slugify((a.artist?.artistName || "").trim());
+      if (!aTitle || !aArtist) continue;
+      const key = `${aArtist}/${aTitle}`;
+      if (!index.has(key)) index.set(key, a);
+    }
+    lidarrSlugIndexes.set(albums, index);
+  }
+  return index;
 }
 
 /**
@@ -167,6 +212,12 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const user = auth.user;
   const offline = new Set(user ? listOfflineTrackIds(user.id) : []);
+  // Clean links (/album/{artist}/{title}) only carry slugs: find the real
+  // album first so everything below works from proper names and ids.
+  const artistSlug = slugify(searchParams.get("artistSlug") || "");
+  const titleSlug = slugify(searchParams.get("titleSlug") || "");
+  const slugMatch = artistSlug && titleSlug ? await resolveAlbumSlugs(artistSlug, titleSlug) : null;
+
   const key = cacheKey(searchParams);
   const cached = albumResponseCache.get(key);
   if (cached && Date.now() - cached.at < ALBUM_CACHE_TTL_MS) {
@@ -177,28 +228,32 @@ export async function GET(req: Request) {
 
   let title = (searchParams.get("title") || "").trim();
   let artist = (searchParams.get("artist") || "").trim();
+  if (slugMatch) {
+    title = slugMatch.title;
+    artist = slugMatch.artist;
+  }
   // Catalog lookups use primary credit (drop feat. noise from listening tags)
   artist = primaryArtistName(artist) || artist;
-  let foreignAlbumId = (searchParams.get("foreignAlbumId") || "").trim();
+  let foreignAlbumId = (
+    searchParams.get("foreignAlbumId") ||
+    slugMatch?.foreignAlbumId ||
+    ""
+  ).trim();
   const image = (searchParams.get("image") || "").trim() || undefined;
   const lidarrAlbumIdRaw = searchParams.get("lidarrAlbumId");
   let lidarrAlbumId = lidarrAlbumIdRaw
     ? Number.parseInt(lidarrAlbumIdRaw, 10)
-    : NaN;
+    : (slugMatch?.lidarrAlbumId ?? NaN);
 
   if (!title && !artist && !foreignAlbumId && !Number.isFinite(lidarrAlbumId)) {
-    return json(
-      { error: "album id, title/artist, or foreignAlbumId required" },
-      { status: 400 },
-    );
+    return json({ error: "album id, title/artist, or foreignAlbumId required" }, { status: 400 });
   }
 
   const settings = getSettings();
   const client = LidarrClient.fromSettings();
 
   let tracks: AlbumTrackDto[] = [];
-  let source: "lidarr" | "musicbrainz" | "library" | "catalog" | "none" =
-    "none";
+  let source: "lidarr" | "musicbrainz" | "library" | "catalog" | "none" = "none";
   let resolvedImage = image;
   let year: number | undefined;
   let error: string | null = null;
@@ -211,13 +266,10 @@ export async function GET(req: Request) {
 
       // Resolve via foreign MBID already in Lidarr library
       if (!albumId && foreignAlbumId) {
-        const byForeign = await client
-          .getAlbumByForeignId(foreignAlbumId)
-          .catch(() => []);
+        const byForeign = await client.getAlbumByForeignId(foreignAlbumId).catch(() => []);
         if (byForeign[0]) {
           albumMetaLoaded = byForeign[0];
-          foreignArtistId =
-            foreignArtistId || artistIdFromAlbum(byForeign[0]);
+          foreignArtistId = foreignArtistId || artistIdFromAlbum(byForeign[0]);
           albumId = byForeign[0].id ?? null;
           if (!title) title = (byForeign[0].title || "").trim();
           if (!artist) {
@@ -251,6 +303,29 @@ export async function GET(req: Request) {
         }
       }
 
+      // Already in Lidarr? The cached library dump answers that without the
+      // slow metadata lookup below (which calls out to Lidarr's upstream).
+      if (!albumId && title && artist) {
+        const wantTitle = title.toLowerCase();
+        const inLibrary = (await client.listAlbums().catch(() => [])).find(
+          (a) =>
+            (a.title || "").trim().toLowerCase() === wantTitle &&
+            namesMatch(a.artist?.artistName || "", artist),
+        );
+        if (inLibrary && typeof inLibrary.id === "number" && inLibrary.id > 0) {
+          albumMetaLoaded = inLibrary;
+          foreignArtistId = foreignArtistId || artistIdFromAlbum(inLibrary);
+          albumId = inLibrary.id;
+          if (!foreignAlbumId && inLibrary.foreignAlbumId) {
+            foreignAlbumId = inLibrary.foreignAlbumId;
+          }
+          if (!resolvedImage) resolvedImage = coverFromAlbum(inLibrary);
+          if (inLibrary.releaseDate) {
+            year = Number(inLibrary.releaseDate.slice(0, 4)) || undefined;
+          }
+        }
+      }
+
       // Resolve via artist + title lookup (library sidebar / partial downloads)
       if (!albumId && title && artist) {
         const term = `${artist} ${title}`;
@@ -271,26 +346,18 @@ export async function GET(req: Request) {
           ranked.find((x) => {
             const aName = (x.album.artist?.artistName || "").trim();
             const aTitle = (x.album.title || "").trim().toLowerCase();
-            return (
-              aTitle === title.toLowerCase() && namesMatch(aName, artist)
-            );
+            return aTitle === title.toLowerCase() && namesMatch(aName, artist);
           }) ||
           // Soft artist check on top hit — never take an unrelated album
-          (ranked[0] &&
-          namesMatch(
-            ranked[0].album.artist?.artistName || "",
-            artist,
-          )
+          (ranked[0] && namesMatch(ranked[0].album.artist?.artistName || "", artist)
             ? ranked[0]
             : undefined);
 
         if (best?.album) {
           albumMetaLoaded = best.album;
-          foreignArtistId =
-            foreignArtistId || artistIdFromAlbum(best.album);
+          foreignArtistId = foreignArtistId || artistIdFromAlbum(best.album);
           const rawId = best.album.id;
-          albumId =
-            typeof rawId === "number" && rawId > 0 ? rawId : null;
+          albumId = typeof rawId === "number" && rawId > 0 ? rawId : null;
           if (!foreignAlbumId && best.album.foreignAlbumId) {
             foreignAlbumId = best.album.foreignAlbumId;
           }
@@ -304,10 +371,7 @@ export async function GET(req: Request) {
       if (albumId && albumId > 0) {
         lidarrAlbumId = albumId;
         // Fill missing meta only if we never loaded this album already
-        if (
-          (!foreignAlbumId || !title || !artist || !year) &&
-          !albumMetaLoaded
-        ) {
+        if ((!foreignAlbumId || !title || !artist || !year) && !albumMetaLoaded) {
           const byId = await client.getAlbum(albumId).catch(() => null);
           if (byId) {
             albumMetaLoaded = byId;
@@ -323,8 +387,7 @@ export async function GET(req: Request) {
             }
           }
         } else if (albumMetaLoaded) {
-          foreignArtistId =
-            foreignArtistId || artistIdFromAlbum(albumMetaLoaded);
+          foreignArtistId = foreignArtistId || artistIdFromAlbum(albumMetaLoaded);
           if (!title) title = (albumMetaLoaded.title || "").trim();
           if (!artist) {
             artist = (albumMetaLoaded.artist?.artistName || "").trim();
@@ -334,8 +397,7 @@ export async function GET(req: Request) {
           }
           if (!resolvedImage) resolvedImage = coverFromAlbum(albumMetaLoaded);
           if (!year && albumMetaLoaded.releaseDate) {
-            year =
-              Number(albumMetaLoaded.releaseDate.slice(0, 4)) || undefined;
+            year = Number(albumMetaLoaded.releaseDate.slice(0, 4)) || undefined;
           }
         }
 
@@ -346,12 +408,8 @@ export async function GET(req: Request) {
             .map((t, i) => {
               const trackTitle = (t.title || "").trim();
               const trackNumber =
-                t.absoluteTrackNumber ||
-                Number.parseInt(t.trackNumber || "", 10) ||
-                i + 1;
-              const durationSec = t.duration
-                ? Math.round(t.duration / 1000)
-                : 0;
+                t.absoluteTrackNumber || Number.parseInt(t.trackNumber || "", 10) || i + 1;
+              const durationSec = t.duration ? Math.round(t.duration / 1000) : 0;
               const local = findTrackFast(artist, trackTitle);
               return {
                 key: `lidarr-${t.id ?? `${trackNumber}-${trackTitle}`}`,
@@ -387,18 +445,22 @@ export async function GET(req: Request) {
   }
 
   if (!title || !artist) {
-    return json(
-      { error: "Could not resolve album title and artist" },
-      { status: 404 },
-    );
+    return json({ error: "Could not resolve album title and artist" }, { status: 404 });
   }
 
   // MusicBrainz when Lidarr had no tracklist
   if (tracks.length === 0) {
     try {
       if (!foreignAlbumId && title && artist) {
-        foreignAlbumId =
-          (await findReleaseGroupId(artist, title)) || "";
+        foreignAlbumId = (await findReleaseGroupId(artist, title)) || "";
+      }
+      // Names guessed from a URL slug ("in rainbows"): take the real ones.
+      if (foreignAlbumId && slugMatch?.guessed) {
+        const meta = await releaseGroupMeta(foreignAlbumId).catch(() => null);
+        if (meta?.title && slugify(meta.title) === titleSlug) title = meta.title;
+        if (meta?.artist && slugify(meta.artist) === artistSlug) {
+          artist = meta.artist;
+        }
       }
       if (foreignAlbumId) {
         const mb = await tracksForReleaseGroup(foreignAlbumId);
@@ -426,8 +488,7 @@ export async function GET(req: Request) {
       }
     } catch (err) {
       if (!error) {
-        error =
-          err instanceof Error ? err.message : "MusicBrainz tracklist failed";
+        error = err instanceof Error ? err.message : "MusicBrainz tracklist failed";
       }
     }
   } else {
@@ -471,15 +532,13 @@ export async function GET(req: Request) {
       }
     } catch (err) {
       if (!error) {
-        error =
-          err instanceof Error ? err.message : "Catalog tracklist failed";
+        error = err instanceof Error ? err.message : "Catalog tracklist failed";
       }
     }
   }
 
   // Parallel tail: MB feature credits ∥ cover ∥ yt-dlp ready
-  const needMbCredits =
-    source === "lidarr" && tracks.length > 0 && Boolean(foreignAlbumId);
+  const needMbCredits = source === "lidarr" && tracks.length > 0 && Boolean(foreignAlbumId);
   // Prefer CAA when we have MBID — skip expensive listAlbums cover map
   if (!resolvedImage && foreignAlbumId) {
     resolvedImage = caaCover(foreignAlbumId);
@@ -487,9 +546,9 @@ export async function GET(req: Request) {
 
   const [mbCredits, coverHit, artistPortrait, fallbackReady] = await Promise.all([
     needMbCredits
-      ? tracksForReleaseGroup(foreignAlbumId).catch(() => [] as Awaited<
-          ReturnType<typeof tracksForReleaseGroup>
-        >)
+      ? tracksForReleaseGroup(foreignAlbumId).catch(
+          () => [] as Awaited<ReturnType<typeof tracksForReleaseGroup>>,
+        )
       : Promise.resolve([] as Awaited<ReturnType<typeof tracksForReleaseGroup>>),
     resolvedImage
       ? Promise.resolve(null as string | null)
@@ -502,15 +561,11 @@ export async function GET(req: Request) {
       artist,
       foreignArtistId,
     }).catch(() => null),
-    settings.fallbackEnabled
-      ? ytDlpAvailable().catch(() => false)
-      : Promise.resolve(false),
+    settings.fallbackEnabled ? ytDlpAvailable().catch(() => false) : Promise.resolve(false),
   ]);
 
   if (mbCredits.length > 0) {
-    const byTitle = new Map(
-      mbCredits.map((t) => [t.title.trim().toLowerCase(), t] as const),
-    );
+    const byTitle = new Map(mbCredits.map((t) => [t.title.trim().toLowerCase(), t] as const));
     tracks = tracks.map((t) => {
       const hit = byTitle.get(t.title.trim().toLowerCase());
       if (!hit?.artists) return t;
@@ -554,9 +609,7 @@ export async function GET(req: Request) {
   if (tracks.length > 0) {
     albumResponseCache.set(key, { at: Date.now(), payload });
     if (albumResponseCache.size > 80) {
-      const oldest = [...albumResponseCache.entries()].sort(
-        (a, b) => a[1].at - b[1].at,
-      );
+      const oldest = [...albumResponseCache.entries()].sort((a, b) => a[1].at - b[1].at);
       for (const [k] of oldest.slice(0, 20)) albumResponseCache.delete(k);
     }
   }

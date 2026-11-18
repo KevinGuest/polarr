@@ -73,16 +73,29 @@ function NativeRoute() {
   if (pathname === "/library") {
     return (
       <>
-        <div className="flex min-h-0 flex-1 flex-col lg:hidden"><LibrarySidebar variant="page" /></div>
-        <div className="hidden lg:block"><LibraryClient /></div>
+        <div className="flex min-h-0 flex-1 flex-col lg:hidden">
+          <LibrarySidebar variant="page" />
+        </div>
+        <div className="hidden lg:block">
+          <LibraryClient />
+        </div>
       </>
     );
   }
   if (pathname === "/library/liked") return <LibraryClient mode="liked" />;
   if (pathname === "/artist") return <ArtistClient />;
-  if (pathname.startsWith("/album/")) return <AlbumClient albumId={segment(pathname, "/album/")} />;
-  if (pathname.startsWith("/playlist/")) return <PlaylistClient playlistId={segment(pathname, "/playlist/")} />;
-  if (pathname.startsWith("/folder/")) return <FolderClient folderId={segment(pathname, "/folder/")} />;
+  if (pathname.startsWith("/album/")) {
+    // /album/{artist-slug}/{title-slug} (clean) or /album/{opaqueId} (legacy).
+    const [first = "", second = ""] = pathname.slice("/album/".length).split("/");
+    if (second) {
+      return <AlbumClient albumId={`${first}/${second}`} slug={{ artist: first, title: second }} />;
+    }
+    return <AlbumClient albumId={segment(pathname, "/album/")} />;
+  }
+  if (pathname.startsWith("/playlist/"))
+    return <PlaylistClient playlistId={segment(pathname, "/playlist/")} />;
+  if (pathname.startsWith("/folder/"))
+    return <FolderClient folderId={segment(pathname, "/folder/")} />;
   if (pathname === "/search") return <SearchClient />;
   if (pathname === "/settings") return <SettingsClient />;
   if (pathname === "/profile") return <ProfileClient />;
@@ -127,7 +140,9 @@ function NativeRoute() {
 function NativeApp() {
   return (
     <AppShell>
-      <Suspense fallback={null}><NativeRoute /></Suspense>
+      <Suspense fallback={null}>
+        <NativeRoute />
+      </Suspense>
     </AppShell>
   );
 }

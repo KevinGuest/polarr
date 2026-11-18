@@ -2,15 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Check,
-  ChevronLeft,
-  CirclePlus,
-  Clock,
-  Pause,
-  Play,
-  Shuffle,
-} from "lucide-react";
+import { Check, ChevronLeft, CirclePlus, Clock, Pause, Play, Shuffle } from "lucide-react";
 import { CoverArt } from "@/components/cover-art";
 import { ExplicitBadge } from "@/components/explicit-badge";
 import { MobileSaveButton } from "@/components/saved-in-drawer";
@@ -33,7 +25,7 @@ import {
   trackRowMidCell,
   trackRowStartCell,
 } from "@/lib/player-row";
-import { decodeAlbumId } from "@/lib/album-ref";
+import { albumRefFromSlugs, decodeAlbumId, type SluggedAlbumRef } from "@/lib/album-ref";
 import { setDragTrack } from "@/lib/drag-track";
 import {
   LIBRARY_CHANGED_EVENT,
@@ -43,9 +35,7 @@ import {
 import { cn, formatAlbumLength, formatDuration, formatTrackArtistLine } from "@/lib/utils";
 import type { LocalSourceBadge } from "@/lib/track-source-badge";
 import { toastError, toastSuccess, toastInfo } from "@/lib/toast";
-import {
-  PlaylistOfflineDownloadButton,
-} from "@/components/playlist-offline-download";
+import { PlaylistOfflineDownloadButton } from "@/components/playlist-offline-download";
 import type { DesktopOfflineTrack } from "@/lib/desktop-offline";
 import { useAuthOptional } from "@/components/auth-provider";
 
@@ -93,43 +83,60 @@ function albumLibraryPinKey(artistName: string, albumTitle: string) {
   return `album:${artistName.trim().toLowerCase()}::${albumTitle.trim().toLowerCase()}`;
 }
 
-export function AlbumClient({ albumId }: { albumId: string }) {
+export function AlbumClient({
+  albumId,
+  slug,
+}: {
+  albumId: string;
+  /** Present on clean links: /album/{artist-slug}/{title-slug}. */
+  slug?: { artist: string; title: string };
+}) {
   const auth = useAuthOptional();
   const { play, toggle, track, queue, playing } = usePlayer();
   const warmTrack = useWarmLibraryTrack();
   const router = useRouter();
-  const ref = useMemo(() => decodeAlbumId(albumId), [albumId]);
+  const slugArtist = slug?.artist || "";
+  const slugTitle = slug?.title || "";
+  const ref = useMemo<SluggedAlbumRef | null>(
+    () =>
+      slugArtist && slugTitle ? albumRefFromSlugs(slugArtist, slugTitle) : decodeAlbumId(albumId),
+    [albumId, slugArtist, slugTitle],
+  );
+  // Names guessed from the URL: the server swaps in the real ones.
+  const unresolvedSlugs = ref?.slugs;
 
   const title = ref?.title || "";
   const artist = ref?.artist || "";
   const foreignAlbumId = ref?.foreignAlbumId || "";
-  const lidarrAlbumId =
-    ref?.lidarrAlbumId != null ? String(ref.lidarrAlbumId) : "";
+  const lidarrAlbumId = ref?.lidarrAlbumId != null ? String(ref.lidarrAlbumId) : "";
 
   const [album, setAlbum] = useState<AlbumMeta | null>(null);
   const [tracks, setTracks] = useState<AlbumTrack[]>([]);
   const [fallbackReady, setFallbackReady] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadingState, setLoading] = useState(true);
+  const [errorState, setError] = useState<string | null>(null);
+  // A link that cannot name an album is known up front — no request needed.
+  const refError = !ref
+    ? "Invalid album link"
+    : !title && !artist && !foreignAlbumId && !lidarrAlbumId
+      ? "Missing album or artist"
+      : null;
+  const loading = refError ? false : loadingState;
+  const error = refError ?? errorState;
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [inYourLibrary, setInYourLibrary] = useState(false);
 
   const load = useCallback(async () => {
-    if (!ref) {
-      setError("Invalid album link");
-      setLoading(false);
-      return;
-    }
-    if (!title && !artist && !foreignAlbumId && !lidarrAlbumId) {
-      setError("Missing album or artist");
-      setLoading(false);
-      return;
-    }
+    if (refError) return;
     const qs = new URLSearchParams();
     if (title) qs.set("title", title);
     if (artist) qs.set("artist", artist);
     if (foreignAlbumId) qs.set("foreignAlbumId", foreignAlbumId);
     if (lidarrAlbumId) qs.set("lidarrAlbumId", lidarrAlbumId);
+    if (unresolvedSlugs) {
+      qs.set("artistSlug", unresolvedSlugs.artist);
+      qs.set("titleSlug", unresolvedSlugs.title);
+    }
 
     const res = await fetch(`/api/album?${qs.toString()}`);
     const data = await res.json();
@@ -143,17 +150,24 @@ export function AlbumClient({ albumId }: { albumId: string }) {
     setFallbackReady(Boolean(data.fallbackReady));
     setError(data.error || null);
     setLoading(false);
-  }, [ref, title, artist, foreignAlbumId, lidarrAlbumId]);
+  }, [refError, title, artist, foreignAlbumId, lidarrAlbumId, unresolvedSlugs]);
+
+  // Show the loading state again when the page switches to another album.
+  const [loadedAlbumId, setLoadedAlbumId] = useState(albumId);
+  if (loadedAlbumId !== albumId) {
+    setLoadedAlbumId(albumId);
+    setLoading(true);
+  }
 
   useEffect(() => {
-    setLoading(true);
+    // load() only sets state after awaiting the network, never synchronously.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 
   useEffect(() => {
     const onLibraryChanged = (event: Event) => {
-      const trackId = (event as CustomEvent<{ trackId?: string }>).detail
-        ?.trackId;
+      const trackId = (event as CustomEvent<{ trackId?: string }>).detail?.trackId;
       if (!trackId) {
         void load();
         return;
@@ -188,10 +202,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
   }, [album?.title, album?.artist, title, artist]);
 
   useEffect(() => {
-    if (!libraryPinKey) {
-      setInYourLibrary(false);
-      return;
-    }
+    if (!libraryPinKey) return;
     let cancelled = false;
     async function loadPin() {
       try {
@@ -215,10 +226,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
     };
   }, [libraryPinKey]);
 
-  const totalSeconds = useMemo(
-    () => tracks.reduce((s, t) => s + (t.duration || 0), 0),
-    [tracks],
-  );
+  const totalSeconds = useMemo(() => tracks.reduce((s, t) => s + (t.duration || 0), 0), [tracks]);
 
   function artistsFor(t: AlbumTrack): string {
     return formatTrackArtistLine(album?.artist || artist, t.title, t.artists);
@@ -229,11 +237,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
       tracks.map((t) => ({
         id: t.localTrackId || `stream:${t.key}`,
         title: t.title,
-        artist: formatTrackArtistLine(
-          album?.artist || artist,
-          t.title,
-          t.artists,
-        ),
+        artist: formatTrackArtistLine(album?.artist || artist, t.title, t.artists),
         resolveArtist: album?.artist || artist,
         album: album?.title || title,
         coverPath: album?.image || null,
@@ -301,8 +305,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
       const live = await liveRes.json().catch(() => null);
       if (!liveRes.ok || !live?.track?.id) {
         toastError(
-          live?.error ||
-            "Couldn’t start stream — try Download if you want it in the library",
+          live?.error || "Couldn’t start stream — try Download if you want it in the library",
         );
         return;
       }
@@ -340,9 +343,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
           body: JSON.stringify({ deviceId: "web" }),
         });
         setTracks((prev) =>
-          prev.map((t) =>
-            t.key === track.key ? { ...t, downloaded: true } : t,
-          ),
+          prev.map((t) => (t.key === track.key ? { ...t, downloaded: true } : t)),
         );
       } finally {
         setBusyKey(null);
@@ -398,8 +399,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         const rows = (albumData.tracks || []) as AlbumTrack[];
         const hit = rows.find(
           (t) =>
-            t.key === track.key ||
-            (t.title === track.title && (t.localTrackId || t.downloaded)),
+            t.key === track.key || (t.title === track.title && (t.localTrackId || t.downloaded)),
         );
         if (hit?.localTrackId || hit?.downloaded || hit?.hasFile) {
           toastSuccess("Downloaded");
@@ -469,9 +469,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
         return;
       }
       emitLibraryPinsChanged();
-      toastSuccess(
-        next ? "Added to Your Library" : "Removed from Your Library",
-      );
+      toastSuccess(next ? "Added to Your Library" : "Removed from Your Library");
     } catch {
       setInYourLibrary(!next);
       toastError("Couldn’t update Your Library");
@@ -485,29 +483,21 @@ export function AlbumClient({ albumId }: { albumId: string }) {
   useEffect(() => {
     const el = heroSentinelRef.current;
     if (!el || loading) return;
-    const obs = new IntersectionObserver(
-      ([entry]) => setShowStickyTitle(!entry?.isIntersecting),
-      { threshold: 0, rootMargin: "-56px 0px 0px 0px" },
-    );
+    const obs = new IntersectionObserver(([entry]) => setShowStickyTitle(!entry?.isIntersecting), {
+      threshold: 0,
+      rootMargin: "-56px 0px 0px 0px",
+    });
     obs.observe(el);
     return () => obs.disconnect();
   }, [loading, stickyTitle]);
 
   if (!ref) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        Invalid album link.
-      </p>
-    );
+    return <p className="text-sm text-muted-foreground">Invalid album link.</p>;
   }
 
   // MBID-only refs resolve title/artist from the API
   if (!foreignAlbumId && !lidarrAlbumId && (!title || !artist)) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        Pick an album from Home or Search.
-      </p>
-    );
+    return <p className="text-sm text-muted-foreground">Pick an album from Home or Search.</p>;
   }
 
   const displayTitle = album?.title || title;
@@ -536,11 +526,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
   }
 
   function toPlayerTrack(t: AlbumTrack): PlayerTrack {
-    const trackArtists = formatTrackArtistLine(
-      album?.artist || artist,
-      t.title,
-      t.artists,
-    );
+    const trackArtists = formatTrackArtistLine(album?.artist || artist, t.title, t.artists);
     return {
       id: t.localTrackId || `stream:${t.key}`,
       title: t.title,
@@ -574,9 +560,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
             onClick={() => router.back()}
             className={cn(
               "rounded-full p-1.5",
-              showStickyTitle
-                ? "text-foreground"
-                : "bg-black/35 text-white backdrop-blur-sm",
+              showStickyTitle ? "text-foreground" : "bg-black/35 text-white backdrop-blur-sm",
             )}
             aria-label="Go back"
           >
@@ -610,96 +594,84 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                 aria-hidden
               />
               <div className="relative mx-auto aspect-square w-[calc(100%-3rem)] max-w-[18rem] overflow-hidden rounded-md shadow-2xl">
-                <CoverArt
-                  seed={coverSeed}
-                  image={coverImage}
-                  className="size-full"
-                />
+                <CoverArt seed={coverSeed} image={coverImage} className="size-full" />
               </div>
               <div ref={heroSentinelRef} className="relative h-px" aria-hidden />
 
               <div className="relative space-y-3 px-4 pb-2 pt-4">
-              <h1 className="text-[1.75rem] font-bold leading-tight tracking-tight">
-                {displayTitle || "Album"}
-              </h1>
+                <h1 className="text-[1.75rem] font-bold leading-tight tracking-tight">
+                  {displayTitle || "Album"}
+                </h1>
 
-              {displayArtist ? (
-                <button
-                  type="button"
-                  onClick={() => openArtist()}
-                  className="flex min-w-0 items-center gap-2 text-left"
-                >
-                  <CoverArt
-                    seed={displayArtist}
-                    image={artistImage}
-                    className="size-6 shrink-0 rounded-full"
-                  />
-                  <span className="truncate text-sm font-semibold">
-                    {displayArtist}
-                  </span>
-                </button>
-              ) : null}
+                {displayArtist ? (
+                  <button
+                    type="button"
+                    onClick={() => openArtist()}
+                    className="flex min-w-0 items-center gap-2 text-left"
+                  >
+                    <CoverArt
+                      seed={displayArtist}
+                      image={artistImage}
+                      className="size-6 shrink-0 rounded-full"
+                    />
+                    <span className="truncate text-sm font-semibold">{displayArtist}</span>
+                  </button>
+                ) : null}
 
-              <p className="text-sm text-muted-foreground">
-                Album
-                {album?.year ? ` · ${album.year}` : ""}
-                {tracks.length
-                  ? ` · ${tracks.length} song${tracks.length === 1 ? "" : "s"}`
-                  : ""}
-              </p>
+                <p className="text-sm text-muted-foreground">
+                  Album
+                  {album?.year ? ` · ${album.year}` : ""}
+                  {tracks.length ? ` · ${tracks.length} song${tracks.length === 1 ? "" : "s"}` : ""}
+                </p>
 
-              {error && !tracks.length ? (
-                <p className="text-sm text-destructive">{error}</p>
-              ) : null}
+                {error && !tracks.length ? (
+                  <p className="text-sm text-destructive">{error}</p>
+                ) : null}
 
-              <div className="flex items-center gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={() => void toggleYourLibrary()}
-                  disabled={!libraryPinKey}
-                  className="flex size-10 items-center justify-center text-muted-foreground disabled:opacity-40"
-                  aria-label={
-                    inYourLibrary
-                      ? "Remove from Your Library"
-                      : "Add to Your Library"
-                  }
-                  aria-pressed={inYourLibrary}
-                >
-                  {inYourLibrary ? (
-                    <span className="flex size-7 items-center justify-center rounded-full bg-foreground text-background">
-                      <Check className="size-4" strokeWidth={3} />
-                    </span>
-                  ) : (
-                    <CirclePlus className="size-8" strokeWidth={1.5} />
-                  )}
-                </button>
+                <div className="flex items-center gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => void toggleYourLibrary()}
+                    disabled={!libraryPinKey}
+                    className="flex size-10 items-center justify-center text-muted-foreground disabled:opacity-40"
+                    aria-label={inYourLibrary ? "Remove from Your Library" : "Add to Your Library"}
+                    aria-pressed={inYourLibrary}
+                  >
+                    {inYourLibrary ? (
+                      <span className="flex size-7 items-center justify-center rounded-full bg-foreground text-background">
+                        <Check className="size-4" strokeWidth={3} />
+                      </span>
+                    ) : (
+                      <CirclePlus className="size-8" strokeWidth={1.5} />
+                    )}
+                  </button>
 
-                <div className="min-w-0 flex-1" />
+                  <div className="min-w-0 flex-1" />
 
-                <button
-                  type="button"
-                  onClick={playShuffled}
-                  disabled={!canPlay}
-                  className="rounded-full p-2 text-muted-foreground hover:text-foreground disabled:opacity-40"
-                  aria-label="Shuffle play"
-                >
-                  <Shuffle className="size-6" />
-                </button>
-                <button
-                  type="button"
-                  onClick={onPlayClick}
-                  disabled={!canPlay}
-                  className="flex size-14 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-opacity hover:opacity-90 disabled:opacity-40"
-                  aria-label={inThisAlbum && playing ? "Pause" : "Play album"}
-                >
-                  {inThisAlbum && playing ? (
-                    <Pause className="size-6" fill="currentColor" />
-                  ) : (
-                    <Play className="size-6 translate-x-0.5" fill="currentColor" />
-                  )}
-                </button>
+                  <button
+                    type="button"
+                    onClick={playShuffled}
+                    disabled={!canPlay}
+                    className="rounded-full p-2 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                    aria-label="Shuffle play"
+                  >
+                    <Shuffle className="size-6" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onPlayClick}
+                    disabled={!canPlay}
+                    className="flex size-14 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-opacity hover:opacity-90 disabled:opacity-40"
+                    aria-label={inThisAlbum && playing ? "Pause" : "Play album"}
+                  >
+                    {inThisAlbum && playing ? (
+                      <Pause className="size-6" fill="currentColor" />
+                    ) : (
+                      <Play className="size-6 translate-x-0.5" fill="currentColor" />
+                    )}
+                  </button>
+                </div>
               </div>
-            </div>
             </div>
 
             <section className="pt-2">
@@ -739,18 +711,12 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                                     : "text-foreground/80",
                               )}
                             >
-                              {isCurrent ? (
-                                <NowPlayingBars playing={playing} />
-                              ) : null}
-                              <span className="truncate text-[15px] font-medium">
-                                {t.title}
-                              </span>
+                              {isCurrent ? <NowPlayingBars playing={playing} /> : null}
+                              <span className="truncate text-[15px] font-medium">{t.title}</span>
                             </div>
                             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
                               {t.explicit ? <ExplicitBadge /> : null}
-                              <span className="min-w-0 truncate">
-                                {playerTrack.artist}
-                              </span>
+                              <span className="min-w-0 truncate">{playerTrack.artist}</span>
                             </div>
                           </button>
                           <div className="flex shrink-0 items-center gap-1.5">
@@ -764,11 +730,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                               duration={t.duration}
                               onPolarr={t.available}
                               alreadyInLibrary={t.available && Boolean(t.localTrackId)}
-                              onDownload={
-                                t.available
-                                  ? undefined
-                                  : () => void markDownloaded(t)
-                              }
+                              onDownload={t.available ? undefined : () => void markDownloaded(t)}
                               size="sm"
                             />
                           </div>
@@ -776,11 +738,7 @@ export function AlbumClient({ albumId }: { albumId: string }) {
                             track={playerTrack}
                             onPolarr={t.available}
                             inLibrary={t.available && Boolean(t.localTrackId)}
-                            onDownload={
-                              t.available
-                                ? undefined
-                                : () => void markDownloaded(t)
-                            }
+                            onDownload={t.available ? undefined : () => void markDownloaded(t)}
                           />
                         </div>
                       </li>
@@ -795,240 +753,226 @@ export function AlbumClient({ albumId }: { albumId: string }) {
 
       {/* Desktop — existing layout */}
       <div className="hidden min-h-full flex-col lg:flex">
-      <section className="relative -mx-4 -mt-4 border-b border-border px-4 pb-10 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10">
-        <div
-          className="pointer-events-none absolute inset-0 opacity-35"
-          style={{
-            background:
-              "linear-gradient(180deg, hsl(20 18% 22%) 0%, hsl(var(--background)) 100%)",
-          }}
-          aria-hidden
-        />
-        <div className="relative flex flex-col gap-6 sm:flex-row sm:items-end">
-          <CoverArt
-            seed={coverSeed}
-            image={coverImage}
-            className="size-44 shrink-0 rounded-lg shadow-lg sm:size-52 md:size-56"
+        <section className="relative -mx-4 -mt-4 border-b border-border px-4 pb-10 pt-8 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10">
+          <div
+            className="pointer-events-none absolute inset-0 opacity-35"
+            style={{
+              background:
+                "linear-gradient(180deg, hsl(20 18% 22%) 0%, hsl(var(--background)) 100%)",
+            }}
+            aria-hidden
           />
-          <div className="min-w-0 flex-1 space-y-2">
-            <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-              Album
-            </p>
-            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
-              {loading && !displayTitle ? "…" : displayTitle || "Album"}
-            </h1>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-muted-foreground">
-              {displayArtist ? (
+          <div className="relative flex flex-col gap-6 sm:flex-row sm:items-end">
+            <CoverArt
+              seed={coverSeed}
+              image={coverImage}
+              className="size-44 shrink-0 rounded-lg shadow-lg sm:size-52 md:size-56"
+            />
+            <div className="min-w-0 flex-1 space-y-2">
+              <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                Album
+              </p>
+              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
+                {loading && !displayTitle ? "…" : displayTitle || "Album"}
+              </h1>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-muted-foreground">
+                {displayArtist ? (
+                  <button
+                    type="button"
+                    onClick={() => openArtist()}
+                    className="inline-flex min-w-0 items-center gap-2 rounded-full pr-1 text-left transition-opacity hover:opacity-90"
+                  >
+                    <CoverArt
+                      seed={displayArtist}
+                      image={artistImage}
+                      className="size-7 shrink-0 rounded-full"
+                    />
+                    <span className="truncate font-semibold text-foreground">{displayArtist}</span>
+                  </button>
+                ) : null}
+                {album?.year ? <span className="tabular-nums">· {album.year}</span> : null}
+                {tracks.length ? (
+                  <span>
+                    · {tracks.length} song{tracks.length === 1 ? "" : "s"},{" "}
+                    {formatAlbumLength(totalSeconds)}
+                  </span>
+                ) : null}
+              </div>
+              {error && !tracks.length && <p className="text-sm text-destructive">{error}</p>}
+              <div className="flex flex-wrap items-center gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => openArtist()}
-                  className="inline-flex min-w-0 items-center gap-2 rounded-full pr-1 text-left transition-opacity hover:opacity-90"
+                  onClick={onPlayClick}
+                  disabled={loading || (!tracks.length && !fallbackReady)}
+                  className="flex size-14 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-40"
+                  aria-label={inThisAlbum && playing ? "Pause" : "Play"}
                 >
-                  <CoverArt
-                    seed={displayArtist}
-                    image={artistImage}
-                    className="size-7 shrink-0 rounded-full"
-                  />
-                  <span className="truncate font-semibold text-foreground">
-                    {displayArtist}
-                  </span>
+                  {inThisAlbum && playing ? (
+                    <Pause className="size-6" fill="currentColor" />
+                  ) : (
+                    <Play className="size-6 translate-x-0.5" fill="currentColor" />
+                  )}
                 </button>
-              ) : null}
-              {album?.year ? (
-                <span className="tabular-nums">· {album.year}</span>
-              ) : null}
-              {tracks.length ? (
-                <span>
-                  · {tracks.length} song{tracks.length === 1 ? "" : "s"},{" "}
-                  {formatAlbumLength(totalSeconds)}
-                </span>
-              ) : null}
-            </div>
-            {error && !tracks.length && (
-              <p className="text-sm text-destructive">{error}</p>
-            )}
-            <div className="flex flex-wrap items-center gap-3 pt-2">
-              <button
-                type="button"
-                onClick={onPlayClick}
-                disabled={loading || (!tracks.length && !fallbackReady)}
-                className="flex size-14 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-90 disabled:opacity-40"
-                aria-label={inThisAlbum && playing ? "Pause" : "Play"}
-              >
-                {inThisAlbum && playing ? (
-                  <Pause className="size-6" fill="currentColor" />
-                ) : (
-                  <Play className="size-6 translate-x-0.5" fill="currentColor" />
-                )}
-              </button>
-              <PlaylistOfflineDownloadButton
-                collectionId={`album:${albumId}`}
-                tracks={offlineTracks}
-              />
-              <button
-                type="button"
-                onClick={() => void toggleYourLibrary()}
-                disabled={!libraryPinKey}
-                className="flex size-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-                aria-label={
-                  inYourLibrary
-                    ? "Remove from Your Library"
-                    : "Add to Your Library"
-                }
-                aria-pressed={inYourLibrary}
-              >
-                {inYourLibrary ? (
-                  <span className="flex size-7 items-center justify-center rounded-full bg-foreground text-background">
-                    <Check className="size-4" strokeWidth={3} />
-                  </span>
-                ) : (
-                  <CirclePlus className="size-8" strokeWidth={1.5} />
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="pt-6">
-        {loading ? (
-          <div className="space-y-2" aria-busy="true" aria-label="Loading tracklist">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-3 py-2.5">
-                <Skeleton className="size-4 shrink-0" />
-                <div className="min-w-0 flex-1 space-y-2">
-                  <Skeleton className="h-4 w-2/5 max-w-xs" />
-                  <Skeleton className="h-3 w-1/4 max-w-[10rem]" />
-                </div>
-                <Skeleton className="h-4 w-10 shrink-0" />
+                <PlaylistOfflineDownloadButton
+                  collectionId={`album:${albumId}`}
+                  tracks={offlineTracks}
+                />
+                <button
+                  type="button"
+                  onClick={() => void toggleYourLibrary()}
+                  disabled={!libraryPinKey}
+                  className="flex size-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                  aria-label={inYourLibrary ? "Remove from Your Library" : "Add to Your Library"}
+                  aria-pressed={inYourLibrary}
+                >
+                  {inYourLibrary ? (
+                    <span className="flex size-7 items-center justify-center rounded-full bg-foreground text-background">
+                      <Check className="size-4" strokeWidth={3} />
+                    </span>
+                  ) : (
+                    <CirclePlus className="size-8" strokeWidth={1.5} />
+                  )}
+                </button>
               </div>
-            ))}
+            </div>
           </div>
-        ) : tracks.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border px-6 py-16 text-center text-muted-foreground">
-            <p>No tracklist found for this album yet.</p>
-          </div>
-        ) : (
-          <div className="w-full overflow-x-auto">
-            <table className="w-full min-w-[480px] border-separate border-spacing-y-1 text-left text-sm">
-              <thead>
-                <tr className="text-xs text-muted-foreground">
-                  <th className="w-10 pb-3 pl-3 font-medium">#</th>
-                  <th className="pb-3 pr-4 font-medium">Title</th>
-                  <th className="w-[5.5rem] pb-3 font-medium" aria-label="Actions" />
-                  <th className="w-16 pb-3 pr-3 text-right font-medium">
-                    <Clock className="ml-auto size-3.5" aria-label="Duration" />
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {tracks.map((t) => {
-                  const busy = busyKey === t.key;
-                  const trackArtists = formatTrackArtistLine(
-                    album?.artist || artist,
-                    t.title,
-                    t.artists,
-                  );
-                  const streamId = `stream:${t.key}`;
-                  const playerTrack: PlayerTrack = {
-                    id: t.localTrackId || streamId,
-                    title: t.title,
-                    artist: trackArtists,
-                    resolveArtist: album?.artist || artist,
-                    album: album?.title || title,
-                    coverPath: album?.image || null,
-                    streamUrl: t.streamUrl || null,
-                    explicit: t.explicit,
-                    duration: t.duration || undefined,
-                  };
-                  const isCurrent = rowIsCurrent(t);
-                  const row = (
-                    <tr
-                      draggable
-                      onDragStart={(e) => setDragTrack(e, playerTrack)}
-                      className="group/row cursor-grab transition-colors active:cursor-grabbing"
-                      onClick={() => void playTrack(t)}
-                      {...warmTrack({
-                        ...playerTrack,
-                        quality: t.localTrackId ? "local" : playerTrack.quality,
-                      })}
-                    >
-                      <td
-                        className={trackRowStartCell(
-                          isCurrent,
-                          "py-3 pl-3 tabular-nums text-muted-foreground",
-                        )}
-                      >
-                        <TrackRowIndex
-                          n={t.trackNumber}
-                          isCurrent={isCurrent}
-                          playing={playing}
-                          busy={busy}
-                        />
-                      </td>
-                      <td className={trackRowMidCell(isCurrent, "py-3 pr-4")}>
-                        <div className="min-w-0">
-                          <div
-                            className={cn(
-                              "truncate font-medium",
-                              isCurrent
-                                ? "text-primary"
-                                : t.available
-                                  ? "text-foreground"
-                                  : "text-foreground/80",
-                            )}
-                          >
-                            {t.title}
-                          </div>
-                          <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
-                            {t.explicit ? <ExplicitBadge /> : null}
-                            <span className="min-w-0 truncate">{trackArtists}</span>
-                          </div>
-                        </div>
-                      </td>
-                      <td className={trackRowMidCell(isCurrent, "py-3")}>
-                        <TrackRowActions
-                          trackId={t.localTrackId || `stream:${t.key}`}
-                          artist={album?.artist || artist || trackArtists}
-                          title={t.title}
-                          album={album?.title || title}
-                          coverPath={album?.image || null}
-                          duration={t.duration}
-                          onPolarr={t.available}
-                          downloading={busy}
-                          onDownload={
-                            t.available
-                              ? undefined
-                              : () => void markDownloaded(t)
-                          }
-                        />
-                      </td>
-                      <td
-                        className={trackRowEndCell(
-                          isCurrent,
-                          "py-3 pr-3 text-right tabular-nums text-muted-foreground",
-                        )}
-                      >
-                        {t.duration ? formatDuration(t.duration) : "—"}
-                      </td>
-                    </tr>
-                  );
+        </section>
 
-                  return (
-                    <TrackContextMenu
-                      key={t.key}
-                      track={playerTrack}
-                      inLibrary={t.available && Boolean(t.localTrackId)}
-                    >
-                      {row}
-                    </TrackContextMenu>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+        <section className="pt-6">
+          {loading ? (
+            <div className="space-y-2" aria-busy="true" aria-label="Loading tracklist">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+                  <Skeleton className="size-4 shrink-0" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Skeleton className="h-4 w-2/5 max-w-xs" />
+                    <Skeleton className="h-3 w-1/4 max-w-[10rem]" />
+                  </div>
+                  <Skeleton className="h-4 w-10 shrink-0" />
+                </div>
+              ))}
+            </div>
+          ) : tracks.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border px-6 py-16 text-center text-muted-foreground">
+              <p>No tracklist found for this album yet.</p>
+            </div>
+          ) : (
+            <div className="w-full overflow-x-auto">
+              <table className="w-full min-w-[480px] border-separate border-spacing-y-1 text-left text-sm">
+                <thead>
+                  <tr className="text-xs text-muted-foreground">
+                    <th className="w-10 pb-3 pl-3 font-medium">#</th>
+                    <th className="pb-3 pr-4 font-medium">Title</th>
+                    <th className="w-[5.5rem] pb-3 font-medium" aria-label="Actions" />
+                    <th className="w-16 pb-3 pr-3 text-right font-medium">
+                      <Clock className="ml-auto size-3.5" aria-label="Duration" />
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tracks.map((t) => {
+                    const busy = busyKey === t.key;
+                    const trackArtists = formatTrackArtistLine(
+                      album?.artist || artist,
+                      t.title,
+                      t.artists,
+                    );
+                    const streamId = `stream:${t.key}`;
+                    const playerTrack: PlayerTrack = {
+                      id: t.localTrackId || streamId,
+                      title: t.title,
+                      artist: trackArtists,
+                      resolveArtist: album?.artist || artist,
+                      album: album?.title || title,
+                      coverPath: album?.image || null,
+                      streamUrl: t.streamUrl || null,
+                      explicit: t.explicit,
+                      duration: t.duration || undefined,
+                    };
+                    const isCurrent = rowIsCurrent(t);
+                    const row = (
+                      <tr
+                        draggable
+                        onDragStart={(e) => setDragTrack(e, playerTrack)}
+                        className="group/row cursor-grab transition-colors active:cursor-grabbing"
+                        onClick={() => void playTrack(t)}
+                        {...warmTrack({
+                          ...playerTrack,
+                          quality: t.localTrackId ? "local" : playerTrack.quality,
+                        })}
+                      >
+                        <td
+                          className={trackRowStartCell(
+                            isCurrent,
+                            "py-3 pl-3 tabular-nums text-muted-foreground",
+                          )}
+                        >
+                          <TrackRowIndex
+                            n={t.trackNumber}
+                            isCurrent={isCurrent}
+                            playing={playing}
+                            busy={busy}
+                          />
+                        </td>
+                        <td className={trackRowMidCell(isCurrent, "py-3 pr-4")}>
+                          <div className="min-w-0">
+                            <div
+                              className={cn(
+                                "truncate font-medium",
+                                isCurrent
+                                  ? "text-primary"
+                                  : t.available
+                                    ? "text-foreground"
+                                    : "text-foreground/80",
+                              )}
+                            >
+                              {t.title}
+                            </div>
+                            <div className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+                              {t.explicit ? <ExplicitBadge /> : null}
+                              <span className="min-w-0 truncate">{trackArtists}</span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className={trackRowMidCell(isCurrent, "py-3")}>
+                          <TrackRowActions
+                            trackId={t.localTrackId || `stream:${t.key}`}
+                            artist={album?.artist || artist || trackArtists}
+                            title={t.title}
+                            album={album?.title || title}
+                            coverPath={album?.image || null}
+                            duration={t.duration}
+                            onPolarr={t.available}
+                            downloading={busy}
+                            onDownload={t.available ? undefined : () => void markDownloaded(t)}
+                          />
+                        </td>
+                        <td
+                          className={trackRowEndCell(
+                            isCurrent,
+                            "py-3 pr-3 text-right tabular-nums text-muted-foreground",
+                          )}
+                        >
+                          {t.duration ? formatDuration(t.duration) : "—"}
+                        </td>
+                      </tr>
+                    );
+
+                    return (
+                      <TrackContextMenu
+                        key={t.key}
+                        track={playerTrack}
+                        inLibrary={t.available && Boolean(t.localTrackId)}
+                      >
+                        {row}
+                      </TrackContextMenu>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       </div>
     </>
   );

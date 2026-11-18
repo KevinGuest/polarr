@@ -4,8 +4,7 @@
  * Fallback packs title + artist (+ optional lidarr id) without cover URLs.
  */
 
-const B62 =
-  "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const B62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 export type AlbumRef = {
   title: string;
@@ -17,7 +16,7 @@ export type AlbumRef = {
 function base62Encode(bytes: Uint8Array): string {
   if (bytes.length === 0) return "";
   // Big-endian integer → base62
-  let digits = [0];
+  const digits = [0];
   for (const byte of bytes) {
     let carry = byte;
     for (let i = 0; i < digits.length; i++) {
@@ -43,7 +42,7 @@ function base62Encode(bytes: Uint8Array): string {
 
 function base62Decode(str: string): Uint8Array | null {
   if (!str || !/^[0-9A-Za-z]+$/.test(str)) return null;
-  let bytes = [0];
+  const bytes = [0];
   for (const ch of str) {
     const val = B62.indexOf(ch);
     if (val < 0) return null;
@@ -128,9 +127,7 @@ export function encodeAlbumId(ref: AlbumRef): string {
     const titleBytes = encodeUtf8Truncated(title, 255);
     const artistBytes = encodeUtf8Truncated(artist, 255);
     const hasLidarr =
-      ref.lidarrAlbumId != null &&
-      Number.isFinite(ref.lidarrAlbumId) &&
-      ref.lidarrAlbumId > 0;
+      ref.lidarrAlbumId != null && Number.isFinite(ref.lidarrAlbumId) && ref.lidarrAlbumId > 0;
     const hasMbid = Boolean(mbid);
     const flags = (hasLidarr ? 1 : 0) | (hasMbid ? 2 : 0);
     const lidarrExtra = hasLidarr ? 4 : 0;
@@ -201,11 +198,7 @@ export function decodeAlbumId(id: string): AlbumRef | null {
     if ((flags & 1) === 1) {
       if (o + 4 > bytes.length) return null;
       lidarrAlbumId =
-        ((bytes[o] << 24) |
-          (bytes[o + 1] << 16) |
-          (bytes[o + 2] << 8) |
-          bytes[o + 3]) >>>
-        0;
+        ((bytes[o] << 24) | (bytes[o + 1] << 16) | (bytes[o + 2] << 8) | bytes[o + 3]) >>> 0;
       o += 4;
     }
     let foreignAlbumId: string | undefined;
@@ -220,7 +213,94 @@ export function decodeAlbumId(id: string): AlbumRef | null {
   return null;
 }
 
-/** Build /album/{opaqueId} — never embeds cover URLs. */
+/* ───────────────────────────── clean album links ───────────────────────────── */
+
+/**
+ * URL slug: lowercase words joined by "-". Letters and digits of any script are
+ * kept (accents folded), everything else separates words.
+ * "Mr. Morale & the Big Steppers" → "mr-morale-the-big-steppers".
+ */
+export function slugify(value: string): string {
+  return (value || "")
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/['’`]/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+}
+
+/** Best-effort words back from a slug (the server resolves the real names). */
+export function deslug(slug: string): string {
+  return (slug || "").replace(/-+/g, " ").trim();
+}
+
+function slugKey(artistSlug: string, titleSlug: string): string {
+  return `${artistSlug}/${titleSlug}`;
+}
+
+/**
+ * Refs seen while building links this session, so an in-app click still
+ * carries the exact Lidarr / MusicBrainz ids that no longer fit in the URL.
+ * Browser only — a cold or shared link is resolved from its slugs by the server.
+ */
+const REMEMBER_MAX = 3000;
+const remembered = new Map<string, AlbumRef>();
+
+function remember(key: string, ref: AlbumRef) {
+  if (typeof window === "undefined") return;
+  const prev = remembered.get(key);
+  // Never let a bare title+artist ref overwrite one that carries ids.
+  if (
+    prev &&
+    (prev.foreignAlbumId || prev.lidarrAlbumId) &&
+    !ref.foreignAlbumId &&
+    !ref.lidarrAlbumId
+  ) {
+    return;
+  }
+  if (!prev && remembered.size >= REMEMBER_MAX) {
+    const oldest = remembered.keys().next().value;
+    if (oldest !== undefined) remembered.delete(oldest);
+  }
+  remembered.set(key, ref);
+}
+
+export type SluggedAlbumRef = AlbumRef & {
+  /** Set when the names are only a guess from the URL and need resolving. */
+  slugs?: { artist: string; title: string };
+};
+
+/** Album identity for /album/{artist-slug}/{title-slug}. */
+export function albumRefFromSlugs(artistSlug: string, titleSlug: string): SluggedAlbumRef | null {
+  const a = slugify(safeDecode(artistSlug));
+  const t = slugify(safeDecode(titleSlug));
+  if (!a || !t) return null;
+  const known = remembered.get(slugKey(a, t));
+  if (known) return known;
+  return { artist: deslug(a), title: deslug(t), slugs: { artist: a, title: t } };
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Album link. Readable `/album/{artist}/{title}` whenever both names produce a
+ * slug; otherwise (symbol-only names, MBID-only refs) the opaque id form, which
+ * keeps working for every previously shared link.
+ */
 export function albumHref(ref: AlbumRef): string {
+  const a = slugify(ref.artist);
+  const t = slugify(ref.title);
+  if (a && t) {
+    remember(slugKey(a, t), ref);
+    return `/album/${encodeURIComponent(a)}/${encodeURIComponent(t)}`;
+  }
   return `/album/${encodeAlbumId(ref)}`;
 }

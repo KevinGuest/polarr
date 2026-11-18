@@ -3715,6 +3715,35 @@ export type AlbumListRow = {
   addedAt: string;
 };
 
+/**
+ * Library album whose artist + title slugify to the given pair.
+ * `slugify` is passed in to keep this module free of URL concerns.
+ */
+export function findLibraryAlbumBySlugs(
+  artistSlug: string,
+  titleSlug: string,
+  slugify: (value: string) => string,
+): { artist: string; title: string } | null {
+  // Narrow by the artist's first word (index range), then compare slugs.
+  const firstWord = artistSlug.split("-")[0] || "";
+  if (!firstWord) return null;
+  const rows = getDb()
+    .prepare(
+      `SELECT DISTINCT artist, album FROM tracks
+       WHERE lower(artist) >= ? AND lower(artist) < ?
+         AND ${LIBRARY_TRACK_FILTER}
+         AND album IS NOT NULL AND trim(album) != ''
+       LIMIT 5000`,
+    )
+    .all(firstWord, `${firstWord}\uffff`) as { artist: string; album: string }[];
+  for (const row of rows) {
+    if (slugify(row.album) === titleSlug && slugify(row.artist) === artistSlug) {
+      return { artist: row.artist, title: row.album };
+    }
+  }
+  return null;
+}
+
 /** Distinct albums from library tracks, newest activity first. */
 export function listAlbumsPaginated(limit = 10, offset = 0): AlbumListRow[] {
   return getDb()

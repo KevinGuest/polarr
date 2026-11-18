@@ -48,9 +48,7 @@ export const IOS_NATIVE_EXTS = new Set([".mp3", ".m4a", ".aac"]);
 export function wantsCompatStream(req: Request): boolean {
   const url = new URL(req.url);
   if (url.searchParams.get("compat") === "1") return true;
-  const mobile = (req.headers.get("x-polarr-mobile-platform") || "")
-    .trim()
-    .toLowerCase();
+  const mobile = (req.headers.get("x-polarr-mobile-platform") || "").trim().toLowerCase();
   if (mobile === "iphone" || mobile === "ipad" || mobile === "ios") return true;
   const ua = req.headers.get("user-agent") || "";
   return /iPhone|iPad|iPod/i.test(ua);
@@ -61,17 +59,13 @@ export function wantsOfflineDownload(req: Request): boolean {
 }
 
 export function streamQualityFromRequest(req: Request): StreamQuality {
-  const raw = (new URL(req.url).searchParams.get("quality") || "")
-    .trim()
-    .toLowerCase();
+  const raw = (new URL(req.url).searchParams.get("quality") || "").trim().toLowerCase();
   return isStreamQuality(raw) ? raw : "high";
 }
 
 /** Explicit `quality=` on the URL (web/desktop opt into an AAC tier this way). */
 export function requestedStreamQuality(req: Request): StreamQuality | null {
-  const raw = (new URL(req.url).searchParams.get("quality") || "")
-    .trim()
-    .toLowerCase();
+  const raw = (new URL(req.url).searchParams.get("quality") || "").trim().toLowerCase();
   return isStreamQuality(raw) ? raw : null;
 }
 
@@ -187,9 +181,7 @@ let encodeCacheDirCache: string | null = null;
 export function encodeCacheDir(): string {
   if (encodeCacheDirCache) return encodeCacheDirCache;
   const env = (process.env.POLARR_ENCODE_CACHE_DIR || "").trim();
-  const candidates = [env, path.join(safeDataDir(), "encode-cache")].filter(
-    Boolean,
-  );
+  const candidates = [env, path.join(safeDataDir(), "encode-cache")].filter(Boolean);
   for (const dir of candidates) {
     try {
       fs.mkdirSync(dir, { recursive: true });
@@ -271,16 +263,7 @@ export async function ensureCompatM4a(
   const argsTail =
     quality === "lossless"
       ? ["-c:a", "alac", "-movflags", "+faststart", "-f", "ipod"]
-      : [
-          "-c:a",
-          "aac",
-          "-b:a",
-          aacBitrate(quality),
-          "-movflags",
-          "+faststart",
-          "-f",
-          "ipod",
-        ];
+      : ["-c:a", "aac", "-b:a", aacBitrate(quality), "-movflags", "+faststart", "-f", "ipod"];
 
   // Shared encodes must not die with the first requester's abort.
   const task = (async () => {
@@ -304,8 +287,7 @@ export async function ensureCompatM4a(
 
 /* ───────────────────────── background pre-encoder ───────────────────────── */
 
-const PREENCODE_DISABLED =
-  /^(0|false|off|no)$/i.test((process.env.POLARR_PREENCODE || "").trim());
+const PREENCODE_DISABLED = /^(0|false|off|no)$/i.test((process.env.POLARR_PREENCODE || "").trim());
 /** Stop filling the cache past this many GB (on-demand encodes still run). */
 const PREENCODE_MAX_BYTES =
   Math.max(1, Number(process.env.POLARR_ENCODE_CACHE_MAX_GB) || 50) * 1024 ** 3;
@@ -688,20 +670,11 @@ export async function startCompatEncodedDownload(
   const cached = await ensureCompatM4a(filePath, quality);
   if (!cached) return null;
   // Copy to a disposable temp so download cleanup can unlink freely.
-  const tmp = path.join(
-    os.tmpdir(),
-    `polarr-dl-${process.pid}-${Date.now()}.m4a`,
-  );
+  const tmp = path.join(os.tmpdir(), `polarr-dl-${process.pid}-${Date.now()}.m4a`);
   try {
     fs.copyFileSync(cached.path, tmp);
   } catch {
-    return serveTempFile(
-      cached,
-      "audio/mp4",
-      quality,
-      "track.m4a",
-      signal,
-    );
+    return serveTempFile(cached, "audio/mp4", quality, "track.m4a", signal);
   }
   let size = 0;
   try {
@@ -709,13 +682,7 @@ export async function startCompatEncodedDownload(
   } catch {
     return null;
   }
-  return serveTempFile(
-    { path: tmp, size },
-    "audio/mp4",
-    quality,
-    "track.m4a",
-    signal,
-  );
+  return serveTempFile({ path: tmp, size }, "audio/mp4", quality, "track.m4a", signal);
 }
 
 /**
@@ -731,13 +698,7 @@ export async function startCompatPlayback(
   if (!IOS_TRANSCODE_EXTS.has(ext.toLowerCase())) return null;
   const cached = await ensureCompatM4a(filePath, quality);
   if (cached) {
-    return serveCompatRangedFile(
-      req,
-      cached.path,
-      cached.size,
-      "audio/mp4",
-      quality,
-    );
+    return serveCompatRangedFile(req, cached.path, cached.size, "audio/mp4", quality);
   }
   if (quality === "lossless") return null;
   return startCompatAacStream(filePath, ext, quality, req.signal);

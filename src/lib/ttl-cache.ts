@@ -61,13 +61,10 @@ export class TtlCache<T> {
    * result that should be retried soon but is still worth serving stale).
    */
   set(key: string, value: T, ttlMs?: number) {
-    const at =
-      ttlMs == null ? Date.now() : Date.now() - Math.max(0, this.ttlMs - ttlMs);
+    const at = ttlMs == null ? Date.now() : Date.now() - Math.max(0, this.ttlMs - ttlMs);
     this.store.set(key, { at, value });
     if (this.store.size > this.maxEntries) {
-      const oldest = [...this.store.entries()].sort(
-        (a, b) => a[1].at - b[1].at,
-      );
+      const oldest = [...this.store.entries()].sort((a, b) => a[1].at - b[1].at);
       for (const [k] of oldest.slice(0, Math.ceil(this.maxEntries / 4))) {
         this.store.delete(k);
       }

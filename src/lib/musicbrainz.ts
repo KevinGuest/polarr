@@ -4,12 +4,7 @@
  */
 
 import { globalSingleton } from "@/lib/ttl-cache";
-import {
-  namesMatch,
-  normalizeTitle,
-  primaryArtistName,
-  titlesMatch,
-} from "@/lib/track-match";
+import { namesMatch, normalizeTitle, primaryArtistName, titlesMatch } from "@/lib/track-match";
 import { formatArtistCredit } from "@/lib/utils";
 
 export type MbTrack = {
@@ -123,9 +118,7 @@ function caaFront(releaseGroupId: string, size = 500): string {
 }
 
 /** Resolve tracklist for a MusicBrainz release-group MBID. */
-export async function tracksForReleaseGroup(
-  releaseGroupId: string,
-): Promise<MbTrack[]> {
+export async function tracksForReleaseGroup(releaseGroupId: string): Promise<MbTrack[]> {
   const mbid = releaseGroupId.trim();
   if (!mbid) return [];
 
@@ -212,10 +205,7 @@ export async function releaseGroupMeta(
 }
 
 /** Find a release-group MBID by artist + album title. */
-export async function findReleaseGroupId(
-  artist: string,
-  album: string,
-): Promise<string | null> {
+export async function findReleaseGroupId(artist: string, album: string): Promise<string | null> {
   const a = primaryArtistName(artist).trim() || artist.trim();
   const t = album.trim();
   if (!a || !t) return null;
@@ -247,9 +237,7 @@ export async function findReleaseGroupId(
       const title = (h.title || "").trim();
       const credit = formatArtistCredit(h["artist-credit"]);
       const titleOk =
-        title.toLowerCase() === tLower ||
-        normalizeTitle(title) === tNorm ||
-        titlesMatch(title, t);
+        title.toLowerCase() === tLower || normalizeTitle(title) === tNorm || titlesMatch(title, t);
       if (!titleOk) return false;
       return namesMatch(credit, a);
     });
@@ -276,11 +264,7 @@ export async function browseReleaseGroups(
     const b = end.toISOString().slice(0, 10);
     dateClause = `firstreleasedate:[${a} TO ${b}]`;
   }
-  const queryParts = [
-    "primarytype:album",
-    "status:official",
-    dateClause,
-  ];
+  const queryParts = ["primarytype:album", "status:official", dateClause];
   if (tag) queryParts.push(`tag:${tag.replace(/\s+/g, "")}`);
   const query = queryParts.join(" AND ");
   const path = `/release-group?query=${encodeURIComponent(query)}&fmt=json&limit=${Math.min(limit, 50)}`;
@@ -301,10 +285,7 @@ export async function browseReleaseGroupsForArtist(
   return mapReleaseGroupHits(data?.["release-groups"] || [], limit);
 }
 
-function mapReleaseGroupHits(
-  hits: MbSearchHit[],
-  limit: number,
-): MbCatalogRelease[] {
+function mapReleaseGroupHits(hits: MbSearchHit[], limit: number): MbCatalogRelease[] {
   const out: MbCatalogRelease[] = [];
   const seen = new Set<string>();
   for (const h of hits) {

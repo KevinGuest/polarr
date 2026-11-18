@@ -7,9 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import packageJson from "../package.json";
 import { mountPolarrClient } from "../../client/app";
 import "./styles.css";
-import {
-  probePolarrServer,
-} from "./server-api";
+import { probePolarrServer } from "./server-api";
 
 const appWindow = getCurrentWindow();
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -220,12 +218,8 @@ const maxBtn = document.querySelector<HTMLButtonElement>("#win-max")!;
 const iconMax = maxBtn.querySelector<SVGElement>(".icon-max")!;
 const iconRestore = maxBtn.querySelector<SVGElement>(".icon-restore")!;
 const appFrame = document.querySelector<HTMLDivElement>(".app-frame")!;
-const titlebarBrandActions = document.querySelector<HTMLDivElement>(
-  "#titlebar-brand-actions",
-)!;
-const titlebarHomeBtn = document.querySelector<HTMLButtonElement>(
-  "#titlebar-home-btn",
-)!;
+const titlebarBrandActions = document.querySelector<HTMLDivElement>("#titlebar-brand-actions")!;
+const titlebarHomeBtn = document.querySelector<HTMLButtonElement>("#titlebar-home-btn")!;
 const searchWrap = document.querySelector<HTMLDivElement>("#titlebar-search")!;
 const searchInput = document.querySelector<HTMLInputElement>("#chrome-search")!;
 const alertsBtn = document.querySelector<HTMLButtonElement>("#alerts-btn")!;
@@ -345,10 +339,7 @@ async function closeChromeMenu() {
   menuClosedAt = Date.now();
 }
 
-async function openNativeChromeMenu(
-  anchor: HTMLElement,
-  items: ChromeMenuItem[],
-) {
+async function openNativeChromeMenu(anchor: HTMLElement, items: ChromeMenuItem[]) {
   const built = [];
   for (const item of items) {
     if (item.kind === "separator") {
@@ -440,10 +431,7 @@ async function openChromeMenu(
 
   try {
     await new Promise<void>((resolve, reject) => {
-      const t = window.setTimeout(
-        () => reject(new Error("menu create timeout")),
-        4000,
-      );
+      const t = window.setTimeout(() => reject(new Error("menu create timeout")), 4000);
       void menuWin.once("tauri://created", () => {
         window.clearTimeout(t);
         resolve();
@@ -488,10 +476,7 @@ async function toggleChromeMenu(
   }
 
   const existing = await WebviewWindow.getByLabel(MENU_WINDOW_LABEL);
-  const justClosedSame =
-    !existing &&
-    menuAnchorEl === anchor &&
-    Date.now() - menuClosedAt < 320;
+  const justClosedSame = !existing && menuAnchorEl === anchor && Date.now() - menuClosedAt < 320;
 
   if ((existing && menuAnchorEl === anchor) || justClosedSame) {
     await closeChromeMenu();
@@ -578,9 +563,7 @@ function openUpdaterWindow(): Promise<void> {
 }
 
 function postToServer(message: Record<string, unknown>) {
-  void emit(CHROME_DOWN_EVENT, { channel: CHROME_CHANNEL, ...message }).catch(
-    () => null,
-  );
+  void emit(CHROME_DOWN_EVENT, { channel: CHROME_CHANNEL, ...message }).catch(() => null);
 }
 
 function sayHelloToServer() {
@@ -610,9 +593,7 @@ function isAuthRoute(path: string): boolean {
   );
 }
 
-function applyAuthState(
-  next: Partial<AuthState> & { authenticated: boolean },
-) {
+function applyAuthState(next: Partial<AuthState> & { authenticated: boolean }) {
   const incomingAvatarUrl =
     next.avatarUrl && !next.avatarUrl.includes("polarr-icon")
       ? next.avatarUrl
@@ -638,16 +619,12 @@ function applyAuthState(
     profileAvatarFailedSrc = null;
     const path = authState.pathname || "";
     const authRoute = isAuthRoute(path);
-    const showChrome =
-      serverOpen && setupView.hidden && authState.authenticated && !authRoute;
+    const showChrome = serverOpen && setupView.hidden && authState.authenticated && !authRoute;
     setChromeAuthenticated(showChrome);
     return;
   }
 
-  if (
-    incomingAvatarDataUrl &&
-    incomingAvatarDataUrl !== authState.avatarDataUrl
-  ) {
+  if (incomingAvatarDataUrl && incomingAvatarDataUrl !== authState.avatarDataUrl) {
     profileAvatarFailedSrc = null;
   }
 
@@ -668,8 +645,7 @@ function applyAuthState(
   const authRoute = isAuthRoute(path);
 
   // Setup visible → chrome minimal. Server open + signed-in → search/alerts/profile.
-  const showChrome =
-    serverOpen && setupView.hidden && authState.authenticated && !authRoute;
+  const showChrome = serverOpen && setupView.hidden && authState.authenticated && !authRoute;
 
   setChromeAuthenticated(showChrome);
   if (!showChrome) return;
@@ -682,10 +658,7 @@ function applyAuthState(
   if (unread > 0) {
     alertsBadge.hidden = false;
     alertsBadge.textContent = unread > 9 ? "9+" : String(unread);
-    alertsBtn.setAttribute(
-      "aria-label",
-      `Notifications, ${unread} unread`,
-    );
+    alertsBtn.setAttribute("aria-label", `Notifications, ${unread} unread`);
   } else {
     alertsBadge.hidden = true;
     alertsBtn.setAttribute("aria-label", "Notifications");
@@ -836,10 +809,7 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
-function bindWindowButton(
-  selector: string,
-  handler: (event: Event) => void,
-) {
+function bindWindowButton(selector: string, handler: (event: Event) => void) {
   document.querySelectorAll(selector).forEach((el) => {
     el.addEventListener("click", handler);
   });
@@ -891,10 +861,7 @@ void listen(CHROME_UP_EVENT, (event) => {
       authenticated: Boolean(p.authenticated),
       username: p.username ?? null,
       avatarUrl: p.avatarUrl !== undefined ? p.avatarUrl : authState.avatarUrl,
-      avatarDataUrl:
-        p.avatarDataUrl !== undefined
-          ? p.avatarDataUrl
-          : authState.avatarDataUrl,
+      avatarDataUrl: p.avatarDataUrl !== undefined ? p.avatarDataUrl : authState.avatarDataUrl,
       isStaff: Boolean(p.isStaff),
       pathname: p.pathname ?? null,
       notificationUnread: p.notificationUnread ?? 0,
@@ -973,8 +940,7 @@ void listen<{ id?: string }>("polarr-chrome-menu-action", (event) => {
 });
 
 function syncSearchActive() {
-  const active =
-    document.activeElement === searchInput || searchInput.value.length > 0;
+  const active = document.activeElement === searchInput || searchInput.value.length > 0;
   searchWrap.classList.toggle("is-active", active);
 }
 
@@ -1027,10 +993,14 @@ async function bootstrap() {
 
 async function connectSavedServer() {
   try {
-    const saved = await invoke<{
-      url: string | null;
-      skipAutoConnect?: boolean;
-    } | string | null>("get_server_url");
+    const saved = await invoke<
+      | {
+          url: string | null;
+          skipAutoConnect?: boolean;
+        }
+      | string
+      | null
+    >("get_server_url");
     const existing =
       typeof saved === "string" ? saved : saved && typeof saved === "object" ? saved.url : null;
     const skipAuto =

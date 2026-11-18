@@ -17,10 +17,7 @@ import { fetchTrendingAlbums } from "@/lib/trending";
 import { resolveArtistPortrait } from "@/lib/artist-portrait";
 import { ytDlpAvailable } from "@/lib/fallback-download";
 import { globalSingleton, TtlCache } from "@/lib/ttl-cache";
-import type {
-  DiscoverPayload,
-  DiscoverReleaseCard,
-} from "@/lib/discover-types";
+import type { DiscoverPayload, DiscoverReleaseCard } from "@/lib/discover-types";
 
 export type { DiscoverPayload, DiscoverReleaseCard };
 
@@ -105,58 +102,68 @@ async function buildDiscoverPayload(userId: string | null): Promise<BuildResult>
 
   const tasteNames = userId ? tasteArtistNames(userId, 12) : [];
 
-  const [
-    mbNew,
-    tasteAlbums,
-    neighborhood,
-    trending,
-    lidarrBundle,
-    moreFrom,
-    fallbackReady,
-  ] = await Promise.all([
-    source("mbNew", browseReleaseGroups(36, { monthsBack: 4 }).catch(() => []), []),
-    source("tasteAlbums", (async () => {
-      if (tasteNames.length === 0) return [] as MbCatalogRelease[];
-      const batches = await Promise.all(
-        tasteNames.slice(0, 8).map((name) =>
-          browseReleaseGroupsForArtist(name, 6).catch(
-            () => [] as MbCatalogRelease[],
-          ),
-        ),
-      );
-      return batches.flat();
-    })(), [] as MbCatalogRelease[]),
-    source(
-      "neighborhood",
-      userId
-        ? expandTasteNeighborhood(userId, 8).catch(emptyNeighborhood)
-        : Promise.resolve(emptyNeighborhood()),
-      emptyNeighborhood(),
-    ),
-    source("trending", fetchTrendingAlbums(28).catch(() => []), []),
-    source("lidarr", (async () => {
-      if (!client) return null;
-      try {
-        const [rel, arts] = await Promise.all([
-          client.latestReleases(36, 12),
-          client.catalogArtists(48),
-        ]);
-        return { releases: rel, artists: arts };
-      } catch (err) {
-        lidarrError =
-          err instanceof Error ? err.message : "Lidarr discover failed";
-        return null;
-      }
-    })(), null),
-    source("moreFrom", pickMoreFromArtists(5).catch(() => []), []),
-    source(
-      "ytDlp",
-      settings.fallbackEnabled
-        ? ytDlpAvailable().catch(() => false)
-        : Promise.resolve(false),
-      false,
-    ),
-  ]);
+  const [mbNew, tasteAlbums, neighborhood, trending, lidarrBundle, moreFrom, fallbackReady] =
+    await Promise.all([
+      source(
+        "mbNew",
+        browseReleaseGroups(36, { monthsBack: 4 }).catch(() => []),
+        [],
+      ),
+      source(
+        "tasteAlbums",
+        (async () => {
+          if (tasteNames.length === 0) return [] as MbCatalogRelease[];
+          const batches = await Promise.all(
+            tasteNames
+              .slice(0, 8)
+              .map((name) =>
+                browseReleaseGroupsForArtist(name, 6).catch(() => [] as MbCatalogRelease[]),
+              ),
+          );
+          return batches.flat();
+        })(),
+        [] as MbCatalogRelease[],
+      ),
+      source(
+        "neighborhood",
+        userId
+          ? expandTasteNeighborhood(userId, 8).catch(emptyNeighborhood)
+          : Promise.resolve(emptyNeighborhood()),
+        emptyNeighborhood(),
+      ),
+      source(
+        "trending",
+        fetchTrendingAlbums(28).catch(() => []),
+        [],
+      ),
+      source(
+        "lidarr",
+        (async () => {
+          if (!client) return null;
+          try {
+            const [rel, arts] = await Promise.all([
+              client.latestReleases(36, 12),
+              client.catalogArtists(48),
+            ]);
+            return { releases: rel, artists: arts };
+          } catch (err) {
+            lidarrError = err instanceof Error ? err.message : "Lidarr discover failed";
+            return null;
+          }
+        })(),
+        null,
+      ),
+      source(
+        "moreFrom",
+        pickMoreFromArtists(5).catch(() => []),
+        [],
+      ),
+      source(
+        "ytDlp",
+        settings.fallbackEnabled ? ytDlpAvailable().catch(() => false) : Promise.resolve(false),
+        false,
+      ),
+    ]);
 
   if (lidarrBundle) {
     lidarrLatest = lidarrBundle.releases;
@@ -173,29 +180,28 @@ async function buildDiscoverPayload(userId: string | null): Promise<BuildResult>
       }).catch(() => [] as Awaited<ReturnType<typeof buildHomeArtists>>),
       [],
     ),
-    source("portraits", Promise.all(
-      moreFrom.map(async (cat) => {
-        if (cat.image && /^https?:\/\//i.test(cat.image)) {
-          return cat;
-        }
-        const fresh = await resolveArtistPortrait({
-          artist: cat.artist,
-        }).catch(() => null);
-        return {
-          ...cat,
-          image: fresh || cat.image,
-        };
-      }),
-    ), moreFrom),
+    source(
+      "portraits",
+      Promise.all(
+        moreFrom.map(async (cat) => {
+          if (cat.image && /^https?:\/\//i.test(cat.image)) {
+            return cat;
+          }
+          const fresh = await resolveArtistPortrait({
+            artist: cat.artist,
+          }).catch(() => null);
+          return {
+            ...cat,
+            image: fresh || cat.image,
+          };
+        }),
+      ),
+      moreFrom,
+    ),
   ]);
 
-  const releases = mergeByKey([
-    ...lidarrLatest,
-    ...mbNew.map(fromMb),
-  ]).sort((a, b) =>
-    (b.releaseDate || String(b.year || "")).localeCompare(
-      a.releaseDate || String(a.year || ""),
-    ),
+  const releases = mergeByKey([...lidarrLatest, ...mbNew.map(fromMb)]).sort((a, b) =>
+    (b.releaseDate || String(b.year || "")).localeCompare(a.releaseDate || String(a.year || "")),
   );
 
   const latestKeys = new Set(
@@ -215,19 +221,17 @@ async function buildDiscoverPayload(userId: string | null): Promise<BuildResult>
   }));
 
   const preferencePool = mergeByKey([
-    ...neighborhood.albums.map(
-      (a): ReleaseCard => ({
-        id: a.id,
-        title: a.title,
-        artist: a.artist,
-        year: a.year,
-        image: a.image,
-        foreignAlbumId: a.foreignAlbumId,
-        releaseDate: a.releaseDate,
-        hasFile: false,
-        monitored: false,
-      }),
-    ),
+    ...neighborhood.albums.map((a): ReleaseCard => ({
+      id: a.id,
+      title: a.title,
+      artist: a.artist,
+      year: a.year,
+      image: a.image,
+      foreignAlbumId: a.foreignAlbumId,
+      releaseDate: a.releaseDate,
+      hasFile: false,
+      monitored: false,
+    })),
     ...tasteAlbums.map(fromMb),
     ...mbNew.map(fromMb),
   ]).filter((r) => !latestKeys.has((r.foreignAlbumId || r.id).toLowerCase()));
@@ -327,9 +331,7 @@ function rebuild(key: string, userId: string | null): Promise<DiscoverPayload> {
  * returned immediately and rebuilt in the background, so only a user's very
  * first request after a restart ever waits on the upstreams.
  */
-export async function getDiscoverFeed(
-  userId: string | null,
-): Promise<DiscoverPayload> {
+export async function getDiscoverFeed(userId: string | null): Promise<DiscoverPayload> {
   const key = userId || ANON_KEY;
   return discoverCache.getOrRevalidate(key, () => rebuild(key, userId));
 }

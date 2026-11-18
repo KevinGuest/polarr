@@ -105,12 +105,11 @@ export function coverFrom(
   if (remote) return remote;
   const localHttp = absoluteHttpUrl(preferred?.url);
   if (localHttp) return localHttp;
-  const rel =
-    preferred?.url?.startsWith("/MediaCover/")
-      ? preferred.url
-      : preferred?.remoteUrl?.startsWith("/MediaCover/")
-        ? preferred.remoteUrl
-        : null;
+  const rel = preferred?.url?.startsWith("/MediaCover/")
+    ? preferred.url
+    : preferred?.remoteUrl?.startsWith("/MediaCover/")
+      ? preferred.remoteUrl
+      : null;
   if (rel) {
     const proxy = lidarrMediaCoverProxyUrl(rel);
     if (proxy) return proxy;
@@ -240,9 +239,7 @@ async function loadCoverMaps(): Promise<{
     const image = coverFrom(a.images);
     if (!image) continue;
     const artist =
-      a.artist?.artistName ||
-      (a.artistId != null ? artistById.get(a.artistId) : "") ||
-      "";
+      a.artist?.artistName || (a.artistId != null ? artistById.get(a.artistId) : "") || "";
     const title = a.title || "";
     if (!artist.trim() || !title.trim()) continue;
     albumMap.set(albumCoverKey(artist, title), image);
@@ -290,11 +287,7 @@ export async function resolveTrackCover(input: {
 }
 
 /** Case-insensitive relevance of a Lidarr hit to the user query. */
-export function relevanceScore(
-  query: string,
-  title: string,
-  artist: string,
-): number {
+export function relevanceScore(query: string, title: string, artist: string): number {
   const q = query.trim().toLowerCase().replace(/\s+/g, " ");
   if (!q) return 0;
   const t = title.trim().toLowerCase();
@@ -364,9 +357,7 @@ export class LidarrClient {
   }
 
   async status() {
-    return this.request<{ version?: string; instanceName?: string }>(
-      "/system/status",
-    );
+    return this.request<{ version?: string; instanceName?: string }>("/system/status");
   }
 
   async rootFolders() {
@@ -465,9 +456,7 @@ export class LidarrClient {
 
   private toDiscover(a: LidarrAlbum): DiscoverRelease {
     const hasFile = (a.statistics?.trackFileCount || 0) > 0;
-    const year = a.releaseDate
-      ? Number(a.releaseDate.slice(0, 4)) || undefined
-      : undefined;
+    const year = a.releaseDate ? Number(a.releaseDate.slice(0, 4)) || undefined : undefined;
     return {
       id: String(a.id ?? a.foreignAlbumId ?? `${a.title}-${a.artist?.artistName}`),
       title: a.title,
@@ -487,10 +476,7 @@ export class LidarrClient {
    * Recent + upcoming albums from Lidarr (calendar + missing + library).
    * Default window: last 12 months + ~1 month upcoming ("anything new").
    */
-  async latestReleases(
-    limit = 24,
-    monthsBack = 12,
-  ): Promise<DiscoverRelease[]> {
+  async latestReleases(limit = 24, monthsBack = 12): Promise<DiscoverRelease[]> {
     const now = new Date();
     const start = new Date(now);
     start.setMonth(start.getMonth() - monthsBack);
@@ -529,9 +515,7 @@ export class LidarrClient {
 
     return [...merged.values()]
       .filter((r) => Boolean(r.image))
-      .sort((a, b) =>
-        (b.releaseDate || "").localeCompare(a.releaseDate || ""),
-      )
+      .sort((a, b) => (b.releaseDate || "").localeCompare(a.releaseDate || ""))
       .slice(0, limit);
   }
 
@@ -546,26 +530,24 @@ export class LidarrClient {
     return [...all]
       .map((a) => {
         const card = this.toDiscover(a);
-        if (
-          (!card.artist || card.artist === "Unknown Artist") &&
-          a.artistId != null
-        ) {
+        if ((!card.artist || card.artist === "Unknown Artist") && a.artistId != null) {
           card.artist = nameById.get(a.artistId) || card.artist;
         }
         return card;
       })
       .filter((r) => Boolean(r.image) && r.title)
-      .sort((a, b) =>
-        (b.releaseDate || "").localeCompare(a.releaseDate || "") ||
-        a.title.localeCompare(b.title),
+      .sort(
+        (a, b) =>
+          (b.releaseDate || "").localeCompare(a.releaseDate || "") ||
+          a.title.localeCompare(b.title),
       )
       .slice(0, limit);
   }
 
   /** Artist faces for home browse. */
-  async catalogArtists(limit = 24): Promise<
-    { name: string; image?: string; foreignArtistId?: string }[]
-  > {
+  async catalogArtists(
+    limit = 24,
+  ): Promise<{ name: string; image?: string; foreignArtistId?: string }[]> {
     const artists = await this.listArtists().catch(() => [] as LidarrArtist[]);
     return artists
       .map((a) => ({
@@ -672,14 +654,11 @@ export class LidarrClient {
       this.metadataProfiles(),
     ]);
     if (!roots[0] || !qualities[0] || !metadata[0]) {
-      throw new Error(
-        "Lidarr is missing a root folder, quality profile, or metadata profile",
-      );
+      throw new Error("Lidarr is missing a root folder, quality profile, or metadata profile");
     }
 
     const lookup = await this.searchArtists(artistName);
-    const match =
-      lookup.find((a) => a.foreignArtistId === foreignArtistId) || lookup[0];
+    const match = lookup.find((a) => a.foreignArtistId === foreignArtistId) || lookup[0];
     if (!match) throw new Error("Artist not found in Lidarr lookup");
 
     const created = await this.addArtist({
@@ -704,16 +683,10 @@ export async function probeLidarr(url: string, apiKey: string) {
 
 const LIDARR_FILE_CACHE_MS = 2 * 60_000;
 let artistListCache: { at: number; artists: LidarrArtist[] } | null = null;
-const artistTrackCache = new Map<
-  number,
-  { at: number; tracks: LidarrTrack[] }
->();
+const artistTrackCache = new Map<number, { at: number; tracks: LidarrTrack[] }>();
 
 /** True when Lidarr already has an on-disk file for this artist + title. */
-export async function lidarrHasTrackFile(
-  artist: string,
-  title: string,
-): Promise<boolean> {
+export async function lidarrHasTrackFile(artist: string, title: string): Promise<boolean> {
   const client = LidarrClient.fromSettings();
   if (!client) return false;
   const wantArtist = artist.trim();
@@ -728,9 +701,7 @@ export async function lidarrHasTrackFile(
         artists: await client.listArtists(),
       };
     }
-    const match = artistListCache.artists.find((a) =>
-      namesMatch(a.artistName || "", wantArtist),
-    );
+    const match = artistListCache.artists.find((a) => namesMatch(a.artistName || "", wantArtist));
     if (match?.id == null) return false;
 
     const cached = artistTrackCache.get(match.id);
@@ -739,9 +710,7 @@ export async function lidarrHasTrackFile(
       tracks = await client.getArtistTracks(match.id);
       artistTrackCache.set(match.id, { at: now, tracks });
     }
-    return (tracks || []).some(
-      (t) => t.hasFile && titlesMatch(t.title || "", wantTitle),
-    );
+    return (tracks || []).some((t) => t.hasFile && titlesMatch(t.title || "", wantTitle));
   } catch {
     return false;
   }

@@ -34,22 +34,17 @@ const TREND_TTL_MS = 45 * 60 * 1000;
 let trendCache: { at: number; items: TrendingAlbum[] } | null = null;
 
 /** Top albums worldwide (Deezer chart). Cached ~45m. */
-export async function fetchTrendingAlbums(
-  limit = 30,
-): Promise<TrendingAlbum[]> {
+export async function fetchTrendingAlbums(limit = 30): Promise<TrendingAlbum[]> {
   if (trendCache && Date.now() - trendCache.at < TREND_TTL_MS) {
     return trendCache.items.slice(0, limit);
   }
 
   try {
-    const res = await fetch(
-      `https://api.deezer.com/chart/0/albums?limit=${Math.min(limit, 50)}`,
-      {
-        headers: { Accept: "application/json" },
-        next: { revalidate: 1800 },
-        signal: AbortSignal.timeout(8_000),
-      },
-    );
+    const res = await fetch(`https://api.deezer.com/chart/0/albums?limit=${Math.min(limit, 50)}`, {
+      headers: { Accept: "application/json" },
+      next: { revalidate: 1800 },
+      signal: AbortSignal.timeout(8_000),
+    });
     if (!res.ok) return trendCache?.items.slice(0, limit) || [];
     const data = (await res.json()) as { data?: DeezerChartAlbum[] };
     const items: TrendingAlbum[] = [];
@@ -91,25 +86,17 @@ const TREND_ARTIST_TTL_MS = 45 * 60 * 1000;
 let trendArtistCache: { at: number; items: TrendingArtist[] } | null = null;
 
 /** Top artists worldwide (Deezer chart). Cached ~45m. */
-export async function fetchTrendingArtists(
-  limit = 24,
-): Promise<TrendingArtist[]> {
-  if (
-    trendArtistCache &&
-    Date.now() - trendArtistCache.at < TREND_ARTIST_TTL_MS
-  ) {
+export async function fetchTrendingArtists(limit = 24): Promise<TrendingArtist[]> {
+  if (trendArtistCache && Date.now() - trendArtistCache.at < TREND_ARTIST_TTL_MS) {
     return trendArtistCache.items.slice(0, limit);
   }
 
   try {
-    const res = await fetch(
-      `https://api.deezer.com/chart/0/artists?limit=${Math.min(limit, 50)}`,
-      {
-        headers: { Accept: "application/json" },
-        next: { revalidate: 1800 },
-        signal: AbortSignal.timeout(8_000),
-      },
-    );
+    const res = await fetch(`https://api.deezer.com/chart/0/artists?limit=${Math.min(limit, 50)}`, {
+      headers: { Accept: "application/json" },
+      next: { revalidate: 1800 },
+      signal: AbortSignal.timeout(8_000),
+    });
     if (!res.ok) return trendArtistCache?.items.slice(0, limit) || [];
     const data = (await res.json()) as { data?: DeezerChartArtist[] };
     const items: TrendingArtist[] = [];

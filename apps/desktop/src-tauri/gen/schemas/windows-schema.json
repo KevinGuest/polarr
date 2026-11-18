@@ -189,10 +189,28 @@
           "markdownDescription": "Close the Polarr server webview"
         },
         {
+          "description": "Send an API request to the configured Polarr server from the bundled UI",
+          "type": "string",
+          "const": "allow-desktop-api-request",
+          "markdownDescription": "Send an API request to the configured Polarr server from the bundled UI"
+        },
+        {
+          "description": "Clear the bundled UI's native Polarr server session",
+          "type": "string",
+          "const": "allow-desktop-api-reset-session",
+          "markdownDescription": "Clear the bundled UI's native Polarr server session"
+        },
+        {
           "description": "Relay desktop chrome auth/ready messages from the server webview to the shell",
           "type": "string",
           "const": "allow-desktop-chrome-up",
           "markdownDescription": "Relay desktop chrome auth/ready messages from the server webview to the shell"
+        },
+        {
+          "description": "Load protected Polarr artwork for the bundled desktop UI",
+          "type": "string",
+          "const": "allow-desktop-media-data-url",
+          "markdownDescription": "Load protected Polarr artwork for the bundled desktop UI"
         },
         {
           "description": "Clear Discord Rich Presence",
@@ -211,6 +229,12 @@
           "type": "string",
           "const": "allow-discord-set-presence",
           "markdownDescription": "Set Discord Rich Presence listening activity"
+        },
+        {
+          "description": "Read the computer name for Polarr Connect",
+          "type": "string",
+          "const": "allow-get-desktop-device-name",
+          "markdownDescription": "Read the computer name for Polarr Connect"
         },
         {
           "description": "Read the saved Polarr server URL",
@@ -279,6 +303,18 @@
           "markdownDescription": "Open the Polarr server webview"
         },
         {
+          "description": "Read Polarr server compatibility and capability information",
+          "type": "string",
+          "const": "allow-probe-server",
+          "markdownDescription": "Read Polarr server compatibility and capability information"
+        },
+        {
+          "description": "Check that a URL is a Polarr server before connecting",
+          "type": "string",
+          "const": "allow-probe-server-url",
+          "markdownDescription": "Check that a URL is a Polarr server before connecting"
+        },
+        {
           "description": "Navigate the Polarr server webview back",
           "type": "string",
           "const": "allow-server-history-back",
@@ -337,6 +373,12 @@
           "type": "string",
           "const": "core:app:allow-default-window-icon",
           "markdownDescription": "Enables the default_window_icon command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the exit command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:app:allow-exit",
+          "markdownDescription": "Enables the exit command without any pre-configured scope."
         },
         {
           "description": "Enables the fetch_data_store_identifiers command without any pre-configured scope.",
@@ -427,6 +469,12 @@
           "type": "string",
           "const": "core:app:deny-default-window-icon",
           "markdownDescription": "Denies the default_window_icon command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the exit command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:app:deny-exit",
+          "markdownDescription": "Denies the exit command without any pre-configured scope."
         },
         {
           "description": "Denies the fetch_data_store_identifiers command without any pre-configured scope.",
@@ -1689,6 +1737,12 @@
           "markdownDescription": "Enables the set_fullscreen command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_fullscreen_on_monitor command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:window:allow-set-fullscreen-on-monitor",
+          "markdownDescription": "Enables the set_fullscreen_on_monitor command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_icon command without any pre-configured scope.",
           "type": "string",
           "const": "core:window:allow-set-icon",
@@ -2155,6 +2209,12 @@
           "type": "string",
           "const": "core:window:deny-set-fullscreen",
           "markdownDescription": "Denies the set_fullscreen command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_fullscreen_on_monitor command without any pre-configured scope.",
+          "type": "string",
+          "const": "core:window:deny-set-fullscreen-on-monitor",
+          "markdownDescription": "Denies the set_fullscreen_on_monitor command without any pre-configured scope."
         },
         {
           "description": "Denies the set_icon command without any pre-configured scope.",

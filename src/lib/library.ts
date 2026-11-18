@@ -21,16 +21,7 @@ import { remapForeignMusicPath } from "./music-roots";
 import { downloadsDir, musicDir } from "./paths";
 import { classifyIndexedTrackSource } from "./track-source";
 
-const AUDIO_EXT = new Set([
-  ".mp3",
-  ".flac",
-  ".m4a",
-  ".aac",
-  ".ogg",
-  ".opus",
-  ".wav",
-  ".wma",
-]);
+const AUDIO_EXT = new Set([".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".wma"]);
 
 /** How many ffprobe workers at once. */
 const PROBE_CONCURRENCY = 4;
@@ -53,10 +44,7 @@ async function walk(dir: string, out: string[] = []): Promise<string[]> {
     if (entry.isSymbolicLink()) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) await walk(full, out);
-    else if (
-      entry.isFile() &&
-      AUDIO_EXT.has(path.extname(entry.name).toLowerCase())
-    ) {
+    else if (entry.isFile() && AUDIO_EXT.has(path.extname(entry.name).toLowerCase())) {
       out.push(full);
     }
   }
@@ -78,8 +66,7 @@ function parseTagsFromPath(filePath: string): {
   const file = parts[parts.length - 1] || "Unknown";
   const base = path.basename(file, path.extname(file));
   const albumRaw = parts.length >= 2 ? parts[parts.length - 2] : "Unknown Album";
-  const artist =
-    parts.length >= 3 ? parts[parts.length - 3] : "Unknown Artist";
+  const artist = parts.length >= 3 ? parts[parts.length - 3] : "Unknown Artist";
   const album = looksLikeFilenameTitle(albumRaw)
     ? displayTitleFromStem(albumRaw) || albumRaw
     : albumRaw;
@@ -91,10 +78,7 @@ function parseTagsFromPath(filePath: string): {
     if (/^\d{1,3}$/.test(maybeArtist)) {
       return {
         artist,
-        title: displayTitleFromStem(
-          stripTrackNumber(rest.join(" - ").trim() || base),
-          artist,
-        ),
+        title: displayTitleFromStem(stripTrackNumber(rest.join(" - ").trim() || base), artist),
         album,
       };
     }
@@ -165,15 +149,10 @@ function collapseNestedRoots(dirs: string[]): string[] {
 }
 
 /** True when this DB path lives in a tree we actually listed this scan. */
-function storedPathUnderWalkedRoots(
-  stored: string,
-  walkedRoots: string[],
-): boolean {
+function storedPathUnderWalkedRoots(stored: string, walkedRoots: string[]): boolean {
   if (walkedRoots.some((root) => pathUnderRoot(stored, root))) return true;
   const remapped = remapForeignMusicPath(stored);
-  return Boolean(
-    remapped && walkedRoots.some((root) => pathUnderRoot(remapped, root)),
-  );
+  return Boolean(remapped && walkedRoots.some((root) => pathUnderRoot(remapped, root)));
 }
 
 /**
@@ -184,9 +163,7 @@ function storedPathUnderWalkedRoots(
 function pruneMissingLibraryTracks(files: string[], roots: string[]): number {
   const walkedRoots = roots.filter(dirIsScannable);
   if (walkedRoots.length === 0) {
-    console.warn(
-      "[polarr] library scan skipped prune — music root is missing or unreadable",
-    );
+    console.warn("[polarr] library scan skipped prune — music root is missing or unreadable");
     return 0;
   }
 
@@ -343,9 +320,7 @@ export async function scanMusicLibrary(): Promise<{
   try {
     const { warmLibrarySidecars } = await import("@/lib/stream-compat");
     const { listLibraryTrackPaths } = await import("@/lib/db");
-    const { queued, removed: sidecarOrphans } = await warmLibrarySidecars(
-      listLibraryTrackPaths(),
-    );
+    const { queued, removed: sidecarOrphans } = await warmLibrarySidecars(listLibraryTrackPaths());
     if (queued || sidecarOrphans) {
       console.info(
         `[polarr] sidecar pre-encode · ${queued} queued · ${sidecarOrphans} orphans removed`,

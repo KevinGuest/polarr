@@ -10,11 +10,7 @@
  */
 
 import { globalSingleton } from "@/lib/ttl-cache";
-import {
-  listLikedTracks,
-  listTasteExcludeIds,
-  listUserListenSignals,
-} from "@/lib/db";
+import { listLikedTracks, listTasteExcludeIds, listUserListenSignals } from "@/lib/db";
 import { primaryArtistName } from "@/lib/artist-portrait";
 import type { TrendingAlbum } from "@/lib/trending";
 
@@ -33,10 +29,7 @@ export type ExploreAlbum = {
 };
 
 function artistKey(artist: string) {
-  return (
-    primaryArtistName(artist).trim().toLowerCase() ||
-    artist.trim().toLowerCase()
-  );
+  return primaryArtistName(artist).trim().toLowerCase() || artist.trim().toLowerCase();
 }
 
 function albumKey(artist: string, title: string) {
@@ -116,8 +109,7 @@ const artistIdCache = globalSingleton(
 );
 const relatedCache = globalSingleton(
   "explore-related",
-  () =>
-    new Map<string, { at: number; artists: { id: number; name: string }[] }>(),
+  () => new Map<string, { at: number; artists: { id: number; name: string }[] }>(),
 );
 const albumCache = globalSingleton(
   "explore-albums",
@@ -163,10 +155,7 @@ async function resolveDeezerArtistId(name: string): Promise<number | null> {
 }
 
 /** Public: related artist names for playlist / seed expansion. */
-export async function relatedArtistNames(
-  seedName: string,
-  limit = 5,
-): Promise<string[]> {
+export async function relatedArtistNames(seedName: string, limit = 5): Promise<string[]> {
   const id = await resolveDeezerArtistId(seedName);
   if (id == null) return [];
   const related = await fetchRelatedDeezerArtists(id, limit);
@@ -195,10 +184,7 @@ async function fetchRelatedDeezerArtists(
   return artists;
 }
 
-function mapDeezerAlbum(
-  a: DeezerAlbumHit,
-  fallbackArtist?: string,
-): ExploreAlbum | null {
+function mapDeezerAlbum(a: DeezerAlbumHit, fallbackArtist?: string): ExploreAlbum | null {
   const title = (a.title || "").trim();
   const artist = (a.artist?.name || fallbackArtist || "").trim();
   if (!title || !artist || a.id == null) return null;
@@ -256,9 +242,7 @@ export async function expandTasteNeighborhood(
 }> {
   const { scores, labels, heardAlbums } = listenArtistAffinity(userId);
   const graph = new Map<string, number>(scores);
-  const seeds = [...scores.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, seedLimit);
+  const seeds = [...scores.entries()].sort((a, b) => b[1] - a[1]).slice(0, seedLimit);
 
   if (seeds.length === 0) {
     return { albums: [], graph, heardAlbums };
@@ -310,9 +294,7 @@ export async function expandTasteNeighborhood(
 }
 
 function freshnessScore(releaseDate?: string, year?: number): number {
-  const iso =
-    releaseDate ||
-    (year != null && year > 1900 ? `${year}-06-01` : undefined);
+  const iso = releaseDate || (year != null && year > 1900 ? `${year}-06-01` : undefined);
   if (!iso) return 0.25;
   const d = daysAgo(iso);
   if (d <= 90) return 1;
@@ -336,14 +318,10 @@ export function rankExploreAlbums<T extends ExploreAlbum>(opts: {
   const limit = opts.limit ?? 36;
   const taste =
     opts.graph ||
-    (opts.userId
-      ? listenArtistAffinity(opts.userId).scores
-      : new Map<string, number>());
+    (opts.userId ? listenArtistAffinity(opts.userId).scores : new Map<string, number>());
   const heard =
     opts.heardAlbums ||
-    (opts.userId
-      ? listenArtistAffinity(opts.userId).heardAlbums
-      : new Set<string>());
+    (opts.userId ? listenArtistAffinity(opts.userId).heardAlbums : new Set<string>());
 
   let maxTaste = 1;
   for (const v of taste.values()) if (v > maxTaste) maxTaste = v;
@@ -367,8 +345,7 @@ export function rankExploreAlbums<T extends ExploreAlbum>(opts: {
   const scored = [...byKey.values()].map((item) => {
     const key = (item.foreignAlbumId || item.id).toLowerCase();
     const r = trendRank.get(key);
-    const chart =
-      r != null ? Math.max(0, 1 - (r - 1) / trendCount) : 0.05;
+    const chart = r != null ? Math.max(0, 1 - (r - 1) / trendCount) : 0.05;
 
     const ak = artistKey(item.artist);
     const tasteRaw = taste.get(ak) || 0;
@@ -385,11 +362,7 @@ export function rankExploreAlbums<T extends ExploreAlbum>(opts: {
       score = chart * 0.7 + fresh * 0.3;
     } else {
       // Listen graph dominates; chart is light seasoning
-      score =
-        tasteNorm * 0.62 +
-        novelty * 0.16 +
-        fresh * 0.1 +
-        chart * 0.12;
+      score = tasteNorm * 0.62 + novelty * 0.16 + fresh * 0.1 + chart * 0.12;
       // Soft boost when both taste + chart agree
       if (r != null && tasteRaw > 0) score += 0.06;
     }
@@ -412,9 +385,7 @@ export function rankExploreAlbums<T extends ExploreAlbum>(opts: {
 
   // Fill if diversity left gaps
   if (out.length < limit) {
-    const have = new Set(
-      out.map((i) => (i.foreignAlbumId || i.id).toLowerCase()),
-    );
+    const have = new Set(out.map((i) => (i.foreignAlbumId || i.id).toLowerCase()));
     for (const row of scored) {
       const k = (row.item.foreignAlbumId || row.item.id).toLowerCase();
       if (have.has(k)) continue;

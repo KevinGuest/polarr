@@ -101,15 +101,10 @@ async function queueSidecarWarm() {
   try {
     const { queued, removed } = await warmLibrarySidecars(listLibraryTrackPaths());
     if (queued || removed) {
-      console.info(
-        `[polarr] sidecar pre-encode · ${queued} queued · ${removed} orphans removed`,
-      );
+      console.info(`[polarr] sidecar pre-encode · ${queued} queued · ${removed} orphans removed`);
     }
   } catch (err) {
-    console.error(
-      "[polarr] sidecar pre-encode failed:",
-      err instanceof Error ? err.message : err,
-    );
+    console.error("[polarr] sidecar pre-encode failed:", err instanceof Error ? err.message : err);
   }
 }
 

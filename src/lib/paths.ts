@@ -41,8 +41,7 @@ function ensureWritableDir(dir: string, label: string): string {
   const ok = tryEnsureWritableDir(dir);
   if (ok) return ok;
   throw new Error(
-    `${label} (${dir}) is not writable. ` +
-      `On Docker: sudo chown -R 1000:1000 <host-data-dir>`,
+    `${label} (${dir}) is not writable. ` + `On Docker: sudo chown -R 1000:1000 <host-data-dir>`,
   );
 }
 
@@ -83,17 +82,11 @@ export function downloadsDir(): string {
   );
   const musicDl = tryEnsureWritableDir(underMusic);
   if (musicDl) return musicDl;
-  return ensureWritableDir(
-    path.join(dataDir(), "downloads"),
-    "POLARR_DOWNLOADS_DIR",
-  );
+  return ensureWritableDir(path.join(dataDir(), "downloads"), "POLARR_DOWNLOADS_DIR");
 }
 
 /** True when filePath resolves under a Polarr-managed music root. */
-export function isManagedMusicPath(
-  filePath: string,
-  extraRoots: string[] = [],
-): boolean {
+export function isManagedMusicPath(filePath: string, extraRoots: string[] = []): boolean {
   const abs = path.resolve(filePath);
   const roots = Array.from(
     new Set(

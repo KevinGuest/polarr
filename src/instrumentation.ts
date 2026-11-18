@@ -1,8 +1,6 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
-  const { startLibraryScanScheduler } = await import(
-    "@/lib/library-scan-scheduler"
-  );
+  const { startLibraryScanScheduler } = await import("@/lib/library-scan-scheduler");
   startLibraryScanScheduler();
 
   // Keep home shelves warm in the always-on container so visitors skip cold

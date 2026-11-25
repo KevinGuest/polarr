@@ -25,6 +25,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Built bundles of the desktop and mobile shells, Cargo's build
+    // output, and the copies Capacitor syncs into the native projects.
+    "apps/**/dist/**",
+    "apps/desktop/src-tauri/target/**",
+    "apps/mobile/ios/App/App/public/**",
+    "apps/mobile/android/app/src/main/assets/public/**",
   ]),
 ]);
 

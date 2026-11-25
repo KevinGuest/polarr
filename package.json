@@ -61,5 +61,8 @@
     "tailwindcss": "^4",
     "typescript": "^5"
   },
+  "overrides": {
+    "minimatch@^10": "^11.0.1"
+  },
   "description": "Self-hosted music discovery, requests, and streaming for your home server"
 }
